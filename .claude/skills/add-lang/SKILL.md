@@ -25,9 +25,9 @@ single-token form everywhere (`csharp`, not `c#`).
 Copy this checklist and work through it in order:
 ```
 - [ ] 1. Resolve language; bail early if already supported (just benchmark)
-- [ ] 2. Find a grammar (tree-sitter-wasms vs vendor a .wasm)
+- [ ] 2. Find a grammar + health-check it (ABI / heap corruption)
 - [ ] 3. Discover the grammar's AST node types (dump-ast.mjs)
-- [ ] 4. Wire the language (4 source edits)
+- [ ] 4. Wire the language (4 files; sometimes a 5th core touch)
 - [ ] 5. Build + verify-extraction loop until PASS
 - [ ] 6. Add extraction tests; make them green
 - [ ] 7. Auto-pick 3 popular repos by size tier; add to corpus.json
@@ -44,20 +44,35 @@ Check whether the language is already wired: look for the token in the
 `typescript`, `rust`), **skip Steps 2–6** and go straight to benchmarking
 (Steps 7–8) to validate/measure it — note in the report that no code changed.
 
-### Step 2 — Find a grammar
+### Step 2 — Find a grammar, then health-check it
 
 ```bash
 ls node_modules/tree-sitter-wasms/out/ | grep -i <lang>   # csharp -> c_sharp
 ```
-- **Present** → off-the-shelf. No vendoring; `grammars.ts` resolves it from
-  `tree-sitter-wasms` automatically. (Most popular languages are here: lua,
-  elixir, zig, ocaml, solidity, toml, yaml, …)
-- **Absent** → you must vendor a `.wasm` into `src/extraction/wasm/` (like
-  `pascal`/`scala`) and add the token to the vendored branch in Step 4. Get a
-  wasm from the grammar's npm package (a prebuilt `*.wasm`) or by building one
-  (`npx tree-sitter-cli build --wasm`, which needs emscripten/Docker — the
-  `tree-sitter` CLI is usually not on PATH here). **If you cannot obtain a
-  wasm, STOP and tell the user** — the language can't be added without it.
+- **Present** → likely off-the-shelf; `grammars.ts` resolves it from
+  `tree-sitter-wasms` automatically. (Many languages: elixir, zig, ocaml,
+  solidity, toml, yaml, …)
+- **Absent** → vendor a `.wasm` into `src/extraction/wasm/` (like `pascal` /
+  `scala` / `lua`) and add the token to the vendored branch in Step 4.
+
+**Always health-check before writing an extractor — a *present* grammar can
+still be unusable:**
+```bash
+node scripts/add-lang/check-grammar.mjs <lang> path/to/valid-sample.<ext>
+```
+It prints the grammar's ABI version and parses a valid sample many times in a
+multi-grammar runtime. If it **FAILs** (ERROR trees on valid code — an old ABI
+corrupting the shared WASM heap, which silently drops nested calls/imports on
+every file after the first; e.g. the tree-sitter-wasms **Lua** grammar is ABI 13
+and fails), do NOT use that wasm. **Vendor a newer (ABI 14/15) build instead:**
+```bash
+npm pack @tree-sitter-grammars/tree-sitter-<lang>   # often ships a prebuilt *.wasm
+# or build one: npx tree-sitter build --wasm   (needs Docker/emscripten)
+cp <the>.wasm src/extraction/wasm/tree-sitter-<lang>.wasm
+```
+then add the token to the vendored branch in Step 4 and re-run check-grammar on
+the vendored path until it PASSes. **If you cannot obtain a healthy wasm, STOP
+and tell the user.**
 
 ### Step 3 — Discover AST node types
 
@@ -74,29 +89,40 @@ language's paradigm as a model: `rust.ts`/`scala.ts` (functional, traits),
 `java.ts`/`csharp.ts` (OO), `python.ts`/`ruby.ts` (scripting), `go.ts`
 (top-level methods + receivers).
 
-### Step 4 — Wire the language (4 edits)
+### Step 4 — Wire the language (4 files)
 
 These are exact, fragile wiring — match the existing style precisely:
 
-1. **`src/types.ts`** — add `'<lang>',` to the `LANGUAGES` const (before
-   `'unknown'`).
+1. **`src/types.ts`** — TWO edits:
+   - add `'<lang>',` to the `LANGUAGES` const (before `'unknown'`);
+   - add `'**/*.<ext>',` to `DEFAULT_CONFIG.include`. **Don't skip this** — it's
+     the file-scan allowlist; without the glob, `codegraph init` finds **0
+     files** even though detection/extraction are wired.
 2. **`src/extraction/grammars.ts`** — three maps:
    - `WASM_GRAMMAR_FILES`: `<lang>: 'tree-sitter-<lang>.wasm',`
    - `EXTENSION_MAP`: each file extension → `'<lang>'` (e.g. `'.lua': 'lua',`)
    - `getLanguageDisplayName`: `<lang>: '<Display Name>',`
    - **vendored only**: add `<lang>` to the
-     `(lang === 'pascal' || lang === 'scala')` wasm-path branch.
+     `(lang === 'pascal' || lang === 'scala' || …)` wasm-path branch.
 3. **`src/extraction/languages/<lang>.ts`** — new file exporting
    `export const <lang>Extractor: LanguageExtractor = { … }`. Map the node types
    from Step 3. Required fields: `functionTypes`, `classTypes`, `methodTypes`,
    `interfaceTypes`, `structTypes`, `enumTypes`, `typeAliasTypes`,
    `importTypes`, `callTypes`, `variableTypes`, `nameField`, `bodyField`,
    `paramsField`. Add hooks as the grammar needs them (`getSignature`,
-   `getVisibility`, `isExported`, `extractImport`, `getReceiverType`,
+   `getVisibility`, `isExported`, `extractImport`, `visitNode`, `getReceiverType`,
    `interfaceKind`, `enumMemberTypes`, etc. — see
    `src/extraction/tree-sitter-types.ts`).
 4. **`src/extraction/languages/index.ts`** — `import { <lang>Extractor } from
    './<lang>';` and add `<lang>: <lang>Extractor,` to `EXTRACTORS`.
+
+**Sometimes a 5th, core touch in `src/extraction/tree-sitter.ts`** — variable
+extraction has per-language branches in `extractVariable` (the generic fallback
+only finds direct `identifier`/`variable_declarator` children). If the grammar
+nests declared names (e.g. Lua's `variable_declaration → variable_list`), add a
+`} else if (this.language === '<lang>')` branch there, mirroring the existing
+ts/python/go ones. Import forms that aren't a distinct node (Lua/Ruby `require`
+is a *call*) are handled in the extractor's `visitNode` hook instead.
 
 ### Step 5 — Build + verify loop
 
