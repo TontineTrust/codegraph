@@ -173,7 +173,7 @@ Status legend: ✅ done+validated · 🔬 hole identified · ⬜ not started.
 
 | Language | Framework(s) | Canonical flow to test | Mechanism | Status |
 |---|---|---|---|---|
-| TypeScript/JS | React / observer / EventEmitter | state→render; dispatch→callback | S + X | ✅ (excalidraw) |
+| TypeScript/JS | React / observer / EventEmitter / React Router | state→render; dispatch→callback; route→component | S + X | ✅ rendering+dispatch (excalidraw); **React Router JSX routing** `<Route path component={C}/>` (v5) + `element={<C/>}` (v6) → component (react-realworld **0→10, 10/10**). 🔬 object data-router `createBrowserRouter([{path,element}])` (modern v6) + a pre-existing Next.js false-positive (config files in a `pages/` app dir treated as routes) |
 | TypeScript/JS | Vue / Nuxt | template events (@click→handler); component composition; reactive→render | S + X | ✅ events + composition (vitepress S / vben M / element-plus L); 🔬 reactive→render (vue-core Proxy runtime — frontier, deferred) |
 | TypeScript/JS | Svelte / SvelteKit | template calls/composition; SvelteKit action→api; store→DOM | X | ✅ already strong (realworld S / skeleton M / shadcn L): template `{fn()}` calls, `<Pascal/>` composition, `import * as api` namespace, `load`→api all work out of the box. + exported-const object-of-functions extraction (SvelteKit `actions`). 🔬 `$lib`-namespace-from-action + store/reactive frontier |
 | TypeScript/JS | Express / Koa | request → route → handler → service | R + X | ✅ named handlers + middleware + controller/service (resolver) + **inline arrow handlers → service body calls** (realworld S 19 / parse M / ghost L 65 edges). 🔬 custom routers (payload had 0 routes — not `app.get`-style) |
@@ -407,6 +407,18 @@ Status legend: ✅ done+validated · 🔬 hole identified · ⬜ not started.
   **0 read / 0 grep / 4 codegraph / 26–30s** (both runs fully clean) vs without **1–4 read / 0–2 grep +
   glob/bash, one run spawned a sub-agent / 34–48s**. Node count stable; fix is Vapor-scoped (SwiftUI/UIKit
   untouched).
+- **React Router routing (validated 2026-05-23, react-realworld S) — the routing half of the React row.**
+  React rendering (state→render, jsx-child) was already covered; route→component was NOT — `react.ts` extracted
+  components/hooks and Next.js file routes but returned `references: []`, so `<Route>` declarations produced
+  nothing. Added `<Route>` JSX extraction: scan a window after each `<Route\b` (so the nested `>` in
+  `element={<Comp/>}` doesn't truncate it), pull `path="…"` + `component={C}` (v5) or `element={<C/>}` (v6) in
+  any attribute order, emit a route node + component reference (resolves via the existing PascalCase
+  `resolveComponent`). react-realworld **0→10, 10/10** (`/login`→Login, `/editor/:slug`→Editor,
+  `/@:username`→Profile); `<Routes>` container excluded via the `\b` boundary. No regression on excalidraw
+  (9,290 nodes, 46 react-render synth edges intact, 0 false routes). 🔬 the object **data-router** API
+  `createBrowserRouter([{ path, element }])` (modern v6, used by bulletproof-react) is object-based not JSX — a
+  separate frontier; plus a pre-existing Next.js false-positive (`*.config.mjs` in a `pages/` app dir treated
+  as a route).
 - **Difficulty gradient is real:** named-ref dispatch (resolver) is cheap; anonymous
   callback dispatch (synthesizer) is medium; **anonymous-arrow handlers are the hard
   remaining gap** (no identity → need synthesizer link-through-body, not yet built).
