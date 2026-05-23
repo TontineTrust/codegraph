@@ -136,9 +136,9 @@ The template to replicate per language/framework. Question: *"how does updating 
 |---|---|---|---|---|
 | Without codegraph | 115–139s | 9–10 | 10–11 | 0 |
 | Broken (explore-budget regression) | 131–139s | 5–10 | 3–5 | 6–14 |
-| Fixed (budget + msgs + full synthesis) | **64–76s** | **0–1** | 2 | **3–4** |
+| Fixed (budget + msgs + full synthesis) | **64–112s** | **0–2** | 2–4 | **3–10** |
 
-Validated: `trace(mutateElement, renderStaticScene)` connects in **6 hops** across all three boundaries (`mutateElement → triggerUpdate → [callback] triggerRender → [react-render] render → [jsx] StaticCanvas → renderStaticScene`), each hop showing inline source + the wiring site; node count stable at 9,289; 1 callback + 46 react-render + 280 jsx-render synthesized edges (no explosion, precision-checked).
+Numbers are n=4 unhooked runs of the same prompt; **best run 0 Read / 3 codegraph / 76s**, typical ~1 Read / ~4 codegraph / ~78s, with an occasional over-drill outlier (10 codegraph / 2 Read / 112s). Run-to-run variance is large — that's expected; report the range, never a single run. Validated: `trace(mutateElement, renderStaticScene)` connects in **6 hops** across all three boundaries (`mutateElement → triggerUpdate → [callback] triggerRender → [react-render] render → [jsx] StaticCanvas → renderStaticScene`), each hop showing inline source + the wiring site; node count stable at 9,289; 1 callback + 46 react-render + 280 jsx-render synthesized edges (no explosion, precision-checked).
 
 ## Tests
 
