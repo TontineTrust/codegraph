@@ -187,7 +187,7 @@ Status legend: ✅ done+validated · 🔬 hole identified · ⬜ not started.
 | Java | Spring | request → @RestController → @Autowired service → repo | R + X | ✅ **bare `@GetMapping`/`@PostMapping` + class `@RequestMapping` prefix join → route→method** (realworld S / mall M / halo L) — was missing all path-less method mappings; DI controller→service resolves (name + dir). 🔬 Spring Data JPA derived queries (`findByEmail`) — metaprogramming frontier |
 | Kotlin | (coroutines / DI) | flow/callback dispatch | ? | ⬜ |
 | Swift | Vapor | request → route → controller | ? | ⬜ |
-| C# | ASP.NET | request → controller; DI | ? | ⬜ |
+| C# | ASP.NET Core | request → [Http*] action → DI service → EF | X | ✅ **feature-folder detection** (realworld 0→19 — was undetected) + **bare `[HttpGet]` + class `[Route]` prefix** (eShopOnWeb 9→33 / jellyfin L) — co-located so no claimsReference needed. 🔬 EF Core LINQ/DbSet (metaprogramming frontier) |
 | Ruby | Rails / Sinatra | request → routes.rb → Controller#action → model | R | ✅ **RESTful `resources`/`resource` routing → controller#action** (realworld S 16 / spree M / forem L), pluralization + only/except + claimsReference; explicit routes fixed to precise `controller#action` too. 🔬 ActiveRecord dynamic finders (`Article.find_by_slug`) — metaprogramming frontier |
 | PHP | Laravel | request → route → controller → Eloquent | R | ✅ **precise `Route::get([Ctrl::class,'m'])` / `'Ctrl@m'` → Ctrl@method** (realworld S / firefly M / bookstack L) — was resolving the bare method name to the WRONG controller (every `index`→ArticleController); Route::resource→controller. 🔬 Eloquent dynamic finders/relationships (metaprogramming frontier) |
 | C/C++ | (callback structs / vtables) | function-pointer dispatch | ? | ⬜ |
@@ -312,6 +312,18 @@ Status legend: ✅ done+validated · 🔬 hole identified · ⬜ not started.
   0 reads / 0 grep / 26–30s vs without 3 / 3 / 52–53s — cleanest backend win yet (0/0, 2× faster).**
   Residuals: inline `func(c *gin.Context){}` handlers (anonymous, body lost — like Express before its fix);
   gitness's chi custom handlers (26/321).
+- **ASP.NET Core (validated 2026-05-23, realworld S / eShopOnWeb M / jellyfin L) — detection + bare-attribute
+  fix.** Two holes: (1) `detect()` only fired on a `/Controllers/` dir or root `Program.cs`/`.csproj` (which
+  often isn't in the indexed source set), so feature-folder apps (realworld: `Features/*/FooController.cs`,
+  subdir `Program.cs`) were NEVER detected → 0 routes despite a full controller set. Broaden: scan
+  Controller/Program/Startup `.cs` for ASP.NET signatures. (2) the attribute regex required a string path →
+  bare `[HttpGet]` (route on the class `[Route("[controller]")]`) missed (eShopOnWeb was 24 bare / 2
+  string). Match bare-or-path + join the class `[Route]` prefix (like Spring). **No `claimsReference`
+  needed** — ASP.NET attribute routes are co-located IN the controller with the action, so the bare method
+  ref resolves same-file (unlike Rails/Laravel, whose routes live in a separate file). realworld 0→19,
+  eShopOnWeb 9→33, jellyfin 362→399, all precise (`GET /articles → Get`, class prefix joined), no explosion.
+  Agent A/B (eShop catalog listing): codegraph **1–2 reads / 0 grep / 63–75s** vs without **6–7 / 1–6 /
+  77–79s**. Residual: EF Core LINQ/DbSet (metaprogramming frontier).
 - **Difficulty gradient is real:** named-ref dispatch (resolver) is cheap; anonymous
   callback dispatch (synthesizer) is medium; **anonymous-arrow handlers are the hard
   remaining gap** (no identity → need synthesizer link-through-body, not yet built).
