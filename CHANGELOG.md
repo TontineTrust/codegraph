@@ -25,8 +25,8 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   emits a `calls` edge from the caller to `area` even though `area` is passed
   as data (allowlist covers `map`, `fmap`, `filter`, `foldr`, `foldl`,
   `mapM_`, `traverse`, `concatMap`, `find`, `takeWhile`, `sortBy`, `zipWith`,
-  and ~20 more *function-first* combinators — see `HOF_NAMES` in
-  `src/extraction/languages/haskell.ts`. Data-first variants like `forM_`
+  and ~25 more *function-first* combinators (39 in total — see `HOF_NAMES` in
+  `src/extraction/languages/haskell.ts`). Data-first variants like `forM_`
   and `for_` are deliberately excluded — their signature is
   `t a -> (a -> f b) -> …`, so bridging them would emit the data list as a
   bogus callee).
