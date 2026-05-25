@@ -6,12 +6,19 @@
  * What it extracts
  * ----------------
  *   function       — top-level `f x = …` (one node per clause; same-named clauses
- *                    dedupe at query time)
+ *                    dedupe at query time). Also parameterless top-level
+ *                    bindings (`main = do …`, `pi = 3.14`, `constVal = 42`)
+ *                    which the grammar parses as `bind` nodes — extracted as
+ *                    function-kind because they're callable in Haskell.
+ *                    Also operator definitions (`x === y = …` and `(===) x y = …`)
+ *                    — extracted with the operator wrapped in parens
+ *                    (`function:(===)`).
  *   method         — class method bodies + signatures, instance method bodies
  *                    (qualified as `T.method` via getReceiverType)
  *   interface      — type class declarations (`class C a where …`)
  *   enum           — data types and newtypes
- *   enum_member    — data / newtype constructors
+ *   enum_member    — data / newtype constructors; GADT constructors
+ *                    (`data Term a where IntT :: Int -> Term Int`) too
  *   field          — record-syntax fields (`data Foo = Foo { x :: Int }`),
  *                    scoped to the parent enum (Haskell record selectors live
  *                    at the type level: `x :: Foo -> Int`)
@@ -21,7 +28,8 @@
  * Edges
  * -----
  *   calls          — direct `apply` chains, leaf-only to avoid spurious
- *                    "f x"-text callees on nested/curried apply
+ *                    "f x"-text callees on nested/curried apply, PLUS
+ *                    higher-order synthesis (see "Higher-order calls" below).
  *   contains       — standard scope nesting
  *   imports        — module-name based
  *   implements     — emitted from `instance C T where …` (T → C) when T is
@@ -31,18 +39,46 @@
  *                    constraints `class (Eq a, Show a) => Ord a where …`
  *                    (Haskell `context:` AST field; see tree-sitter.ts)
  *
+ * Higher-order calls
+ * ------------------
+ * Haskell pervasively passes functions as data: `totalArea xs = sum (map area xs)`
+ * calls `area` once per list element, but tree-sitter sees `area` only as the
+ * first argument of `map`. Without synthesis the call graph is broken at every
+ * idiomatic combinator. We bridge this by emitting an additional `calls` edge
+ * from the caller to the FIRST positional argument of a known higher-order
+ * function (see HOF_NAMES). Scope is deliberately narrow:
+ *   - Only the FIRST positional arg of a curried application is treated as the
+ *     "function" arg. In `mapM_ putStrLn shapes`, `putStrLn` is bridged;
+ *     `shapes` (the data) is NOT (it's the argument of the outer apply, whose
+ *     function field is itself an apply, not a leaf HOF variable).
+ *   - Only when the argument is a bare `variable` or `constructor` name —
+ *     lambdas, sections, and composed expressions (`(f . g)`, `(\\x -> …)`) are
+ *     skipped.
+ *   - The HOF must be a known function-first combinator. The list is the
+ *     Foldable/Traversable / list-utility combinators that take their function
+ *     argument FIRST: `map`, `fmap`, `mapM_`, `filter`, `foldr`, `traverse`,
+ *     `concatMap`, `find`, `takeWhile`, `sortBy`, `zipWith`, … (see HOF_NAMES
+ *     for the full list and rationale). Data-first variants like `forM_`,
+ *     `for_`, `forM`, `for` are *deliberately excluded* — their signature is
+ *     `t a -> (a -> f b) -> …` so including them would bridge the data list
+ *     to the call graph, not the function.
+ *   - Operators (`(>>=)`, `(<$>)`, `(.)`) are parsed as `infix` not `apply`
+ *     and are NOT bridged — that's the monadic-bind frontier and needs a
+ *     separate, scoped pass.
+ *
  * What it does NOT extract yet (known gaps)
  * -----------------------------------------
- *   - Higher-order calls: `map area xs` does not emit `caller → area`, because
- *     `area` is *passed* not invoked. Bridging this needs an allowlist of
- *     combinators; deferred per CLAUDE.md "partial coverage is worse than none".
+ *   - Monadic-bind / operator-as-call flows: `xs >>= f`, `f <$> xs`. These
+ *     parse as `infix` nodes; the higher-order bridge above only covers
+ *     `apply`-shaped combinators.
  *   - Orphan instances: `instance C T` where `T` is defined in another file
  *     produces no `implements` edge. The receiver-type lookup is local-only;
  *     fixing this needs a resolver pass that matches by receiver-name across
  *     files.
- *   - Local where/let bindings: skipped (matches every other language's
- *     treatment of closures). Calls *inside* the where-clause still resolve.
- *   - Operator sections / infix as calls: `x + y` does not emit a call to `(+)`.
+ *   - Operator sections / infix as calls: `x + y` does not emit a call to `(+)`,
+ *     `xs >>= f` does not emit a call to `(>>=)`. The operator DEFINITIONS are
+ *     extracted (see above), but operator-as-call (infix usage) needs a
+ *     separate pass over `infix` AST nodes that we haven't done.
  *   - `.lhs` (literate Haskell), `.cabal`, `package.yaml`: not parsed.
  *   - No build-graph awareness: imports resolve module-name → module-name; the
  *     extractor doesn't know which Cabal/Stack package a module belongs to.
@@ -50,10 +86,17 @@
  * How it's tested
  * ---------------
  *   1. Unit tests — `__tests__/extraction.test.ts` "Haskell Extraction" block.
- *      13 cases cover function extraction, type class, ADT/newtype as enum,
- *      type synonym, dotted-module imports, call attribution to the enclosing
- *      function, instance method receivers, instance/deriving → implements,
- *      superclass → extends, and record fields. All green via
+ *      27 cases cover function extraction, type class, ADT/newtype as enum,
+ *      GADT constructors, type synonym, dotted-module imports, call
+ *      attribution (including the regression guards that the file is NOT the
+ *      attribution scope for operator/instance-method bodies), instance
+ *      method receivers, instance/deriving → implements, superclass → extends,
+ *      record fields, higher-order calls (positive: `map` / `filter` /
+ *      `mapM_` / `traverse` / `zipWith`; negative: data-arg / data-first
+ *      `forM_`/`for_` / non-HOF caller — none of those bridge), where-clause
+ *      call resolution (both top-level and inside instance methods),
+ *      operator function definitions, and top-level `bind` extraction
+ *      (`main = do …`, `constVal = 42`). All green via
  *      `npx vitest run __tests__/extraction.test.ts -t "Haskell"`.
  *
  *   2. Real-repo extraction integrity — `scripts/add-lang/verify-extraction.mjs`
@@ -126,22 +169,106 @@ function derivedClassNames(derivingNode: SyntaxNode, source: string): Array<{ na
 }
 
 /**
+ * Higher-order-function allowlist for call-edge synthesis. When one of these
+ * names appears as the function of an `apply` whose first argument is a bare
+ * variable / constructor name, that name is also emitted as a callee from the
+ * enclosing function. This bridges idiomatic Haskell patterns like
+ * `totalArea xs = sum (map area xs)` — without it, `area` is invisible to the
+ * call graph because tree-sitter sees it as data passed to `map`, not a call.
+ *
+ * The set is deliberately conservative — only "applies its first argument as
+ * a function" combinators. Operators like `(>>=)`, `(<$>)`, `(<*>)`, `(.)` are
+ * NOT in here because the grammar parses them as `infix` not `apply`, and
+ * monadic-bind-style flows are a wider frontier that needs deliberate scoping
+ * (CLAUDE.md "partial coverage is worse than none").
+ */
+// Allowlist of combinators whose FIRST positional argument is the function
+// (so an identifier passed there is a callable). The strict rule keeps the
+// bridge deterministic: `mapM_ action xs` emits `action` (function-first);
+// `forM_ xs action` and `for xs action` do NOT — they are list-first /
+// function-second and would emit the list as a bogus callee. Same for
+// `flip f x y`, `zipWith f xs ys` only emits f, etc. Stdlib signatures
+// confirmed against `base-4` Prelude / Data.List / Data.Foldable /
+// Data.Traversable. If you add a name here, verify the signature.
+const HOF_NAMES = new Set<string>([
+  // Functor / Foldable / Traversable basics (function-first)
+  'map', 'fmap', 'filter', 'foldr', 'foldl', "foldl'", 'foldr1', 'foldl1',
+  'concatMap', 'find', 'any', 'all',
+  // Monadic action runners (function-first ONLY — NOT `forM`/`for`, those are
+  // `flip mapM` / `flip traverse` and put the data list first)
+  'mapM', 'mapM_', 'foldM', 'foldM_',
+  // Traversable (function-first)
+  'traverse', 'traverse_', 'mapAccumL', 'mapAccumR',
+  // List utilities that take a predicate / comparator as the FIRST arg
+  'takeWhile', 'dropWhile', 'span', 'break', 'partition',
+  'groupBy', 'sortBy', 'nubBy', 'deleteBy', 'insertBy', 'unionBy', 'intersectBy',
+  // Two-list / multi-arg HOFs (function-first)
+  'zipWith', 'zipWith3', 'zipWithM', 'zipWithM_',
+  // Misc function-first combinators
+  'iterate', 'unfoldr', 'until',
+]);
+
+/**
  * For an `apply` node, return the callee name when its `function:` field is
  * a leaf (variable / constructor / qualified path). Skip when the function is
  * itself another `apply` — the inner curried call carries the leaf name and
  * gets its own bareCall pass. This avoids emitting bogus "f x"-text callee
  * names for nested applications like `f x y`.
+ *
+ * Additionally synthesizes a call edge for higher-order patterns: when a bare
+ * `variable` / `constructor` node is the direct `argument:` of an `apply`
+ * whose `function:` is a known HOF (see `HOF_NAMES`), the argument's name is
+ * also emitted as a callee. This catches `map area xs` → `caller → area`. The
+ * regular `caller → map` call edge is still emitted by the apply-node pass.
  */
 function bareCallFromApply(node: SyntaxNode, source: string): string | undefined {
-  if (node.type !== 'apply') return undefined;
-  const fn = node.childForFieldName('function');
-  if (!fn) return undefined;
-  if (fn.type === 'variable' || fn.type === 'constructor') {
-    return getNodeText(fn, source);
+  if (node.type === 'apply') {
+    const fn = node.childForFieldName('function');
+    if (!fn) return undefined;
+    if (fn.type === 'variable' || fn.type === 'constructor') {
+      return getNodeText(fn, source);
+    }
+    if (fn.type === 'qualified' || fn.type === 'qualified_variable') {
+      return getNodeText(fn, source).replace(/\s+/g, '');
+    }
+    return undefined;
   }
-  if (fn.type === 'qualified' || fn.type === 'qualified_variable') {
-    return getNodeText(fn, source).replace(/\s+/g, '');
+
+  // Higher-order synthesis: only when this node is the direct `argument:` of
+  // an `apply` whose `function:` is a leaf variable/constructor in HOF_NAMES.
+  // The "direct argument of a leaf-HOF apply" check intentionally rules out
+  // the second-or-later positional arg of curried HOFs (e.g. in
+  // `mapM_ putStrLn shapes`, `shapes` is the argument of the OUTER apply whose
+  // function is itself an apply — so it never matches and we don't emit a
+  // bogus call to the data list).
+  if (node.type === 'variable' || node.type === 'constructor') {
+    const parent = node.parent;
+    if (!parent) return undefined;
+
+    // Do-block bare statement: `main = do { hi; bye }`. The `do` contains
+    // `statement: exp` children, each wrapping a single expression. When that
+    // expression is just a bare variable, the variable IS the monadic action
+    // being run — emit a call edge from the caller to it. Without this,
+    // every monadic helper invoked statement-style in a do-block is missed.
+    if (parent.type === 'exp' && parent.namedChildCount === 1) {
+      return getNodeText(node, source);
+    }
+
+    if (parent.type !== 'apply') return undefined;
+    // Identity comparison would seem natural here, but web-tree-sitter creates
+    // fresh JS wrappers for the same underlying AST node on each access — so
+    // `parent.childForFieldName('argument') !== node` is always true even when
+    // they refer to the same syntax node. Compare by the tree-sitter numeric
+    // node id instead.
+    const arg = parent.childForFieldName('argument');
+    if (!arg || arg.id !== node.id) return undefined;
+    const fn = parent.childForFieldName('function');
+    if (!fn) return undefined;
+    if (fn.type !== 'variable' && fn.type !== 'constructor') return undefined;
+    if (!HOF_NAMES.has(getNodeText(fn, source))) return undefined;
+    return getNodeText(node, source);
   }
+
   return undefined;
 }
 
@@ -166,6 +293,10 @@ export const haskellExtractor: LanguageExtractor = {
   bodyField: 'match',
   paramsField: 'patterns',
   interfaceKind: 'class',
+  // `where`-clause bindings live in a `binds:` sibling field on the function
+  // node (NOT inside `match:`), so the core needs to walk it explicitly or
+  // calls inside `where` are lost. See LanguageExtractor.extraBodyFields.
+  extraBodyFields: ['binds'],
 
   getSignature: (node, source) => {
     const patterns = node.childForFieldName('patterns');
@@ -227,6 +358,51 @@ export const haskellExtractor: LanguageExtractor = {
     }
 
     if (t === 'function') {
+      // Operator definition: `x === y = …` has no `name:` field — instead
+      // the grammar puts an `infix` child holding the left operand, operator,
+      // and right operand. Detect this and create a function node named
+      // `(<op>)`. Without this, operator definitions are silently dropped.
+      const hasName = node.childForFieldName('name') != null;
+      if (!hasName) {
+        let infix: SyntaxNode | null = null;
+        for (let i = 0; i < node.namedChildCount; i++) {
+          const c = node.namedChild(i);
+          if (c?.type === 'infix') { infix = c; break; }
+        }
+        if (infix) {
+          const opNode = infix.childForFieldName('operator');
+          if (opNode) {
+            const opText = getNodeText(opNode, ctx.source).trim();
+            const opName = `(${opText})`;
+            const left = infix.childForFieldName('left_operand');
+            const right = infix.childForFieldName('right_operand');
+            const sig = left && right
+              ? `${getNodeText(left, ctx.source)} ${opText} ${getNodeText(right, ctx.source)}`
+              : undefined;
+            const created = ctx.createNode('function', opName, node, {
+              signature: sig,
+              visibility: 'public',
+            });
+            if (created) {
+              // Push the operator node onto the scope stack so calls inside
+              // its body attribute to it, not to the enclosing file. The
+              // framework's extractFunction does this around its
+              // visitFunctionBody call; since we bypass extractFunction here,
+              // we must do it manually.
+              ctx.pushScope(created.id);
+              const body = node.childForFieldName('match');
+              if (body) ctx.visitFunctionBody(body, created.id);
+              const binds = node.childForFieldName('binds');
+              if (binds) ctx.visitFunctionBody(binds, created.id);
+              ctx.popScope();
+            }
+            return true;
+          }
+        }
+        // Unnamed function with no infix child — skip (let framework decide).
+        return false;
+      }
+
       const parent = node.parent;
       if (parent && (parent.type === 'instance_declarations' || parent.type === 'class_declarations')) {
         const nameNode = node.childForFieldName('name');
@@ -240,11 +416,46 @@ export const haskellExtractor: LanguageExtractor = {
           signature: sig,
           visibility: 'public',
         });
-        const body = node.childForFieldName('match');
-        if (body && created) ctx.visitFunctionBody(body, created.id);
+        if (created) {
+          // Push for call attribution (see operator-handler comment above).
+          ctx.pushScope(created.id);
+          const body = node.childForFieldName('match');
+          if (body) ctx.visitFunctionBody(body, created.id);
+          // Method bodies can also have `where` clauses.
+          const binds = node.childForFieldName('binds');
+          if (binds) ctx.visitFunctionBody(binds, created.id);
+          ctx.popScope();
+        }
         return true;
       }
       return false;
+    }
+
+    // Top-level value bindings like `main = do …`, `pi = 3.14`, `constVal = 42`
+    // are parsed as `bind` nodes (no `patterns:` field), NOT `function`. Without
+    // this case `main` would not exist in the graph — a huge miss for any
+    // Haskell program. Nested binds inside `where`/`let` are skipped (the call
+    // walker still descends into their bodies and attributes to the outer
+    // function — the desired behavior for "describe's effective calls").
+    if (t === 'bind') {
+      const parent = node.parent;
+      if (!parent || parent.type !== 'declarations') return false;
+      const nameNode = node.childForFieldName('name');
+      if (!nameNode) return false;
+      const name = getNodeText(nameNode, ctx.source);
+      if (!name) return false;
+      const created = ctx.createNode('function', name, node, {
+        visibility: 'public',
+      });
+      if (created) {
+        ctx.pushScope(created.id);
+        const body = node.childForFieldName('match');
+        if (body) ctx.visitFunctionBody(body, created.id);
+        const binds = node.childForFieldName('binds');
+        if (binds) ctx.visitFunctionBody(binds, created.id);
+        ctx.popScope();
+      }
+      return true;
     }
 
     if (t === 'data_type' || t === 'newtype') {
@@ -259,18 +470,36 @@ export const haskellExtractor: LanguageExtractor = {
       if (!enumNode) return true;
 
       ctx.pushScope(enumNode.id);
-      // data_type wraps constructors under field `constructors` → `data_constructors`.
-      // newtype has a direct `constructor:` field whose child is `newtype_constructor`.
+      // data_type wraps constructors under field `constructors` → either
+      // `data_constructors` (Haskell 98 syntax: `data T = A | B`) OR
+      // `gadt_constructors` (GADT syntax: `data T where A :: T; B :: T`).
+      // newtype has a direct `constructor:` field whose child is
+      // `newtype_constructor`.
       const ctorsWrapper = node.childForFieldName('constructors');
       const ctors: SyntaxNode[] = [];
+      const gadtCtors: SyntaxNode[] = [];
       if (ctorsWrapper) {
         for (let i = 0; i < ctorsWrapper.namedChildCount; i++) {
           const c = ctorsWrapper.namedChild(i);
-          if (c && c.type === 'data_constructor') ctors.push(c);
+          if (!c) continue;
+          if (c.type === 'data_constructor') ctors.push(c);
+          else if (c.type === 'gadt_constructor') gadtCtors.push(c);
         }
       }
       const single = node.childForFieldName('constructor');
       if (single) ctors.push(single);
+
+      // GADT constructors have their name directly as a `name:` field (a
+      // `constructor` typed child), no nested `record`. Emit them upfront.
+      for (const g of gadtCtors) {
+        const nameOnG = g.childForFieldName('name');
+        if (nameOnG) {
+          const ctorName = getNodeText(nameOnG, ctx.source);
+          ctx.createNode('enum_member', ctorName, g, {
+            signature: getNodeText(g, ctx.source).trim(),
+          });
+        }
+      }
 
       for (const ctor of ctors) {
         // newtype_constructor: name is a direct `name:` field of type `constructor`.

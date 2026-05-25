@@ -4078,6 +4078,305 @@ class (Eq a, Show a) => Ord a where
     expect(extendsForOrd.map((r) => r.referenceName).sort()).toEqual(['Eq', 'Show']);
   });
 
+  it('should emit a higher-order call edge for a function passed to `map`', () => {
+    const code = `
+module H where
+
+area :: Double -> Double
+area r = r * r
+
+totalArea :: [Double] -> Double
+totalArea xs = sum (map area xs)
+`;
+    const result = extractFromSource('H.hs', code);
+    const totalArea = result.nodes.find((n) => n.kind === 'function' && n.name === 'totalArea');
+    expect(totalArea).toBeDefined();
+    const callsFromTotalArea = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === totalArea?.id)
+      .map((r) => r.referenceName)
+      .sort();
+    expect(callsFromTotalArea).toContain('map');     // direct call to the HOF
+    expect(callsFromTotalArea).toContain('area');    // HOF synthesis: area was passed to map
+    expect(callsFromTotalArea).toContain('sum');     // direct call to sum
+  });
+
+  it('should emit HOF calls for `filter`, `mapM_`, and `traverse` patterns', () => {
+    const code = `
+module H where
+
+isEven n = n \`mod\` 2 == 0
+greetOne x = print x
+logOne x = print x
+
+filtered xs = filter isEven xs
+greeted xs = mapM_ greetOne xs
+walked xs = traverse logOne xs
+`;
+    const result = extractFromSource('H.hs', code);
+    const get = (name: string) =>
+      result.unresolvedReferences
+        .filter(
+          (r) =>
+            r.referenceKind === 'calls' &&
+            r.fromNodeId === result.nodes.find((n) => n.kind === 'function' && n.name === name)?.id
+        )
+        .map((r) => r.referenceName);
+    expect(get('filtered')).toContain('isEven');
+    expect(get('greeted')).toContain('greetOne');
+    expect(get('walked')).toContain('logOne');
+  });
+
+  it('should NOT emit a bogus HOF call for the data argument of a HOF', () => {
+    // In `mapM_ putStrLn shapes`, `shapes` is the data list, not a function.
+    // The HOF-synthesis path must only fire on the FIRST positional arg of the
+    // HOF (the function arg), never the second/third (data) args.
+    const code = `
+module H where
+
+go shapes = mapM_ putStrLn shapes
+`;
+    const result = extractFromSource('H.hs', code);
+    const go = result.nodes.find((n) => n.kind === 'function' && n.name === 'go');
+    const calls = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === go?.id)
+      .map((r) => r.referenceName);
+    expect(calls).toContain('mapM_');
+    expect(calls).toContain('putStrLn');
+    expect(calls).not.toContain('shapes');  // never the data list
+  });
+
+  it('should bridge constructors used as the HOF function argument', () => {
+    // `map Just xs` should emit `Just` as a call from the caller — Just is a
+    // valid first-class function (the data-constructor as a function).
+    const code = `
+module H where
+data Maybe2 a = Just2 a | Nothing2
+wrap xs = map Just2 xs
+`;
+    const result = extractFromSource('H.hs', code);
+    const wrap = result.nodes.find((n) => n.kind === 'function' && n.name === 'wrap');
+    const calls = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === wrap?.id)
+      .map((r) => r.referenceName);
+    expect(calls).toContain('Just2');
+  });
+
+  it('should bridge `zipWith` first-arg but not second (the lists)', () => {
+    const code = `
+module H where
+combine f xs ys = zipWith f xs ys
+add x y = x + y
+sumPairs xs ys = zipWith add xs ys
+`;
+    const result = extractFromSource('H.hs', code);
+    const sumPairs = result.nodes.find((n) => n.kind === 'function' && n.name === 'sumPairs');
+    const calls = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === sumPairs?.id)
+      .map((r) => r.referenceName);
+    expect(calls).toContain('add');     // function-first arg → bridged
+    expect(calls).not.toContain('xs');  // list args → not bridged
+    expect(calls).not.toContain('ys');
+  });
+
+  it('should NOT emit a bogus call for `forM_`/`for_` data-first combinators', () => {
+    // forM_ / for_ have signature `t a -> (a -> f b) -> f ()` — list FIRST,
+    // function SECOND. Earlier versions of HOF_NAMES included them, which made
+    // `forM_ shapes putStrLn` emit a spurious call to `shapes` (the data list).
+    // Both names must NOT be in HOF_NAMES.
+    const code = `
+module H where
+go shapes action = forM_ shapes action
+go2 xs handler = for_ xs handler
+`;
+    const result = extractFromSource('H.hs', code);
+    const callsFrom = (name: string) =>
+      result.unresolvedReferences
+        .filter(
+          (r) =>
+            r.referenceKind === 'calls' &&
+            r.fromNodeId === result.nodes.find((n) => n.kind === 'function' && n.name === name)?.id
+        )
+        .map((r) => r.referenceName);
+    expect(callsFrom('go')).not.toContain('shapes');
+    expect(callsFrom('go2')).not.toContain('xs');
+  });
+
+  it('should NOT synthesize a HOF call for non-HOF callers (e.g. `print x`)', () => {
+    // `print` is not in the HOF allowlist, so its argument `x` should never
+    // become a call edge.
+    const code = `
+module H where
+
+go x = print x
+`;
+    const result = extractFromSource('H.hs', code);
+    const go = result.nodes.find((n) => n.kind === 'function' && n.name === 'go');
+    const calls = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === go?.id)
+      .map((r) => r.referenceName);
+    expect(calls).toContain('print');
+    expect(calls).not.toContain('x');
+  });
+
+  it('should extract call edges from where-clause bindings', () => {
+    // `f x = result where result = helper x` — the call to `helper` lives in
+    // the function's `binds:` field (a sibling of `match:`). Without walking
+    // `binds:` the call edge is silently lost. Real-world impact is large:
+    // ~1,900 where-clauses across xmonad/shellcheck/pandoc/purescript.
+    const code = `
+module W where
+helper x = x + 1
+describe y = result where result = helper y
+`;
+    const result = extractFromSource('W.hs', code);
+    // The where binding `result = helper y` becomes its own nested function
+    // node (named "result") whose body carries the call to `helper`.
+    const calls = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.referenceName === 'helper');
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('should extract call edges from where-clauses inside instance methods', () => {
+    const code = `
+module W where
+class Greeter a where greet :: a -> String
+data Shape = Shape
+helper x = x
+instance Greeter Shape where
+  greet s = h where h = helper s
+`;
+    const result = extractFromSource('W.hs', code);
+    const calls = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.referenceName === 'helper');
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('should extract operator function definitions as `(<op>)` function nodes', () => {
+    // `(===) :: T; x === y = x == y` — the function declaration has no `name:`
+    // field, only an `infix` child. Before the fix this produced no function
+    // node at all. Now it emits `function:(===)`.
+    const code = `
+module Op where
+(===) :: Int -> Int -> Bool
+x === y = x == y
+
+use a b = a === b
+`;
+    const result = extractFromSource('Op.hs', code);
+    const opFn = result.nodes.find((n) => n.kind === 'function' && n.name === '(===)');
+    expect(opFn).toBeDefined();
+  });
+
+  it('should attribute calls inside an operator-function body to the operator node, not the file', () => {
+    // Regression guard: my visitNode for `function` nodes BYPASSES the
+    // framework's extractFunction, which means it must manually pushScope
+    // before walking the body. If it doesn't, the calls leak to the enclosing
+    // file's scope. Same fix needed for instance methods.
+    const code = `
+module Op where
+helper x = x + 1
+(<+>) :: Int -> Int -> Int
+x <+> y = helper x + helper y
+`;
+    const result = extractFromSource('Op.hs', code);
+    const opFn = result.nodes.find((n) => n.kind === 'function' && n.name === '(<+>)');
+    expect(opFn).toBeDefined();
+    const callsFromOp = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === opFn?.id)
+      .map((r) => r.referenceName);
+    expect(callsFromOp).toContain('helper');
+  });
+
+  it('should extract `main = do …` and other parameterless top-level bindings as function nodes', () => {
+    // Tree-sitter parses `main = do …` (and any value binding without
+    // parameters) as a `bind` node, NOT a `function` node. Before the fix,
+    // `main` was completely missing from the graph. Calls inside `main` were
+    // also lost (no scope to attribute them to).
+    const code = `
+module M where
+greet x = print x
+main = do
+  greet 1
+  greet 2
+constVal = 42
+`;
+    const result = extractFromSource('M.hs', code);
+    const main = result.nodes.find((n) => n.kind === 'function' && n.name === 'main');
+    expect(main).toBeDefined();
+    const constVal = result.nodes.find((n) => n.kind === 'function' && n.name === 'constVal');
+    expect(constVal).toBeDefined();
+    // Calls inside main's do-block must attribute to main, not the file.
+    const callsFromMain = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === main?.id)
+      .map((r) => r.referenceName);
+    expect(callsFromMain.filter((n) => n === 'greet').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should emit calls for bare-variable do-statements (`main = do { hi; bye }`)', () => {
+    // `do { hi; bye }` desugars to `hi >>= \_ -> bye` — `hi` and `bye` ARE the
+    // monadic actions being executed. Tree-sitter parses them as bare `variable`
+    // nodes wrapped in `exp` statements. Before this case, only `apply`-shaped
+    // statements (`greet 1`) emitted call edges; bare-variable statements were
+    // silently lost, so `main` showed no callees.
+    const code = `
+module M where
+hi = print 1
+bye = print 2
+main = do
+  hi
+  bye
+`;
+    const result = extractFromSource('M.hs', code);
+    const main = result.nodes.find((n) => n.kind === 'function' && n.name === 'main');
+    expect(main).toBeDefined();
+    const callsFromMain = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === main?.id)
+      .map((r) => r.referenceName);
+    expect(callsFromMain).toContain('hi');
+    expect(callsFromMain).toContain('bye');
+  });
+
+  it('should extract GADT constructors as enum_members', () => {
+    // GADT syntax `data Term a where IntT :: Int -> Term Int` uses a
+    // `gadt_constructors` wrapper instead of the Haskell-98 `data_constructors`,
+    // and each `gadt_constructor` carries its `name:` field directly (no nested
+    // `record`). Before the fix only the enum (Term) was extracted, not its
+    // constructors.
+    const code = `
+module G where
+data Term a where
+  IntT :: Int -> Term Int
+  BoolT :: Bool -> Term Bool
+`;
+    const result = extractFromSource('G.hs', code);
+    const ctors = result.nodes
+      .filter((n) => n.kind === 'enum_member')
+      .map((n) => n.name)
+      .sort();
+    expect(ctors).toEqual(['BoolT', 'IntT']);
+  });
+
+  it('should attribute calls inside an instance method body to the method node, not the file', () => {
+    // Same regression guard for instance methods. `instance Greeter Shape
+    // where greet s = helper s` — the call to `helper` must attribute to
+    // `Shape.greet`, not to the file.
+    const code = `
+module W where
+class Greeter a where greet :: a -> String
+data Shape = Shape
+helper x = x
+instance Greeter Shape where
+  greet s = helper s
+`;
+    const result = extractFromSource('W.hs', code);
+    const greet = result.nodes.find((n) => n.kind === 'method' && n.name === 'Shape.greet');
+    expect(greet).toBeDefined();
+    const callsFromGreet = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls' && r.fromNodeId === greet?.id)
+      .map((r) => r.referenceName);
+    expect(callsFromGreet).toContain('helper');
+  });
+
   it('should extract record-syntax fields as field nodes', () => {
     const code = `
 module R where

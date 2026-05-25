@@ -137,6 +137,15 @@ export interface LanguageExtractor {
 
   /** Additional node types to treat as class declarations (e.g. Dart: 'mixin_declaration') */
   extraClassNodeTypes?: string[];
+  /**
+   * Additional field names to walk for call/structural extraction after the
+   * primary `bodyField`. Used by Haskell where a function's `where`-clause
+   * bindings live in a sibling `binds:` field (not inside the `match:` body),
+   * so calls inside `where` would otherwise be silently dropped. Each named
+   * field is fed through `visitFunctionBody` with the same enclosing-function
+   * scope as the primary body.
+   */
+  extraBodyFields?: string[];
   /** Whether methods can be top-level without enclosing class (Go: true) */
   methodsAreTopLevel?: boolean;
   /** NodeKind to use for interface-like declarations (Rust: 'trait'). Default: 'interface' */

@@ -607,6 +607,12 @@ export class TreeSitterExtractor {
     if (body) {
       this.visitFunctionBody(body, funcNode.id);
     }
+    // Walk any extra body-shaped fields (e.g. Haskell's `binds:` for
+    // `where`-clause bindings — see LanguageExtractor.extraBodyFields).
+    for (const f of this.extractor.extraBodyFields ?? []) {
+      const extra = getChildByField(node, f);
+      if (extra) this.visitFunctionBody(extra, funcNode.id);
+    }
     this.nodeStack.pop();
   }
 
@@ -736,6 +742,12 @@ export class TreeSitterExtractor {
       ?? getChildByField(node, this.extractor.bodyField);
     if (body) {
       this.visitFunctionBody(body, methodNode.id);
+    }
+    // Walk any extra body-shaped fields (Haskell `where` etc. — see
+    // LanguageExtractor.extraBodyFields).
+    for (const f of this.extractor.extraBodyFields ?? []) {
+      const extra = getChildByField(node, f);
+      if (extra) this.visitFunctionBody(extra, methodNode.id);
     }
     this.nodeStack.pop();
   }

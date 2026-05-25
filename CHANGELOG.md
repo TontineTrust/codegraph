@@ -11,16 +11,31 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - **Basic Haskell (`.hs`) language support.** CodeGraph now indexes Haskell
-  functions, type classes (as interfaces), instance methods attached to their
-  receiver type, algebraic data types and `newtype`s (as enums with their
-  constructors as members), type synonyms, dotted-module imports, and call
-  edges (with leaf-only resolution across curried `apply` chains so nested
-  calls don't emit spurious callee names). Backed by the upstream
+  functions (including parameterless top-level bindings like `main = do …` and
+  `pi = 3.14`, multi-clause functions, and operator definitions like
+  `(===) x y = …`), type classes (as interfaces), instance methods attached to
+  their receiver type, algebraic data types / `newtype`s / GADTs (as enums
+  with their constructors as members), record-syntax fields (as `field` nodes
+  scoped to the parent enum), type synonyms, dotted-module imports, and call
+  edges (extracted from both the `match` body AND `where`-clause bindings).
+  Type-class hierarchies are wired: `instance C T` and `data T … deriving (C)`
+  emit `implements` edges from `T` to `C`; superclass constraints
+  `class (Eq a) => Ord a where …` emit `extends`. Higher-order calls are
+  bridged for the common Foldable/Traversable combinators — `map area xs`
+  emits a `calls` edge from the caller to `area` even though `area` is passed
+  as data (allowlist covers `map`, `fmap`, `filter`, `foldr`, `foldl`,
+  `mapM_`, `traverse`, `concatMap`, `find`, `takeWhile`, `sortBy`, `zipWith`,
+  and ~20 more *function-first* combinators — see `HOF_NAMES` in
+  `src/extraction/languages/haskell.ts`. Data-first variants like `forM_`
+  and `for_` are deliberately excluded — their signature is
+  `t a -> (a -> f b) -> …`, so bridging them would emit the data list as a
+  bogus callee).
+  Backed by the upstream
   [`tree-sitter-haskell`](https://github.com/tree-sitter/tree-sitter-haskell)
-  grammar, vendored as a prebuilt `.wasm` (ABI 14). **This is an initial
-  implementation** — `implements`/`extends` edges between instances and
-  classes, record field nodes, and higher-order-call edges are not extracted
-  yet.
+  grammar, vendored as a prebuilt `.wasm` (ABI 14). Not extracted in this
+  cut: monadic-bind / operator-as-call flows (`xs >>= f`, `f <$> xs`), orphan
+  instances (receiver type in another file), and `.lhs` / `.cabal` /
+  `package.yaml` parsing.
 
 ## [0.9.4] - 2026-05-24
 
