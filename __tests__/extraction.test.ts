@@ -4025,4 +4025,70 @@ instance Greeter Shape where
     const m = result.nodes.find((n) => n.kind === 'method' && n.name === 'Shape.greet');
     expect(m).toBeDefined();
   });
+
+  it('should emit implements references from instance declarations', () => {
+    const code = `
+module I where
+
+class Greeter a where
+  greet :: a -> String
+
+data Shape = Circle
+
+instance Greeter Shape where
+  greet _ = "hi"
+`;
+    const result = extractFromSource('I.hs', code);
+    const shapeNode = result.nodes.find((n) => n.kind === 'enum' && n.name === 'Shape');
+    expect(shapeNode).toBeDefined();
+    const implRef = result.unresolvedReferences.find(
+      (r) => r.referenceKind === 'implements' && r.referenceName === 'Greeter' && r.fromNodeId === shapeNode?.id
+    );
+    expect(implRef).toBeDefined();
+  });
+
+  it('should emit implements references for each `deriving` class', () => {
+    const code = `
+module D where
+
+data Color = Red | Green | Blue deriving (Show, Eq)
+`;
+    const result = extractFromSource('D.hs', code);
+    const colorNode = result.nodes.find((n) => n.kind === 'enum' && n.name === 'Color');
+    expect(colorNode).toBeDefined();
+    const implementsForColor = result.unresolvedReferences.filter(
+      (r) => r.referenceKind === 'implements' && r.fromNodeId === colorNode?.id
+    );
+    expect(implementsForColor.map((r) => r.referenceName).sort()).toEqual(['Eq', 'Show']);
+  });
+
+  it('should emit extends references for type-class superclass constraints', () => {
+    const code = `
+module S where
+
+class (Eq a, Show a) => Ord a where
+  compare :: a -> a -> Ordering
+`;
+    const result = extractFromSource('S.hs', code);
+    const ordNode = result.nodes.find((n) => n.kind === 'class' && n.name === 'Ord');
+    expect(ordNode).toBeDefined();
+    const extendsForOrd = result.unresolvedReferences.filter(
+      (r) => r.referenceKind === 'extends' && r.fromNodeId === ordNode?.id
+    );
+    expect(extendsForOrd.map((r) => r.referenceName).sort()).toEqual(['Eq', 'Show']);
+  });
+
+  it('should extract record-syntax fields as field nodes', () => {
+    const code = `
+module R where
+
+data Person = Person { firstName :: String, lastName :: String, age :: Int }
+`;
+    const result = extractFromSource('R.hs', code);
+    const fields = result.nodes
+      .filter((n) => n.kind === 'field')
+      .map((n) => n.name)
+      .sort();
+    expect(fields).toEqual(['age', 'firstName', 'lastName']);
+  });
 });

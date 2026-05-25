@@ -1,3 +1,79 @@
+/**
+ * Haskell extractor — basic-but-real coverage on top of the upstream
+ * `tree-sitter-haskell` grammar (vendored at `../wasm/tree-sitter-haskell.wasm`,
+ * ABI 14, sha256 d82f63a8…; see `../wasm/README.md` for the build recipe).
+ *
+ * What it extracts
+ * ----------------
+ *   function       — top-level `f x = …` (one node per clause; same-named clauses
+ *                    dedupe at query time)
+ *   method         — class method bodies + signatures, instance method bodies
+ *                    (qualified as `T.method` via getReceiverType)
+ *   interface      — type class declarations (`class C a where …`)
+ *   enum           — data types and newtypes
+ *   enum_member    — data / newtype constructors
+ *   field          — record-syntax fields (`data Foo = Foo { x :: Int }`),
+ *                    scoped to the parent enum (Haskell record selectors live
+ *                    at the type level: `x :: Foo -> Int`)
+ *   type_alias     — `type T = U` (grammar mis-spells the node `type_synomym`)
+ *   import         — `import Data.List (sort)` → moduleName "Data.List"
+ *
+ * Edges
+ * -----
+ *   calls          — direct `apply` chains, leaf-only to avoid spurious
+ *                    "f x"-text callees on nested/curried apply
+ *   contains       — standard scope nesting
+ *   imports        — module-name based
+ *   implements     — emitted from `instance C T where …` (T → C) when T is
+ *                    defined in the same file; also from `data T … deriving (C1, C2)`
+ *                    (and the `newtype` analogue) → one per derived class
+ *   extends        — emitted by core `extractInheritance` from class superclass
+ *                    constraints `class (Eq a, Show a) => Ord a where …`
+ *                    (Haskell `context:` AST field; see tree-sitter.ts)
+ *
+ * What it does NOT extract yet (known gaps)
+ * -----------------------------------------
+ *   - Higher-order calls: `map area xs` does not emit `caller → area`, because
+ *     `area` is *passed* not invoked. Bridging this needs an allowlist of
+ *     combinators; deferred per CLAUDE.md "partial coverage is worse than none".
+ *   - Orphan instances: `instance C T` where `T` is defined in another file
+ *     produces no `implements` edge. The receiver-type lookup is local-only;
+ *     fixing this needs a resolver pass that matches by receiver-name across
+ *     files.
+ *   - Local where/let bindings: skipped (matches every other language's
+ *     treatment of closures). Calls *inside* the where-clause still resolve.
+ *   - Operator sections / infix as calls: `x + y` does not emit a call to `(+)`.
+ *   - `.lhs` (literate Haskell), `.cabal`, `package.yaml`: not parsed.
+ *   - No build-graph awareness: imports resolve module-name → module-name; the
+ *     extractor doesn't know which Cabal/Stack package a module belongs to.
+ *
+ * How it's tested
+ * ---------------
+ *   1. Unit tests — `__tests__/extraction.test.ts` "Haskell Extraction" block.
+ *      13 cases cover function extraction, type class, ADT/newtype as enum,
+ *      type synonym, dotted-module imports, call attribution to the enclosing
+ *      function, instance method receivers, instance/deriving → implements,
+ *      superclass → extends, and record fields. All green via
+ *      `npx vitest run __tests__/extraction.test.ts -t "Haskell"`.
+ *
+ *   2. Real-repo extraction integrity — `scripts/add-lang/verify-extraction.mjs`
+ *      on 4 pinned repos: xmonad (v0.18.1, commit 1a875b34, 39 files / 799
+ *      nodes / 1630 edges / 12 implements / 57 fields), shellcheck (v0.11.0,
+ *      aac0823e, 33 / 2034 / 4137 / 143 fields), pandoc (3.9.0.2, f1e06147,
+ *      557 / 16220 / 35985 / 67 implements + 3 extends / 1119 fields),
+ *      purescript (c4a35b34, 270 / 8185 / 15757 / 277 implements / 578 fields).
+ *      All PASS.
+ *
+ *   3. Agent A/B benchmark — `scripts/add-lang/bench.sh haskell <name> <url> "<Q>"`
+ *      runs Claude Opus headlessly twice per repo (WITH codegraph MCP /
+ *      WITHOUT), parses tool calls + cost + duration. Across the 4 repos,
+ *      WITH-arm uses 0 Read + 0 Grep + 0 Bash for the canonical flow question
+ *      per repo (windows-arrangement for xmonad, parse-analyze for shellcheck,
+ *      reader-pipeline for pandoc, compile-pipeline for purescript) where the
+ *      WITHOUT-arm runs ~17 Read + ~14 Bash + 1 sub-agent per repo. The
+ *      ab-matrix doc has the per-cell numbers.
+ */
+
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getNodeText } from '../tree-sitter-helpers';
 import type { LanguageExtractor } from '../tree-sitter-types';
@@ -27,6 +103,26 @@ function getInstanceReceiverFromAncestor(node: SyntaxNode, source: string): stri
     p = p.parent;
   }
   return undefined;
+}
+
+/**
+ * Pull the class names out of a `deriving:` field — accepts the three shapes
+ * the grammar emits: `deriving (Show, Eq)` → `classes: tuple`,
+ * `deriving (Show)` → `classes: parens`, and `deriving Show` → `classes: name`.
+ */
+function derivedClassNames(derivingNode: SyntaxNode, source: string): Array<{ name: string; node: SyntaxNode }> {
+  const out: Array<{ name: string; node: SyntaxNode }> = [];
+  const classes = derivingNode.childForFieldName('classes');
+  if (!classes) return out;
+  const collect = (n: SyntaxNode) => {
+    if (n.type === 'name') out.push({ name: getNodeText(n, source), node: n });
+    else for (let i = 0; i < n.namedChildCount; i++) {
+      const c = n.namedChild(i);
+      if (c) collect(c);
+    }
+  };
+  collect(classes);
+  return out;
 }
 
 /**
@@ -181,16 +277,97 @@ export const haskellExtractor: LanguageExtractor = {
         // data_constructor: holds a `constructor:` child which is a `record` (or
         // `prefix`) carrying the `name:` field.
         let nameOnCtor = ctor.childForFieldName('name');
+        let inner: SyntaxNode | null = null;
         if (!nameOnCtor) {
-          const inner = ctor.childForFieldName('constructor');
+          inner = ctor.childForFieldName('constructor');
           if (inner) nameOnCtor = inner.childForFieldName('name');
         }
         if (nameOnCtor) {
           ctx.createNode('enum_member', getNodeText(nameOnCtor, ctx.source), ctor);
         }
+
+        // Record-syntax fields: data Foo = Foo { a :: Int, b :: String }.
+        // The constructor's inner node is a `record` with a `fields:` child wrapping
+        // one `field` per declared field; each `field` has `name: field_name`. Emit
+        // a `field` node per field so accessor functions become navigable. Field is
+        // scoped to the enum (the data type), not the constructor — Haskell record
+        // selectors live at the type level (`a :: Foo -> Int`).
+        const recordNode = inner?.type === 'record' ? inner : (ctor.childForFieldName('constructor')?.type === 'record' ? ctor.childForFieldName('constructor') : null);
+        if (recordNode) {
+          const fieldsWrap = recordNode.childForFieldName('fields');
+          if (fieldsWrap) {
+            for (let i = 0; i < fieldsWrap.namedChildCount; i++) {
+              const f = fieldsWrap.namedChild(i);
+              if (f?.type !== 'field') continue;
+              const fnameNode = f.childForFieldName('name');
+              if (!fnameNode) continue;
+              const fname = getNodeText(fnameNode, ctx.source);
+              if (!fname) continue;
+              const typeNode = f.childForFieldName('type');
+              const sig = typeNode
+                ? `${fname} :: ${getNodeText(typeNode, ctx.source)}`
+                : undefined;
+              ctx.createNode('field', fname, f, { signature: sig, visibility: 'public' });
+            }
+          }
+        }
       }
       ctx.popScope();
+
+      // `deriving (Show, Eq)` → emit one `implements` reference per derived class
+      // from the data type to the class. Mirrors how an explicit `instance` does
+      // it; deriving is just an auto-generated instance.
+      const deriving = node.childForFieldName('deriving');
+      if (deriving) {
+        for (const dc of derivedClassNames(deriving, ctx.source)) {
+          ctx.addUnresolvedReference({
+            fromNodeId: enumNode.id,
+            referenceName: dc.name,
+            referenceKind: 'implements',
+            line: dc.node.startPosition.row + 1,
+            column: dc.node.startPosition.column,
+          });
+        }
+      }
       return true;
+    }
+
+    // Top-level `instance C T where …` declarations. The grammar's `instance`
+    // node has `name:` = the class and `patterns: type_patterns` containing the
+    // receiver type. Emit an `implements` reference from the receiver type's
+    // node (if defined in this file) to the class. Method bodies inside the
+    // instance are extracted by the `function` case above with the correct
+    // receiver via getReceiverType. We return false so the framework still
+    // descends into instance_declarations and visits those method bodies.
+    if (t === 'instance') {
+      const classNameNode = node.childForFieldName('name');
+      const patterns = node.childForFieldName('patterns');
+      if (classNameNode && patterns) {
+        const className = getNodeText(classNameNode, ctx.source);
+        for (let i = 0; i < patterns.namedChildCount; i++) {
+          const c = patterns.namedChild(i);
+          if (c?.type !== 'name') continue;
+          const typeName = getNodeText(c, ctx.source);
+          // Local lookup only — Haskell orphan instances (type defined in
+          // another file) won't resolve through this path. The receiver type
+          // must be one of the type-shaped node kinds we emit: enum (data /
+          // newtype) or, in principle, struct/class — keep the set wide so
+          // future extractor changes don't silently break this.
+          const typeNode = ctx.nodes.find((n) =>
+            n.name === typeName && (n.kind === 'enum' || n.kind === 'struct' || n.kind === 'class' || n.kind === 'interface')
+          );
+          if (typeNode) {
+            ctx.addUnresolvedReference({
+              fromNodeId: typeNode.id,
+              referenceName: className,
+              referenceKind: 'implements',
+              line: classNameNode.startPosition.row + 1,
+              column: classNameNode.startPosition.column,
+            });
+          }
+        }
+      }
+      return false;
     }
 
     return false;

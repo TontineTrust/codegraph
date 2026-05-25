@@ -488,7 +488,7 @@ the MCP server and writing its instructions file:
 | Pascal / Delphi | `.pas`, `.dpr`, `.dpk`, `.lpr` | Full support (classes, records, interfaces, enums, DFM/FMX form files) |
 | Lua | `.lua` | Full support (functions, methods with receivers, local variables, `require` imports, call edges) |
 | Luau | `.luau` | Full support (everything in Lua, plus `type`/`export type` aliases, typed signatures, and Roblox instance-path `require`) |
-| Haskell | `.hs` | Basic support (functions, type classes as interfaces, instance methods with receivers, ADTs/newtypes as enums with constructors, type synonyms, dotted-module imports, call edges). Known gaps: no `implements`/`extends` edges between instances and classes, record fields not extracted, higher-order calls (`map f xs`) not tracked as edges. |
+| Haskell | `.hs` | Basic support (functions, type classes as interfaces, instance methods with receivers, ADTs/newtypes as enums with constructors, record-syntax `field` nodes, type synonyms, dotted-module imports, call edges, `implements` edges from `instance` / `deriving`, `extends` edges from class superclass constraints). Not extracted yet: higher-order calls (`map f xs`), orphan instances (receiver type in another file). |
 
 ## Troubleshooting
 

@@ -1799,6 +1799,36 @@ export class TreeSitterExtractor {
         }
       }
 
+      // Haskell type-class superclass constraints: `class (Eq a, Show a) => Ord a where ...`
+      // The `class` node has a `context:` child of type `context`, whose own `context:`
+      // field is either a single `apply` (one constraint) or a `tuple` of `apply` nodes.
+      // Each apply's `constructor:` field is the superclass name. Emit an `extends`
+      // reference per superclass.
+      if (child.type === 'context') {
+        const inner = getChildByField(child, 'context');
+        const applies: SyntaxNode[] = [];
+        if (inner?.type === 'apply') {
+          applies.push(inner);
+        } else if (inner?.type === 'tuple') {
+          for (let j = 0; j < inner.namedChildCount; j++) {
+            const a = inner.namedChild(j);
+            if (a?.type === 'apply') applies.push(a);
+          }
+        }
+        for (const a of applies) {
+          const ctor = getChildByField(a, 'constructor');
+          if (ctor) {
+            this.unresolvedReferences.push({
+              fromNodeId: classId,
+              referenceName: getNodeText(ctor, this.source),
+              referenceKind: 'extends',
+              line: ctor.startPosition.row + 1,
+              column: ctor.startPosition.column,
+            });
+          }
+        }
+      }
+
       // C++ base classes: `class Derived : public Base, private Other` →
       // base_class_clause holds access specifiers + base type(s). Emit an extends
       // ref per base type (skip the public/private/protected keywords).
