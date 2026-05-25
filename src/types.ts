@@ -87,6 +87,7 @@ export const LANGUAGES = [
   'scala',
   'lua',
   'luau',
+  'haskell',
   'yaml',
   'twig',
   'unknown',

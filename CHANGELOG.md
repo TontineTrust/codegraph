@@ -7,6 +7,21 @@ a [GitHub Release](https://github.com/colbymchenry/codegraph/releases) tagged
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Basic Haskell (`.hs`) language support.** CodeGraph now indexes Haskell
+  functions, type classes (as interfaces), instance methods attached to their
+  receiver type, algebraic data types and `newtype`s (as enums with their
+  constructors as members), type synonyms, dotted-module imports, and call
+  edges (with leaf-only resolution across curried `apply` chains so nested
+  calls don't emit spurious callee names). Backed by the upstream
+  [`tree-sitter-haskell`](https://github.com/tree-sitter/tree-sitter-haskell)
+  grammar, vendored as a prebuilt `.wasm` (ABI 14). **This is an initial
+  implementation** — `implements`/`extends` edges between instances and
+  classes, record field nodes, and higher-order-call edges are not extracted
+  yet.
+
 ## [0.9.4] - 2026-05-24
 
 ### Added

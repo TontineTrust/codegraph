@@ -69,5 +69,10 @@
     { "name": "Knit", "repo": "https://github.com/Sleitnick/Knit", "size": "Small", "files": "~10", "question": "How does Knit register services and expose them to clients?" },
     { "name": "vide", "repo": "https://github.com/centau/vide", "size": "Small", "files": "~40", "question": "How does vide track reactive sources and re-run effects when state changes?" },
     { "name": "Fusion", "repo": "https://github.com/dphfox/Fusion", "size": "Medium", "files": "~115", "question": "How does Fusion build and update its reactive UI graph from state objects?" }
+  ],
+  "Haskell": [
+    { "name": "xmonad", "repo": "https://github.com/xmonad/xmonad", "size": "Small", "files": "~30", "question": "How does xmonad apply a layout to arrange and manage windows on the screen?" },
+    { "name": "shellcheck", "repo": "https://github.com/koalaman/shellcheck", "size": "Small", "files": "~30", "question": "How does ShellCheck parse a shell script and dispatch analyses across its AST?" },
+    { "name": "pandoc", "repo": "https://github.com/jgm/pandoc", "size": "Medium", "files": "~360", "question": "How does Pandoc convert a document through its reader, intermediate AST, and writer pipeline?" }
   ]
 }

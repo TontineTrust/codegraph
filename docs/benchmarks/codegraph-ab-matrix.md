@@ -53,6 +53,10 @@ when the whole flow fits in one or two files) — but reads still drop.
 | Go | S | `gin-realworld` | 21 | 0R / 0G | 5 | 35s | 4R / 3G / 1Gl | 57s | 4 |
 | Go | M | `gin-vueadmin` | 625 | 1R / 1G | 4 | 47s | 3R / 3G / 1Gl | 44s | 2 |
 | Go | L | `gin-gitness` | 4438 | 4R / 3G | 4 | 64s | 8R / 7G / 2Gl | 57s | 4 |
+Haskell | S | `xmonad` | 39 | 0R / 0G | 2 | 29s | 14R / 1G / 7B / 1Ag | 84s | 14 |
+Haskell | S | `shellcheck` | 33 | 0R / 0G | 9 | 57s | 20R / 1G / 18B / 1Ag | 118s | 20 |
+Haskell | M | `purescript` | 270 | 0R / 0G | 9 | 69s | 18R / 15B / 1Ag | 110s | 18 |
+Haskell | M | `pandoc` | 557 | 0R / 0G | 5 | 50s | 16R / 2G / 15B / 1Ag | 103s | 16 |
 | Java | S | `spring-realworld` | 117 | 2R / 0G | 3 | 35s | 8R / 1G / 5B | 57s | 6 |
 | Java | M | `spring-mall` | 536 | 1R / 0G | 5 | 39s | 2R / 4G / 2Gl | 49s | 1 |
 | Java | L | `spring-halo` | 2444 | 1R / 2G | 8 | 60s | 4R / 1G / 6B | 52s | 3 |
@@ -81,10 +85,10 @@ when the whole flow fits in one or two files) — but reads still drop.
 | TypeScript/JS | M | `excalidraw` | 643 | 1R / 0G | 3 | 55s | 7R / 5G / 3Gl / 1B | 87s | 6 |
 | TypeScript/JS | L | `nest-immich` | 2759 | 1R / 0G | 7 | 50s | 3R / 0G / 1Gl | 44s | 2 |
 
-**Totals (37 cells):** with codegraph **38 reads / 22 greps**, without **159 reads / 72 greps** —
-**76% fewer reads, ~69% fewer greps.** Codegraph never increased reads in any cell, and the
-without-arm additionally ran **52 globs + 37 shell `find`/`grep` (Bash) + 1 sub-agent** that the
-with-arm (**0 Bash, 0 sub-agents**) never needed. (74 agent runs, $29.18 total.)
+**Totals (41 cells):** with codegraph **38 reads / 22 greps**, without **227 reads / 76 greps** —
+**83% fewer reads, ~71% fewer greps.** Codegraph never increased reads in any cell, and the
+without-arm additionally ran **52 globs + 92 shell `find`/`grep` (Bash) + 5 sub-agents** that the
+with-arm (**0 Bash, 0 sub-agents**) never needed. (82 agent runs, $31.63 total.)
 
 ## Observations
 

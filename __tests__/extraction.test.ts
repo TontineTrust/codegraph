@@ -93,6 +93,10 @@ describe('Language Detection', () => {
     expect(detectLanguage('main.dart')).toBe('dart');
   });
 
+  it('should detect Haskell files', () => {
+    expect(detectLanguage('Main.hs')).toBe('haskell');
+  });
+
   it('should return unknown for unsupported extensions', () => {
     expect(detectLanguage('styles.css')).toBe('unknown');
     expect(detectLanguage('data.json')).toBe('unknown');
@@ -3898,5 +3902,127 @@ local count = 0
       const vars = result.nodes.filter((n) => n.kind === 'variable').map((n) => n.name);
       expect(vars).toContain('count');
     });
+  });
+});
+
+describe('Haskell Extraction', () => {
+  it('should extract top-level functions', () => {
+    const code = `
+module Geom where
+
+area :: Double -> Double
+area r = 3.14 * r * r
+`;
+    const result = extractFromSource('Geom.hs', code);
+    const fn = result.nodes.find((n) => n.kind === 'function' && n.name === 'area');
+    expect(fn).toBeDefined();
+  });
+
+  it('should extract a type class as an interface', () => {
+    const code = `
+module Greeter where
+
+class Greeter a where
+  greet :: a -> String
+`;
+    const result = extractFromSource('Greeter.hs', code);
+    const cls = result.nodes.find((n) => n.kind === 'class' && n.name === 'Greeter');
+    expect(cls).toBeDefined();
+    const method = result.nodes.find((n) => n.kind === 'method' && n.name === 'greet');
+    expect(method).toBeDefined();
+  });
+
+  it('should extract a data type as enum with constructors as enum_members', () => {
+    const code = `
+module Shapes where
+
+data Shape = Circle Double | Rectangle Double Double
+`;
+    const result = extractFromSource('Shapes.hs', code);
+    const enumNode = result.nodes.find((n) => n.kind === 'enum' && n.name === 'Shape');
+    expect(enumNode).toBeDefined();
+    const ctors = result.nodes
+      .filter((n) => n.kind === 'enum_member')
+      .map((n) => n.name);
+    expect(ctors).toContain('Circle');
+    expect(ctors).toContain('Rectangle');
+  });
+
+  it('should extract a newtype as enum with one constructor', () => {
+    const code = `
+module Age where
+
+newtype Age = Age Int
+`;
+    const result = extractFromSource('Age.hs', code);
+    const enumNode = result.nodes.find((n) => n.kind === 'enum' && n.name === 'Age');
+    expect(enumNode).toBeDefined();
+    const ctor = result.nodes.find((n) => n.kind === 'enum_member' && n.name === 'Age');
+    expect(ctor).toBeDefined();
+  });
+
+  it('should extract a type synonym as a type_alias', () => {
+    const code = `
+module N where
+
+type Name = String
+`;
+    const result = extractFromSource('N.hs', code);
+    const alias = result.nodes.find((n) => n.kind === 'type_alias' && n.name === 'Name');
+    expect(alias).toBeDefined();
+  });
+
+  it('should extract imports as dotted module names', () => {
+    const code = `
+module M where
+
+import Data.List (sort)
+import qualified Data.Map as Map
+`;
+    const result = extractFromSource('M.hs', code);
+    const imports = result.nodes
+      .filter((n) => n.kind === 'import')
+      .map((n) => n.name);
+    expect(imports).toContain('Data.List');
+    expect(imports).toContain('Data.Map');
+  });
+
+  it('should attribute call edges to the enclosing function (not the file)', () => {
+    const code = `
+module Calls where
+
+helper :: Int -> Int
+helper x = x + 1
+
+caller :: Int -> Int
+caller y = helper y
+`;
+    const result = extractFromSource('Calls.hs', code);
+    const caller = result.nodes.find((n) => n.kind === 'function' && n.name === 'caller');
+    expect(caller).toBeDefined();
+    const callRef = result.unresolvedReferences.find(
+      (r) =>
+        r.referenceKind === 'calls' &&
+        r.referenceName === 'helper' &&
+        r.fromNodeId === caller?.id
+    );
+    expect(callRef).toBeDefined();
+  });
+
+  it('should attach instance methods to their receiver type', () => {
+    const code = `
+module I where
+
+class Greeter a where
+  greet :: a -> String
+
+data Shape = Circle
+
+instance Greeter Shape where
+  greet _ = "hi"
+`;
+    const result = extractFromSource('I.hs', code);
+    const m = result.nodes.find((n) => n.kind === 'method' && n.name === 'Shape.greet');
+    expect(m).toBeDefined();
   });
 });

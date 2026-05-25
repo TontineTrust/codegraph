@@ -135,7 +135,7 @@ The gains scale with codebase size: on large repos the agent answers from the in
 | **Full-Text Search** | Find code by name instantly across your entire codebase, powered by FTS5 |
 | **Impact Analysis** | Trace callers, callees, and the full impact radius of any symbol before making changes |
 | **Always Fresh** | File watcher uses native OS events (FSEvents/inotify/ReadDirectoryChangesW) with debounced auto-sync — the graph stays current as you code, zero config |
-| **19+ Languages** | TypeScript, JavaScript, Python, Go, Rust, Java, C#, PHP, Ruby, C, C++, Swift, Kotlin, Dart, Lua, Luau, Svelte, Liquid, Pascal/Delphi |
+| **19+ Languages** | TypeScript, JavaScript, Python, Go, Rust, Java, C#, PHP, Ruby, C, C++, Swift, Kotlin, Dart, Lua, Luau, Haskell, Svelte, Liquid, Pascal/Delphi |
 | **Framework-aware Routes** | Recognizes web-framework routing files and links URL patterns to their handlers across 14 frameworks |
 | **100% Local** | No data leaves your machine. No API keys. No external services. SQLite database only |
 
@@ -488,6 +488,7 @@ the MCP server and writing its instructions file:
 | Pascal / Delphi | `.pas`, `.dpr`, `.dpk`, `.lpr` | Full support (classes, records, interfaces, enums, DFM/FMX form files) |
 | Lua | `.lua` | Full support (functions, methods with receivers, local variables, `require` imports, call edges) |
 | Luau | `.luau` | Full support (everything in Lua, plus `type`/`export type` aliases, typed signatures, and Roblox instance-path `require`) |
+| Haskell | `.hs` | Basic support (functions, type classes as interfaces, instance methods with receivers, ADTs/newtypes as enums with constructors, type synonyms, dotted-module imports, call edges). Known gaps: no `implements`/`extends` edges between instances and classes, record fields not extracted, higher-order calls (`map f xs`) not tracked as edges. |
 
 ## Troubleshooting
 
