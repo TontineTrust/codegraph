@@ -674,20 +674,20 @@ export class ToolHandler {
 
       // Tiny-repo tool gating: on projects under TINY_REPO_FILE_THRESHOLD
       // files, only expose the 5 core tools (search, context, node,
-      // explore, trace). The agent's grep+read path is so cheap on a
-      // sub-150-file repo that the cache-creation overhead of 10 MCP tool
-      // definitions in the system prompt — ~$0.10-0.15 of fixed cost per
-      // question — can exceed the structural savings codegraph delivers.
-      // The 5 omitted tools (callers, callees, impact, status, files) are
-      // available on bigger projects where their value is clearer; on a
-      // tiny repo their use cases reduce to one grep anyway.
+      // explore, trace). The 5 omitted tools (callers, callees, impact,
+      // status, files) reduce to one grep at this scale.
       //
-      // Note: tried cutting to 3 tools (search/context/trace only) on a
-      // micro tier — REGRESSED cost on cobra/ky/sinatra. Without
-      // codegraph_node and codegraph_explore the agent falls back to
-      // raw Reads, adding more cache-creation than the tool defs saved.
-      // 5 tools is the empirical lower bound that doesn't push the
-      // agent to Read on the typical small-repo flow.
+      // n=2 audits ruled out cutting below 5 tools:
+      // - 3-tool gate (search + context + trace): cost regressed on
+      //   cobra/ky/sinatra. The agent fell back to raw Reads to cover
+      //   what codegraph_node + codegraph_explore would have answered.
+      // - 1-tool gate (search only): catastrophic regression — express
+      //   went from -43% WIN to +107% LOSS. With only search, the agent
+      //   can't navigate the call graph structurally and reads everything.
+      //
+      // 5 is the empirical lower bound. Tools beyond search/context/
+      // node/explore/trace pay overhead that the agent doesn't recoup
+      // on tiny-repo flow questions.
       const TINY_REPO_FILE_THRESHOLD = 150;
       const TINY_REPO_CORE_TOOLS = new Set([
         'codegraph_search',
