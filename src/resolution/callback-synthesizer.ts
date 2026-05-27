@@ -338,7 +338,16 @@ function cppOverrideEdges(queries: QueryBuilder): Edge[] {
  * trace/callees reach the implementation. Over-approximation accepted
  * (reachability-correct); capped per class, gated to JVM languages.
  */
-const IFACE_OVERRIDE_LANGS = new Set(['java', 'kotlin']);
+// Languages whose static `implements`/`extends` edges should bridge an
+// interface (or abstract base) method to the matching concrete-class method.
+// The set is "languages with explicit nominal subtyping and a single class
+// kind that holds methods" — i.e. the shape this loop expects. Swift and
+// Scala fit shape-wise (Swift `protocol`/`class`, Scala `trait`/`class`)
+// and are added below; their concrete-side nodes can be a `struct` (Swift)
+// or an `object` (Scala) so the loop also iterates those kinds.
+const IFACE_OVERRIDE_LANGS = new Set([
+  'java', 'kotlin', 'csharp', 'typescript', 'javascript', 'swift', 'scala',
+]);
 function interfaceOverrideEdges(queries: QueryBuilder): Edge[] {
   const edges: Edge[] = [];
   const seen = new Set<string>();
@@ -347,7 +356,12 @@ function interfaceOverrideEdges(queries: QueryBuilder): Edge[] {
       .getOutgoingEdges(classId, ['contains'])
       .map((e) => queries.getNodeById(e.target))
       .filter((n): n is Node => !!n && n.kind === 'method');
-  for (const cls of queries.getNodesByKind('class')) {
+  // Concrete-side kinds vary by language: `class` covers Java / Kotlin /
+  // C# / TS / Swift-classes / Scala-classes; `struct` covers Swift value
+  // types that conform to protocols. Iterate both.
+  const concreteKinds = ['class', 'struct'] as const;
+  for (const kind of concreteKinds) {
+  for (const cls of queries.getNodesByKind(kind)) {
     const implMethods = methodsOf(cls.id).filter((n) => IFACE_OVERRIDE_LANGS.has(n.language));
     if (implMethods.length === 0) continue;
     for (const sup of queries.getOutgoingEdges(cls.id, ['implements', 'extends'])) {
@@ -383,6 +397,7 @@ function interfaceOverrideEdges(queries: QueryBuilder): Edge[] {
         }
       }
     }
+  }
   }
   return edges;
 }

@@ -34,15 +34,38 @@ const GENERATED_PATTERNS: ReadonlyArray<RegExp> = [
   /_mock\.go$/,
   /_mocks\.go$/,
   /^mock_[^/]+\.go$/,
-  // TypeScript / JavaScript — common codegen suffix
+  // TypeScript / JavaScript — common codegen suffixes (Apollo / GraphQL
+  // codegen, Prisma, Hasura, ts-proto, gRPC-web, swagger-codegen).
   /\.generated\.[jt]sx?$/,
-  // Python — protobuf
+  /\.gen\.[jt]sx?$/,
+  /\.pb\.[jt]s$/,
+  /_pb\.[jt]s$/,
+  /_grpc_pb\.[jt]s$/,
+  // Python — protobuf / gRPC / openapi-codegen
   /_pb2(_grpc)?\.py$/,
+  /_pb2\.pyi$/,
   // C++ — protobuf
   /\.pb\.(cc|h)$/,
-  // Dart — build_runner / freezed
+  // C# — protobuf / gRPC (protoc-gen-csharp puts output under obj/ but
+  // many projects also commit *.g.cs and *Grpc.cs siblings)
+  /\.g\.cs$/,
+  /Grpc\.cs$/,
+  // Java — protobuf / gRPC: protoc-gen-java emits `*OuterClass.java`,
+  // protoc-gen-grpc-java emits `*Grpc.java`. The XxxImplBase abstract
+  // class lives inside Xxx*Grpc.java.
+  /OuterClass\.java$/,
+  /Grpc\.java$/,
+  // Swift — protobuf
+  /\.pb\.swift$/,
+  // Dart — build_runner / freezed / json_serializable / chopper
   /\.g\.dart$/,
   /\.freezed\.dart$/,
+  /\.pb\.dart$/,
+  /\.pbgrpc\.dart$/,
+  /\.chopper\.dart$/,
+  // Rust — common build.rs OUT_DIR outputs are usually outside the source
+  // tree, but in-tree generated files often use `*.generated.rs`.
+  /\.generated\.rs$/,
 ];
 
 /**

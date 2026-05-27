@@ -1914,15 +1914,32 @@ export class ToolHandler {
 
       // Deprioritize test files, icon files, and i18n files. Covers both
       // directory-style (`/tests/`, `/spec/`) AND suffix-style conventions
-      // (`*_test.go`, `*_spec.rb`, `*.test.ts`, `*.spec.tsx`, `*Test.java`,
-      // `*Spec.kt`) — without the suffix check, etcd's `watchable_store_test.go`
-      // displaced 5K chars of real-flow source in codegraph_explore for Q2.
+      // across every language we support — without the suffix check, etcd's
+      // `watchable_store_test.go` displaced 5K chars of real-flow source in
+      // codegraph_explore for Q2.
       const isLowValue = (p: string) =>
         /\/(tests?|__tests?__|spec)\//i.test(p) ||
-        /_test\.(go|py|rb)$/i.test(p) ||
+        // Go: `*_test.go`
+        /_test\.go$/i.test(p) ||
+        // Python: `test_*.py` (pytest discovery) and `*_test.py`
+        /(?:^|\/)test_[^/]+\.py$/i.test(p) ||
+        /_test\.py$/i.test(p) ||
+        // Ruby: `*_spec.rb` (rspec) and `*_test.rb` (minitest)
         /_spec\.rb$/i.test(p) ||
+        /_test\.rb$/i.test(p) ||
+        // JS / TS: `*.test.ts`, `*.spec.tsx`, etc.
         /\.(test|spec)\.[jt]sx?$/i.test(p) ||
+        // JVM: `*Test.java`, `*Tests.java`, `*Spec.kt`, `*Spec.scala`
         /(Test|Spec|Tests)\.(java|kt|scala)$/.test(p) ||
+        // C#: `*Tests.cs`, `*Test.cs`, `*Spec.cs`
+        /(Tests?|Spec)\.cs$/.test(p) ||
+        // Swift: `*Tests.swift` (XCTest convention)
+        /Tests?\.swift$/.test(p) ||
+        // Dart: `*_test.dart`
+        /_test\.dart$/i.test(p) ||
+        // Rust: `tests/*.rs` already caught by `/tests/` above; `_test.rs`
+        // and `_tests.rs` aren't Rust conventions (Rust uses `#[cfg(test)]`
+        // inside source files), so nothing extra needed.
         /\bicons?\b/i.test(p) ||
         /\bi18n\b/i.test(p);
       const aLow = isLowValue(aPath);
