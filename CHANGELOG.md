@@ -10,6 +10,57 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Generated-file down-ranking across search, trace, and explore.** A new
+  filename-based classifier (`src/extraction/generated-detection.ts`) flags
+  protobuf / gRPC / mockgen / build-output files (`.pb.go`, `.pulsar.go`,
+  `_grpc.pb.go`, `_mock.go`, `_mocks.go`, `mock_*.go`, `.generated.[jt]sx`,
+  `_pb2(_grpc)?.py`, `.pb.{cc,h}`, `.g.dart`, `.freezed.dart`) and pushes them
+  LAST in disambiguation. Before this, a `codegraph_search "Send"` on
+  cosmos-sdk returned the gRPC interface stub at `tx_grpc.pb.go:124` as the
+  first match — the trace landed on that empty stub, reported "no path", and
+  the agent fell back to Read. With the down-rank applied to `findSymbol`,
+  `findAllSymbols`, `codegraph_search`, the CLI `query` command, AND the
+  context Entry Points / Related Symbols / Code blocks, the bank keeper's
+  `msgServer.Send` (the real implementation) ranks #3 instead of #9 and
+  trace lands on it directly. Pure path-based classifier — no schema change,
+  no index migration.
+- **gRPC interface→implementation bridge for Go.** New synthesizer
+  `goGrpcStubImplEdges` in `src/resolution/callback-synthesizer.ts` finds
+  `UnimplementedXxxServer` structs in `.pb.go` / `_grpc.pb.go` files,
+  identifies their RPC-method signatures (excluding the `mustEmbed*` /
+  `testEmbeddedByValue` gRPC markers), and links each stub method to the
+  hand-written impl method on any struct whose method-name set is a
+  superset. Closes Go's structural-typing gap that the Java/Kotlin-only
+  `interfaceOverrideEdges` couldn't bridge. Excludes other generated files
+  from candidate impls so a sibling `msgClient` in the same `.pb.go` doesn't
+  get falsely paired. Measured on cosmos-sdk: 467 stub→impl `calls` edges
+  synthesized, bank's `UnimplementedMsgServer::Send` now points only to
+  `x/bank/keeper/msg_server.go::msgServer::Send` — not to mocks, not to
+  client wrappers.
+- **Trace-failure response now inlines both endpoints' bodies + neighbors.**
+  When `codegraph_trace` can't find a static call path (typically a
+  dynamic-dispatch break), it used to return a one-liner telling the agent
+  to call `codegraph_node` next — which triggered 3-4 follow-up calls plus a
+  Read. The new failure response inlines each endpoint's source (capped at
+  120 lines / 3600 chars), callers, and callees in one response. On the
+  cosmos-Q3 / etcd-Q2 audits this eliminated the entire fan-out pattern
+  (5-11 codegraph calls collapsed into 1-2).
+- **Path-proximity pairing in trace endpoint selection.** In a multi-module
+  Go repo, a symbol like `EndBlocker` exists in 20+ modules; FTS picks one
+  almost arbitrarily. Trace now scores every `from` × `to` candidate pair by
+  shared directory prefix length (longest match wins) so
+  `x/gov/abci.go::EndBlocker` + `x/gov/keeper/tally.go::Tally` are paired
+  before `simapp/app.go`'s wrapper EndBlocker is even considered. A
+  less-canonical-path penalty (`enterprise/`, `contrib/`, `examples/`,
+  `vendor/`, `third_party/`, `deprecated/`, `legacy/`) ensures a side-module
+  with a longer shared prefix doesn't beat the canonical module with a
+  shorter one. FindPath probe budget capped at 20 pairs.
+- **Test-file deprioritization in `codegraph_explore`.** Existing
+  `isLowValue` only caught directory-style patterns (`/tests/`, `/spec/`);
+  now also catches Go's `_test.go`, Ruby's `_spec.rb`, JS/TS `.test.ts` /
+  `.spec.tsx`, and Java/Kotlin/Scala `*Test.java` / `*Spec.kt`. Without
+  this, etcd's `watchable_store_test.go` consumed 5K chars of explore
+  budget that should have gone to the hand-written flow source.
 - **Java / Kotlin imports now resolve by fully-qualified name.** Extraction
   wraps every top-level declaration of a `.kt` / `.java` file in a `namespace`
   node carrying the file's `package` (so a class `Bar` in

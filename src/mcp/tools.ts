@@ -24,6 +24,7 @@ import {
   writeSync,
 } from 'fs';
 import { clamp, validatePathWithinRoot, validateProjectPath } from '../utils';
+import { isGeneratedFile } from '../extraction/generated-detection';
 import { tmpdir } from 'os';
 import { join, resolve as resolvePath } from 'path';
 
@@ -1014,7 +1015,16 @@ export class ToolHandler {
       return this.textResult(`No results found for "${query}"`);
     }
 
-    const formatted = this.formatSearchResults(results);
+    // Down-rank generated files within the FTS-returned set so a search
+    // for "Send" surfaces the hand-written keeper before .pb.go stubs
+    // that share the name. Stable: only reorders generated vs. not.
+    const ranked = [...results].sort((a, b) => {
+      const aGen = isGeneratedFile(a.node.filePath) ? 1 : 0;
+      const bGen = isGeneratedFile(b.node.filePath) ? 1 : 0;
+      return aGen - bGen;
+    });
+
+    const formatted = this.formatSearchResults(ranked);
     return this.textResult(this.truncateOutput(formatted));
   }
 
@@ -1232,41 +1242,137 @@ export class ToolHandler {
     // (which, on real code, means the flow breaks at dynamic dispatch).
     const edgeKinds: Edge['kind'][] = ['calls'];
     const MAX_HOPS = 7;
-    const fromTry = fromMatches.nodes.slice(0, 3);
-    const toTry = toMatches.nodes.slice(0, 3);
+    // Path-proximity pairing: in a multi-module repo a symbol name like
+    // `EndBlocker` exists in 20+ modules. FTS picks one almost arbitrarily;
+    // the WRONG pair (e.g. simapp's wrapper EndBlocker paired with gov's Tally)
+    // has no static path, falls through to the dynamic-dispatch failure branch,
+    // and surfaces unrelated bodies — exactly the cosmos-Q3 trace failure mode.
+    // Score every from×to combo by shared file-path prefix length; try the
+    // most-co-located pair first (e.g. `x/gov/abci.go::EndBlocker` ×
+    // `x/gov/keeper/tally.go::Tally` share `x/gov/`).
+    //
+    // Consider the FULL candidate set, not just the FTS top-5: the right
+    // EndBlocker for a gov-module flow may rank 8th in FTS but share the
+    // entire `x/gov/` prefix with the destination. Path-proximity supersedes
+    // FTS for this disambiguation. Findpath trials are still capped by
+    // FINDPATH_PAIR_BUDGET below to bound graph traversal cost.
+    const sharedDirPrefixLen = (a: string, b: string): number => {
+      const aDir = a.replace(/[^/]+$/, '');
+      const bDir = b.replace(/[^/]+$/, '');
+      let i = 0;
+      while (i < aDir.length && i < bDir.length && aDir[i] === bDir[i]) i++;
+      return i;
+    };
+    // Cosmos-Q3 surfaced a second-order failure: `enterprise/group/x/group/`
+    // SHARES MORE of its path with `enterprise/group/x/group/keeper/tally.go`
+    // (24 chars) than `x/gov/abci.go` shares with `x/gov/keeper/tally.go`
+    // (6 chars), so pure shared-prefix prefers the side-experiment module
+    // over the canonical one — even though the user's question is clearly
+    // about the main gov module. Penalize candidates living under prefixes
+    // that conventionally hold extensions / experiments / vendored code, so
+    // the canonical-path pair wins even when its shared prefix is short.
+    const isLessCanonicalPath = (p: string): boolean =>
+      /^(enterprise|contrib|examples?|sample|playground|vendor|third[_-]?party|deprecated|legacy)\//i.test(p);
+    const LESS_CANONICAL_PENALTY = 100; // any canonical candidate beats any less-canonical one
+    const scorePair = (a: string, b: string): number =>
+      sharedDirPrefixLen(a, b)
+      - (isLessCanonicalPath(a) ? LESS_CANONICAL_PENALTY : 0)
+      - (isLessCanonicalPath(b) ? LESS_CANONICAL_PENALTY : 0);
+    const fromCands = fromMatches.nodes;
+    const toCands = toMatches.nodes;
+    const pairs: Array<{ f: Node; t: Node; score: number }> = [];
+    for (const f of fromCands) {
+      for (const t of toCands) {
+        pairs.push({ f, t, score: scorePair(f.filePath, t.filePath) });
+      }
+    }
+    // Sort by shared prefix desc, then by FTS order (already encoded in the
+    // pairs' insertion order — both for f and t). The tiebreaker preserves
+    // findAllSymbols' generated-file-last ranking.
+    pairs.sort((a, b) => b.score - a.score);
+    // Cap how many graph-path probes we attempt so a 50×50 cross-product
+    // doesn't blow up on a god-named symbol like `Get` (well-named flows have
+    // their good pair near the top of the sort anyway).
+    const FINDPATH_PAIR_BUDGET = 20;
+    const fromTry = fromCands;
+    const toTry = toCands;
     let path: Array<{ node: Node; edge: Edge | null }> | null = null;
     let overCap: Array<{ node: Node; edge: Edge | null }> | null = null;
-    for (const f of fromTry) {
-      for (const t of toTry) {
-        const p = cg.findPath(f.id, t.id, edgeKinds);
-        if (!p || p.length <= 1) continue;
-        if (p.length <= MAX_HOPS) { path = p; break; }
-        if (!overCap || p.length < overCap.length) overCap = p;
-      }
+    let bestPair: { f: Node; t: Node } | null = null;
+    let triedPairs = 0;
+    for (const { f, t } of pairs) {
       if (path) break;
+      if (triedPairs >= FINDPATH_PAIR_BUDGET) break;
+      triedPairs++;
+      const p = cg.findPath(f.id, t.id, edgeKinds);
+      if (p && p.length > 1) {
+        if (p.length <= MAX_HOPS) { path = p; bestPair = { f, t }; break; }
+        if (!overCap || p.length < overCap.length) { overCap = p; bestPair = { f, t }; }
+      } else if (!bestPair) {
+        // No path yet — remember the top-scored pair so the failure branch
+        // surfaces the most-co-located candidates' bodies, not whatever FTS
+        // happened to put first.
+        bestPair = { f, t };
+      }
     }
 
     if (!path) {
-      // No static path — almost always a dynamic-dispatch break. Surface the
-      // start symbol's outgoing calls so the agent can bridge the gap.
-      const start = fromTry[0]!;
-      const callees = cg.getCallees(start.id).slice(0, 10)
-        .map(c => `${c.node.name} (${c.node.filePath}:${c.node.startLine})`);
+      // No static path — almost always a dynamic-dispatch break. INSTEAD of
+      // telling the agent to chase the gap with codegraph_node/callers/callees
+      // (which fans out into 3-4 follow-up tool calls + a Read), inline the
+      // material those would have returned right here. Measured on cosmos-Q3:
+      // the failed-trace + subsequent fan-out used to cost ~2× a single
+      // sufficient trace call; this branch closes that gap.
+      // Prefer the path-proximity-best pair we identified above (e.g. gov's
+      // EndBlocker × gov's Tally) over the FTS top-pick (simapp's wrapper).
+      const start = bestPair?.f ?? fromTry[0]!;
+      const end = bestPair?.t ?? toTry[0]!;
+      const fileCache = new Map<string, string[]>();
       const lines = [
-        `No direct call path from "${from}" to "${to}".`,
+        `No direct static call path from "${from}" to "${to}" — the chain almost certainly breaks at dynamic dispatch (a callback / interface dispatch / framework hook / metaclass). Both endpoint bodies + their immediate neighbors are inlined below; answer from them — a follow-up codegraph_node/callers/callees on these would just return what is already here.`,
         '',
-        (overCap
-          ? `(Only a ${overCap.length}-hop indirect chain connects them — almost certainly a BFS wander through unrelated code, not the real flow.) `
-          : '') +
-        'The direct chain most likely breaks at **dynamic dispatch** (a callback, descriptor, ' +
-        'metaclass, or attribute-as-callable) that static parsing cannot resolve into an edge. ' +
-        `Inspect \`${start.name}\` (${start.filePath}:${start.startLine}) with codegraph_node ` +
-        '(includeCode=true) — its body usually shows the dynamic call to follow next.',
       ];
-      if (callees.length > 0) {
-        lines.push('', `**${start.name} statically calls:** ${callees.join(', ')}`);
+      if (overCap) {
+        lines.push(
+          `> Indirect chain of ${overCap.length} hops exists but is over the ${MAX_HOPS}-hop cap (usually a BFS wander through unrelated code, not the real execution flow).`,
+          '',
+        );
       }
-      return this.textResult(lines.join('\n') + fromMatches.note + toMatches.note);
+
+      const inlineEndpoint = (
+        label: 'FROM' | 'TO',
+        node: Node,
+        // calls/callers caps are tight on purpose — the full bodies are what
+        // displaces the Read; the lists are just enough hint to follow if needed.
+      ) => {
+        lines.push(`### ${label}: \`${node.name}\` (${node.filePath}:${node.startLine}-${node.endLine})`);
+        // Modest endpoint-source cap (120 lines / 3600 chars). Earlier bumped to
+        // 200/6000 to fit cosmos-gov's 261-line EndBlocker without truncation,
+        // but the n=2 audit showed the agent re-Reads regardless — so the extra
+        // characters were pure cost without payoff. 120/3600 captures most
+        // real-world endpoint bodies (the gRPC stubs / module Begin/EndBlocker
+        // wrappers we typically land on are short) at half the token weight.
+        const body = this.sourceRangeAt(cg, node.filePath, node.startLine, node.endLine, fileCache, 120, 3600);
+        if (body) lines.push(body);
+        const callers = cg.getCallers(node.id).slice(0, 6);
+        if (callers.length > 0) {
+          lines.push(`**Callers of \`${node.name}\`:** ` +
+            callers.map(c => `${c.node.name} (${c.node.filePath}:${c.node.startLine})`).join(', '));
+        }
+        const callees = cg.getCallees(node.id).slice(0, 8);
+        if (callees.length > 0) {
+          lines.push(`**\`${node.name}\` calls:** ` +
+            callees.map(c => `${c.node.name} (${c.node.filePath}:${c.node.startLine})`).join(', '));
+        }
+        lines.push('');
+      };
+      inlineEndpoint('FROM', start);
+      if (end.id !== start.id) inlineEndpoint('TO', end);
+
+      lines.push(
+        '> Both endpoint bodies, callers, and callees are inlined above. The dynamic-dispatch hop typically appears in one of them as: a callback registration, an interface method invoked on a field, a framework hook, or a generated stub. Identify the gap from the bodies — no further codegraph_node/Read is needed for these symbols.',
+      );
+      return this.textResult(this.truncateOutput(lines.join('\n') + fromMatches.note + toMatches.note));
     }
 
     const lines: string[] = [
@@ -1670,14 +1776,32 @@ export class ToolHandler {
       const bRelevant = hasQueryRelevance(bPath, b[1].nodes);
       if (aRelevant !== bRelevant) return aRelevant ? -1 : 1;
 
-      // Deprioritize test files, icon files, and i18n files
+      // Deprioritize test files, icon files, and i18n files. Covers both
+      // directory-style (`/tests/`, `/spec/`) AND suffix-style conventions
+      // (`*_test.go`, `*_spec.rb`, `*.test.ts`, `*.spec.tsx`, `*Test.java`,
+      // `*Spec.kt`) — without the suffix check, etcd's `watchable_store_test.go`
+      // displaced 5K chars of real-flow source in codegraph_explore for Q2.
       const isLowValue = (p: string) =>
         /\/(tests?|__tests?__|spec)\//i.test(p) ||
+        /_test\.(go|py|rb)$/i.test(p) ||
+        /_spec\.rb$/i.test(p) ||
+        /\.(test|spec)\.[jt]sx?$/i.test(p) ||
+        /(Test|Spec|Tests)\.(java|kt|scala)$/.test(p) ||
         /\bicons?\b/i.test(p) ||
         /\bi18n\b/i.test(p);
       const aLow = isLowValue(aPath);
       const bLow = isLowValue(bPath);
       if (aLow !== bLow) return aLow ? 1 : -1;
+
+      // Deprioritize generated source (.pb.go / .pulsar.go / _mocks.go / …) —
+      // the agent rarely needs to see the protobuf scaffold or gomock output
+      // when asking about the actual flow, and dumping their bodies inflates
+      // the response (the cosmos Q3 explore otherwise leads with
+      // `expected_keepers_mocks.go`, displacing the real `tally.go` content
+      // and forcing the agent to Read tally.go anyway).
+      const aGen = isGeneratedFile(a[0]);
+      const bGen = isGeneratedFile(b[0]);
+      if (aGen !== bGen) return aGen ? 1 : -1;
 
       if (a[1].score !== b[1].score) return b[1].score - a[1].score;
       return b[1].nodes.length - a[1].nodes.length;
@@ -2519,12 +2643,21 @@ export class ToolHandler {
     }
 
     if (exactMatches.length > 1) {
+      // Down-rank generated files (.pb.go, .pulsar.go, _grpc.pb.go, …)
+      // so a query like "Send" prefers the keeper implementation over
+      // the protobuf-generated interface stub. Stable sort preserves
+      // FTS order within each group. See generated-detection.ts.
+      const ranked = [...exactMatches].sort((a, b) => {
+        const aGen = isGeneratedFile(a.node.filePath) ? 1 : 0;
+        const bGen = isGeneratedFile(b.node.filePath) ? 1 : 0;
+        return aGen - bGen;
+      });
       // Multiple exact matches - pick first, note the others
-      const picked = exactMatches[0]!.node;
-      const others = exactMatches.slice(1).map(r =>
+      const picked = ranked[0]!.node;
+      const others = ranked.slice(1).map(r =>
         `${r.node.name} (${r.node.kind}) at ${r.node.filePath}:${r.node.startLine}`
       );
-      const note = `\n\n> **Note:** ${exactMatches.length} symbols named "${symbol}". Showing results for \`${picked.filePath}:${picked.startLine}\`. Others: ${others.join(', ')}`;
+      const note = `\n\n> **Note:** ${ranked.length} symbols named "${symbol}". Showing results for \`${picked.filePath}:${picked.startLine}\`. Others: ${others.join(', ')}`;
       return { node: picked, note };
     }
 
@@ -2562,11 +2695,20 @@ export class ToolHandler {
       return { nodes: [node], note: '' };
     }
 
-    const locations = exactMatches.map(r =>
+    // Same generated-file down-rank as findSymbol — keeps callers/callees
+    // /impact aggregation aligned (a query against "Send" returns the
+    // hand-written implementations before the protobuf scaffold).
+    const ranked = [...exactMatches].sort((a, b) => {
+      const aGen = isGeneratedFile(a.node.filePath) ? 1 : 0;
+      const bGen = isGeneratedFile(b.node.filePath) ? 1 : 0;
+      return aGen - bGen;
+    });
+
+    const locations = ranked.map(r =>
       `${r.node.kind} at ${r.node.filePath}:${r.node.startLine}`
     );
-    const note = `\n\n> **Note:** Aggregated results across ${exactMatches.length} symbols named "${symbol}": ${locations.join(', ')}`;
-    return { nodes: exactMatches.map(r => r.node), note };
+    const note = `\n\n> **Note:** Aggregated results across ${ranked.length} symbols named "${symbol}": ${locations.join(', ')}`;
+    return { nodes: ranked.map(r => r.node), note };
   }
 
   /**
