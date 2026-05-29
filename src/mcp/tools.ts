@@ -1924,8 +1924,8 @@ export class ToolHandler {
    * whose qualifiedName contains another named token (`PmsProductServiceImpl::list`),
    * dropping unrelated `OmsOrderService::list`.
    */
-  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string): { text: string; pathNodeIds: Set<string> } {
-    const EMPTY: { text: string; pathNodeIds: Set<string> } = { text: '', pathNodeIds: new Set<string>() };
+  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string): { text: string; pathNodeIds: Set<string>; namedNodeIds: Set<string> } {
+    const EMPTY = { text: '', pathNodeIds: new Set<string>(), namedNodeIds: new Set<string>() };
     try {
       const CALLABLE = new Set(['method', 'function', 'component', 'constructor']);
       // Strip only a REAL file extension (Create.cs → Create); KEEP qualified
@@ -1999,7 +1999,12 @@ export class ToolHandler {
         out.push(`${i + 1}. ${step.node.name} (${step.node.filePath}:${step.node.startLine})`);
       }
       out.push('', '> Full source for these symbols is below; codegraph_trace(from,to) for the exact path between two endpoints.', '');
-      return { text: out.join('\n'), pathNodeIds: new Set(best.map((s) => s.node.id)) };
+      // namedNodeIds = every callable the agent explicitly named (a superset of
+      // the spine). A file holding one is something the agent asked to SEE, so it
+      // must keep full source even if it's an off-spine polymorphic sibling — the
+      // agent named `getResponseWithInterceptorChain` / `SQLCompiler.execute_sql`
+      // as the mechanism, not as an interchangeable leaf. See the skeleton gate.
+      return { text: out.join('\n'), pathNodeIds: new Set(best.map((s) => s.node.id)), namedNodeIds: new Set(named.keys()) };
     } catch {
       return EMPTY;
     }
@@ -2265,6 +2270,32 @@ export class ToolHandler {
       return false;
     };
 
+    // A file that DEFINES a polymorphic supertype (a class/interface with ≥
+    // MIN_SIBLINGS implementers) AND co-locates its subclasses is a redundant
+    // "family" file — Django's compiler.py holds `SQLCompiler` + its 4 subclasses
+    // (SQLInsert/Update/Delete/AggregateCompiler) in 2,266 lines. Such files are
+    // huge and read-anyway, so they should STILL skeletonize even when the agent
+    // named a method in them: a full one eats ~6.5K of the explore budget (Django
+    // is pinned at the 28K cap, truncating), starving the sibling files the agent
+    // then Reads. This flag OVERRIDES the named-callable spare below — it does NOT
+    // by itself spare a file. (OkHttp's RealCall implements the `Lockable` mixin
+    // but defines no ≥3-impl supertype, so the named spare keeps it full.)
+    const superMany = new Map<string, boolean>();
+    const definesPolymorphicSupertype = (nodes: Node[]): boolean => {
+      for (const n of nodes) {
+        if (n.kind !== 'class' && n.kind !== 'interface' && n.kind !== 'struct'
+            && n.kind !== 'trait' && n.kind !== 'protocol' && n.kind !== 'type_alias') continue;
+        let many = superMany.get(n.id);
+        if (many === undefined) {
+          many = cg.getIncomingEdges(n.id)
+            .filter((x) => x.kind === 'implements' || x.kind === 'extends').length >= MIN_SIBLINGS;
+          superMany.set(n.id, many);
+        }
+        if (many) return true;
+      }
+      return false;
+    };
+
     lines.push('### Source Code');
     lines.push('');
     lines.push('> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.');
@@ -2292,16 +2323,26 @@ export class ToolHandler {
       const lang = group.nodes[0]?.language || '';
 
       // Adaptive sizing (CODEGRAPH_ADAPTIVE_EXPLORE, default on): skeletonize a file
-      // (member signatures, bodies elided) only when it is BOTH off the flow spine
-      // AND a polymorphic sibling — one of many interchangeable impls of a shared
-      // interface (OkHttp's interceptors). The on-spine exemplar + the rest as
-      // signatures convey the chain without N redundant full bodies. DISTINCT
-      // pipeline steps (no shared supertype, e.g. Excalidraw's renderStaticScene)
-      // are NOT siblings, so they keep full source — the lever helps sibling-heavy
-      // flows without starving diffuse ones.
+      // (member signatures, bodies elided) when it is a redundant member of a
+      // polymorphic family. Skeletonize iff ALL hold:
+      //   1. a flow spine exists,
+      //   2. no symbol in the file is on that spine (it's not the mechanism path),
+      //   3. it IS a polymorphic sibling (≥ MIN_SIBLINGS impls of a shared supertype),
+      //   4. it is NOT SPARED, where a file is spared iff the agent NAMED a callable
+      //      in it (`getResponseWithInterceptorChain` → keep RealCall.kt full so the
+      //      agent doesn't Read it back) UNLESS the file also DEFINES the family's
+      //      supertype — a base+subclasses "family" file (Django's compiler.py) is
+      //      huge and Read-anyway, so skeletonizing it FREES budget for the sibling
+      //      files the agent would otherwise Read (it's the cheaper option, proven by
+      //      A/B: sparing compiler.py cost MORE and Read MORE).
+      // Before condition 4, off-spine + sibling alone skeletonized RealCall.kt (it
+      // implements the 9-impl `Lockable` mixin), which the agent then Read back.
+      const namedInFile = group.nodes.some(n => flow.namedNodeIds.has(n.id));
+      const spared = namedInFile && !definesPolymorphicSupertype(group.nodes);
       if (adaptiveExploreEnabled() && flow.pathNodeIds.size > 0
           && !group.nodes.some(n => flow.pathNodeIds.has(n.id))
-          && isPolymorphicSibling(group.nodes)) {
+          && isPolymorphicSibling(group.nodes)
+          && !spared) {
         const syms = group.nodes
           .filter(n => n.kind !== 'import' && n.kind !== 'export' && n.startLine > 0)
           .sort((a, b) => a.startLine - b.startLine);

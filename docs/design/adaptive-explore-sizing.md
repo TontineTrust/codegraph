@@ -1,13 +1,33 @@
 # Design + status: adaptive `codegraph_explore` sizing (sibling skeletonization)
 
 **Status:** Implemented & validated, **default-on**, on branch
-`feat/adaptive-explore-sizing` (commit `d6d059f`, 2026-05-29). Escape hatch:
-`CODEGRAPH_ADAPTIVE_EXPLORE=0`.
+`feat/adaptive-explore-sizing` (initial commit `d6d059f`; **refined 2026-05-29**
+after a real-agent A/B exposed a read-back regression — see
+"Refinement" below). Escape hatch: `CODEGRAPH_ADAPTIVE_EXPLORE=0`.
 **Motivation:** make `codegraph_explore` size its output to the *answer* rather
 than always filling the budget cap — so a "sibling-heavy" flow (many
 interchangeable implementations of one interface) stops costing *more* than
 plain grep/read, without starving "diffuse" flows that genuinely need broad
 source.
+
+> **Refinement (2026-05-29) — the read-back regression.** The first cut gated
+> only on *off-spine + polymorphic-sibling*. A real-agent A/B (not the
+> deterministic probe) showed that this skeletonized two files the agent then
+> **Read back**, defeating the point: OkHttp's `RealCall` (it implements the
+> 9-impl `Lockable` *mixin*, so it tripped the sibling signal even though it's
+> the orchestrator) and Django's `compiler.py` (it *defines* `SQLCompiler` and
+> co-locates its subclasses). Two conditions fixed it — a file skeletonizes only
+> if it is **not spared**, where **spared = the agent NAMED a callable in it**
+> (`getResponseWithInterceptorChain`, `SQLCompiler.execute_sql` → keep it full)
+> **UNLESS the file DEFINES a ≥3-impl supertype** (a base+subclasses "family"
+> file is huge and Read-anyway, so skeletonizing it *frees explore budget* for
+> the sibling files the agent would otherwise Read). Result: OkHttp **3%
+> costlier → ~10% cheaper** (RealCall full, 0 read-backs); Django **10% costlier
+> → ~10% cheaper** (compiler.py skeleton frees ~6.5 KB of the 28 KB budget; half
+> the runs answer with 0 reads). The supertype signal was initially used as a
+> *spare* — that was backwards and regressed Django to 9% costlier by starving
+> its budget; it is now an *override* of the named-callable spare. The
+> single-condition history below is kept for context.
 
 ---
 
@@ -27,12 +47,21 @@ polymorphic sibling**, render it as a **skeleton** (class + member *signatures*,
 bodies elided) instead of full source — keeping the on-spine exemplar and the
 mechanism in full.
 
-- **OkHttp:** explore `28.5k → 16.6k` chars; headless A/B median **$0.413 ON vs
-  $0.462 shipped vs ~$0.57 without-CodeGraph** → flips OkHttp from −3% costlier
-  to **~28% cheaper than native**, with **reads NOT raised** (median 1 vs 3).
-- **Excalidraw / Tokio / Django / VS Code / Gin:** explore output is
-  **byte-identical** with the flag on/off (0 skeletons) → **provably zero
-  regression**. Their flows have no off-spine ≥3-implementer sibling group.
+- **OkHttp:** the interceptor-chain flow skeletonizes the 5 redundant
+  `: Interceptor` impls while keeping `RealInterceptorChain` (the dispatch
+  mechanism) and `RealCall` (the orchestrator the agent named) full → **~10%
+  cheaper than native, 0 RealCall read-backs** (see Refinement for the corrected
+  numbers; the original `28.5k → 16.6k` / "reads 1 vs 3" figures came from a
+  deterministic probe query, not the agent's real query).
+- **Django:** the QuerySet→SQL flow skeletonizes `compiler.py` (a
+  base+subclasses family file), freeing budget → **~10% cheaper**. (The earlier
+  claim that Django was "byte-identical / 0 skeletons" was an artifact of the
+  *probe* query; the agent's real query DOES surface the SQLCompiler family.)
+- **Excalidraw / Tokio / VS Code / Gin:** explore output is **byte-identical**
+  with the flag on/off (0 skeletons) — their flows have no off-spine
+  ≥3-implementer sibling group. The corrected gate only *adds* a spare
+  condition, so it skeletonizes a **strict subset** of the original gate → these
+  repos provably stay at 0 skeletons (verified by probe).
 
 ---
 
@@ -60,26 +89,45 @@ reconstruct them from signatures (more reasoning, net costlier; see "Dead ends")
 So the whole game is: **tell "interchangeable sibling" apart from "distinct
 step," cheaply.**
 
-## The two-condition gate
+## The gate (refined)
 
-A file is skeletonized iff **both** hold (and `CODEGRAPH_ADAPTIVE_EXPLORE != 0`):
+A file is skeletonized iff **all** hold (and `CODEGRAPH_ADAPTIVE_EXPLORE != 0`):
 
-1. **Off the flow spine.** `buildFlowFromNamedSymbols` now returns its path node
-   set (`pathNodeIds`) in addition to the rendered Flow text. A file with any
-   symbol on that traced chain is "on-spine" and always kept full — that's the
-   mechanism + the exemplar the agent is actually tracing through. (Gated on a
-   spine existing at all; if there's no spine, nothing skeletonizes.)
+1. **A spine exists.** `buildFlowFromNamedSymbols` returns its path node set
+   (`pathNodeIds`) and the full set of agent-named callables (`namedNodeIds`). If
+   no spine forms, nothing skeletonizes.
 
-2. **A polymorphic sibling.** The file's class `implements`/`extends` a supertype
-   that has **≥ 3 implementers** (`MIN_SIBLINGS`). This is the signal that the
-   class is one of many *interchangeable* implementations rather than a unique
-   step. Computed from real `implements`/`extends` edges (see "Why this signal"),
-   cached per-supertype so it stays a handful of edge lookups.
+2. **Off the flow spine.** No symbol in the file is on the traced chain — that
+   chain is the mechanism the agent is walking, always kept full.
 
-`RealInterceptorChain` *also* implements `Interceptor`, but its `proceed` is
-**on the spine** → kept full (condition 1 fails). `RealCall` is off-spine but
-implements nothing with ≥3 impls → kept full (condition 2 fails). The other
-interceptors are off-spine **and** ≥3-impl siblings → skeletonized. Exactly right.
+3. **A polymorphic sibling.** The file's class `implements`/`extends` a supertype
+   with **≥ 3 implementers** (`MIN_SIBLINGS`) — the signal that it's one of many
+   *interchangeable* impls. From real `implements`/`extends` edges, cached.
+
+4. **Not spared.** A file is **spared** (kept full) iff the agent **named a
+   callable in it** — a named method/function is something the agent asked to
+   *see* (`getResponseWithInterceptorChain`, `SQLCompiler.execute_sql`), not an
+   interchangeable leaf — **UNLESS the file itself DEFINES a ≥3-impl supertype**.
+   That last clause is the override: a base+subclasses "family" file (Django's
+   `compiler.py`) is huge and Read-anyway, so a full copy just eats explore
+   budget; skeletonizing it *frees* that budget for the sibling files the agent
+   would otherwise Read. So: *named ⇒ spare, unless it's a family file ⇒
+   skeletonize anyway.*
+
+Worked through the two repos:
+
+- **`RealInterceptorChain`** — `proceed` is on the spine → kept full (cond. 2).
+- **`RealCall`** — off-spine, and it trips the sibling signal via the **9-impl
+  `Lockable` mixin** (not because it's an interchangeable interceptor). But the
+  agent named `getResponseWithInterceptorChain`/`execute`/`enqueue` in it, and it
+  defines no ≥3-impl supertype → **spared, kept full** (cond. 4). This is the fix
+  for the read-back: before cond. 4 it skeletonized and the agent Read it back.
+- **`BridgeInterceptor` & the other 4** — off-spine, ≥3-impl siblings, named only
+  by *type*, define no supertype → **skeletonized**. The win.
+- **Django `compiler.py`** — off-spine, a sibling (its subclasses extend
+  `SQLCompiler`), the agent named `execute_sql` in it — *but it defines the
+  `SQLCompiler` supertype*, so the override fires → **skeletonized** (frees
+  budget). Sparing it instead (the wrong first attempt) cost MORE and Read MORE.
 
 ## Why "shared supertype with ≥3 implementers" is the signal
 
@@ -121,24 +169,28 @@ that actually *names* the symbol, so the skeleton shows the real signature:
 The header still lists the file's symbols and says `Read for a full body`, so the
 agent can pull one specific implementation if it truly needs it.
 
-## Validation
+## Validation (refined gate)
 
-Headless `claude -p`, Opus 4.8, median of 3, WITH-CodeGraph adaptive **on vs off**
-(isolates the flag). Probe sizes from `scripts/agent-eval/probe-explore.mjs`.
+Headless `claude -p`, Opus 4.8, **WITH vs WITHOUT** CodeGraph (the real benchmark
+arm, not the on/off probe the first cut used). Cost = median `total_cost_usd`.
 
-| Repo | explore OFF→ON | skeletons | A/B cost (ON vs shipped) | reads |
+| Repo | WITH→WITHOUT cost | WITH reads | WITHOUT reads | RealCall/compiler read-back |
 |---|---|---|---|---|
-| **OkHttp** | 28.5k → **16.6k** | 6 | **$0.413 vs $0.462** (~28% < native's $0.57) | flat (1 vs 3) |
-| Excalidraw | 28.6k → 28.6k | 0 | byte-identical → neutral | — |
-| Tokio | identical | 0 | neutral | — |
-| Django | identical | 0 | neutral | — |
-| VS Code | identical | 0 | neutral | — |
-| Gin | identical | 0 | neutral | — |
+| **OkHttp** (n=4) | **$0.45 → $0.50** (~10% cheaper) | 2 | 3.5 | **0 / —** (RealCall full) |
+| **Django** (n=6) | **$0.56 → $0.63** (~10% cheaper) | 2 | 8.5 | half the runs read 0 |
 
-The decisive check (the open risk of skeletonization) **passed**: skeletonizing
-the off-spine interceptors did **not** push the agent to Read them back — reads
-stayed flat (lower, if anything). And the 5 non-sibling repos are byte-identical
-with the flag toggled, so default-on carries no regression for them.
+Both were the README's **cost outliers** (OkHttp 3% costlier, Django 10%
+costlier) and both flipped to clear wins. OkHttp WITH was cheaper in all 4 runs;
+Django in 5 of 6 (n=6 to see through its high variance). WITHOUT baselines match
+the README ($0.50/$0.63 vs $0.57/$0.64), so the gain is the WITH-arm improving.
+
+The **decisive check now passes for the right reason**: with the named-callable
+spare, OkHttp's `RealCall` stays full and is **never** Read back (it was Read
+back in 3/4 runs before the fix). The inert repos (Excalidraw / Tokio / VS Code /
+Gin) stay at **0 skeletons** — verified by probe — because the refined gate
+skeletonizes a strict subset of the original. (The first cut's "on vs off, reads
+flat 1 vs 3" claim came from a deterministic probe query and did **not** hold for
+the agent's real query — that mismatch is what this refinement corrects.)
 
 ## Dead ends (don't re-attempt these)
 
@@ -156,20 +208,47 @@ with the flag toggled, so default-on carries no regression for them.
 4. **A plain "core-floor" gate** (keep first N full, skeletonize the rest) —
    skeletonized Excalidraw's *distinct* steps → **+17% cost regression**. The
    sibling condition is what makes it safe.
+5. **Sparing a file because it DEFINES the supertype** (the first refinement
+   attempt). Backwards: a base+subclasses *family* file (Django's `compiler.py`,
+   2,266 lines) is huge and Read-anyway, so keeping it full just **eats the 28 KB
+   explore budget and starves the sibling files** the agent then Reads — it
+   regressed Django to **9% costlier** ($0.71). Defining a supertype is instead
+   an **override** that lets a named family file skeletonize anyway.
+6. **Validating skeletonization with the deterministic probe query only.** The
+   probe (`probe-explore.mjs "<symbol bag>"`) and the *agent's* real explore
+   query name symbols differently, so they form different spines and skeletonize
+   different files. The probe said "Django: 0 skeletons / reads flat"; the real
+   agent query skeletonized `compiler.py` and Read it back. **Always confirm with
+   a real-agent A/B (`run-all.sh`), not just the probe.**
 
 ## Code
 
 - `src/mcp/tools.ts`
   - `adaptiveExploreEnabled()` — the flag (default on).
-  - `buildFlowFromNamedSymbols()` — now returns `{ text, pathNodeIds }`.
-  - `handleExplore()` — `isPolymorphicSibling()` helper (supertype ≥3-impl
-    detection, cached) + the skeleton branch in the source-section loop.
+  - `buildFlowFromNamedSymbols()` — returns `{ text, pathNodeIds, namedNodeIds }`.
+    `namedNodeIds` is every callable the agent named (a superset of the spine) —
+    the named-callable spare reads it.
+  - `handleExplore()` — two cached helpers: `isPolymorphicSibling()` (a node has
+    an outgoing `implements`/`extends` to a ≥3-impl supertype) and
+    `definesPolymorphicSupertype()` (a node HAS ≥3 incoming `implements`/`extends`
+    — i.e. the file is the family base). The skeleton branch:
+    `off-spine && isPolymorphicSibling && !(namedInFile && !definesSupertype)`.
+- `__tests__/adaptive-explore-sizing.test.ts` — 7 cases incl. the named-callable
+  spare (RealCall) and the supertype-family override (compiler.py).
 
 ## Frontier / future work
 
-- **No regression test yet** for the skeletonization (a fixture with ≥3 interface
-  impls + a flow spine asserting off-spine siblings skeletonize, distinct steps
-  stay full, `=0` disables). Recommended before/with merge.
+- **Per-symbol skeletonization within a family file.** `compiler.py` is
+  skeletonized whole, so `SQLCompiler.execute_sql` (the base mechanism) becomes a
+  signature too and *is* Read back in ~half the Django runs. The ideal is to keep
+  the base class's methods full and elide only the redundant subclass bodies —
+  shrinking the payload without eliding the answer. Whole-file skeletonization
+  can't express that yet.
+- **Big non-sibling files dominate Django's residual reads.** `query.py` (3,040
+  lines) and `sql/query.py` are not polymorphic families, so skeletonization
+  can't touch them; the agent Reads them when the 28 KB clustered view is
+  insufficient. That's the explore-budget / big-file-clustering frontier, not
+  skeletonization.
 - **Non-interface sibling families** (Go `HandlerFunc` slices, function-pointer
   registries) aren't caught — they have no `implements`/`extends` edge. Gin's
   middleware chain, for instance, doesn't trip the gate (its handlers are funcs,
