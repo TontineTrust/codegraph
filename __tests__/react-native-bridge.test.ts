@@ -314,11 +314,18 @@ describe('React Native cross-platform pairing — end to end', () => {
     fs.writeFileSync(path.join(dir, 'RNThing.m'),
       "@implementation RNThing\n" +
       "RCT_EXPORT_MODULE()\n" +
-      "- (void)uniquePingMethod:(RCTResponseSenderBlock)cb {}\n@end\n");
+      "RCT_EXPORT_METHOD(uniquePingMethod:(RCTResponseSenderBlock)cb) {}\n@end\n");
 
     const cg = await CodeGraph.init(dir, { silent: true });
     await cg.indexAll();
     const db = (cg as any).db.db;
+
+    // The iOS `RCT_EXPORT_METHOD` is extracted as an ObjC method node (the macro
+    // parses as a macro-expression, not a method, so it had no node before).
+    const objc = db.prepare(
+      "SELECT * FROM nodes WHERE name='uniquePingMethod' AND language='objc' AND id LIKE 'rn-export:%'"
+    ).all();
+    expect(objc).toHaveLength(1);
 
     // The Java and ObjC impls of `uniquePingMethod` are linked to each other, so
     // a JS call that resolves to one platform reaches the other.
