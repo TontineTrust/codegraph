@@ -2363,7 +2363,17 @@ export class TreeSitterExtractor {
     // 1. Decorators that are direct children of the declaration
     //    (method/property style, also some grammars for class).
     for (let i = 0; i < declNode.namedChildCount; i++) {
-      consider(declNode.namedChild(i));
+      const child = declNode.namedChild(i);
+      consider(child);
+      // Java/Kotlin/C# put annotations INSIDE a `modifiers` node
+      // (`@MyAnno public class X` → class_declaration → modifiers → annotation),
+      // so descend into it — otherwise every annotation usage is silently
+      // dropped and annotation types show zero dependents.
+      if (child && child.type === 'modifiers') {
+        for (let j = 0; j < child.namedChildCount; j++) {
+          consider(child.namedChild(j));
+        }
+      }
     }
 
     // 2. Decorators that are PRECEDING siblings of the declaration
