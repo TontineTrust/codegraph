@@ -1171,6 +1171,16 @@ export function resolveViaImport(
     if (rustResult) return rustResult;
   }
 
+  // Lua / Luau `require(...)`: a dotted module path (`a.b.c` from
+  // `require("a.b.c")`) or an instance-path leaf (`Signal` from
+  // `require(script.Parent.Signal)`) — map it to a module file. There's no static
+  // import statement, so the generic path-matcher can't bridge the dot↔slash /
+  // leaf↔basename gap; resolve it explicitly to the module file.
+  if ((ref.language === 'lua' || ref.language === 'luau') && ref.referenceKind === 'imports') {
+    const luaResult = resolveLuaRequire(ref, context);
+    if (luaResult) return luaResult;
+  }
+
   // Whole-module / namespace imports → link the importing file to the module
   // file. Python `from . import certs` / `import mod`, and TS/JS `import * as ns
   // from './x'` (so a namespace touched only via a value-member read still
@@ -1305,6 +1315,43 @@ function resolvePythonModuleMember(
  * real file. A NAMED TS/JS import (`import { widget }`) is not a module, so it
  * returns null and normal symbol resolution handles it.
  */
+/**
+ * Resolve a Lua/Luau `require(...)` to its module file. The reference name is
+ * either a dotted module path (`telescope.config` → `telescope/config.lua`) or a
+ * Roblox instance-path leaf (`Signal` from `require(script.Parent.Signal)` →
+ * `Signal.luau`). We try `<path>.lua|.luau` and `<path>/init.lua|.luau`, matched
+ * by path suffix (the module root — `lua/`, `src/`, … — is project-specific).
+ * Among suffix matches, the one sharing the longest directory prefix with the
+ * requiring file wins (instance-path requires resolve within the same package).
+ */
+function resolveLuaRequire(ref: UnresolvedRef, context: ResolutionContext): ResolvedRef | null {
+  const name = ref.referenceName;
+  if (!name) return null;
+  const base = name.includes('.') ? name.replace(/\./g, '/') : name;
+  const suffixes = [`${base}.lua`, `${base}.luau`, `${base}/init.lua`, `${base}/init.luau`];
+  const files = context.getAllFiles();
+  const shared = (a: string, b: string): number => {
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return i;
+  };
+  for (const suffix of suffixes) {
+    const matches = files.filter((f) => f === suffix || f.endsWith('/' + suffix));
+    if (matches.length === 0) continue;
+    matches.sort((x, y) => shared(y, ref.filePath) - shared(x, ref.filePath));
+    const best = matches[0]!;
+    if (best === ref.filePath) continue;
+    const fileNode = context.getNodesInFile(best).find((n) => n.kind === 'file');
+    if (fileNode) {
+      // Confidence ≥ 0.9 so this deterministic path/suffix match wins over
+      // name-matching, which otherwise resolves the require to the import node
+      // itself (a same-name self-match).
+      return { original: ref, targetNodeId: fileNode.id, confidence: 0.9, resolvedBy: 'import' };
+    }
+  }
+  return null;
+}
+
 function resolveModuleImportToFile(
   ref: UnresolvedRef,
   imports: ImportMapping[],
