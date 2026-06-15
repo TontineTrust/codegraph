@@ -45,7 +45,7 @@ agent read-reduction (see §4.3).
 
 | Symbol | Role |
 |---|---|
-| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`. **Add the new language here.** |
+| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`, `go`, `python`. **Add the new language here.** |
 | `valueRefsEnabled` | `process.env.CODEGRAPH_VALUE_REFS !== '0'` — default ON, env opts out. |
 | `MAX_VALUE_REF_NODES` (20_000) | per-scope traversal cap (and the shadow-scan cap). |
 | `captureValueRefScope(kind, name, id, node)` | called from `createNode` on every node. Records **targets** (file-scope `const`/`var`) and **reader scopes** (`function`/`method`/`const`/`var`). |
@@ -66,10 +66,10 @@ targets** (see §3).
 
 ## 2. Current state (what's shipped + validated)
 
-- **Default ON** for TS/JS/tsx + Go (`CODEGRAPH_VALUE_REFS=0` disables). Shipped in **PR #895**
+- **Default ON** for TS/JS/tsx + Go + Python (`CODEGRAPH_VALUE_REFS=0` disables). Shipped in **PR #895**
   (flip-on + the shadow prune); Go added in a later PR (the shadow-prune declarator switch +
   `VALUE_REF_LANGS`).
-- **Validated S/M/L** in **TypeScript, JavaScript, tsx, and Go** — see the matrix in the
+- **Validated S/M/L** in **TypeScript, JavaScript, tsx, Go, and Python** — see the matrix in the
   design doc. All clean: node count identical on/off, precision guards held, impact win
   reproduced. Go required extending the shadow prune (per-grammar declarators) — the worked
   example of "step B is load-bearing."
@@ -87,13 +87,14 @@ Guards run in `flushValueRefs`, in order:
 1. **`isGeneratedFile(path)`** (`src/extraction/generated-detection.ts`) — skips
    *suffix-recognised* generated files (`.pb.ts`, `.min.js`, …). **Path-only** — cannot catch
    content-minified bundles.
-2. **Shadow prune (the #895 fix)** — drop any target whose name is bound by **more than one
-   `variable_declarator`** in the file. Rationale: a bundled/Emscripten `const Module`
-   re-declared as an inner `var Module` / param resolves to the *inner* binding for nested
-   readers, so a file-scope edge is wrong. The inner re-declarations aren't graph nodes, so we
-   count them at the **syntax-tree** level. *This is the per-language-sensitive guard:* it
-   scans for `variable_declarator` nodes — **a different grammar uses a different node type**
-   (§5 step B).
+2. **Shadow prune** — drop a target when its **declarator count exceeds its file-scope node
+   count** (so it's also bound in an inner/local scope). Rationale: a bundled/Emscripten `const
+   Module` re-declared as an inner `var Module`, a Go package const shadowed by a local `:=`, or
+   a Python module const shadowed by a local `=` resolves to the *inner* binding for nested
+   readers, so a file-scope edge is wrong. Inner re-bindings aren't graph nodes, so declarators
+   are counted at the **syntax-tree** level. *This is the per-language-sensitive guard:* the
+   declarator node types differ per grammar (§5 step B), and comparing against file-scope node
+   count (not a flat `>1`) is what keeps **conditional module defs** (`try: X=…; except: X=…`).
 3. **Distinctive-name + same-file** (the target gate).
 
 **What a real FP looks like** (fix it): a reader edged to a file-scope const it does **not**
@@ -220,10 +221,19 @@ silently does nothing for the new language and intra-file shadowing produces fal
 |---|---|---|---|
 | TS/JS/tsx | `variable_declarator` | `namedChild(0)` | done |
 | Go | `const_spec`, `var_spec`, `short_var_declaration` | spec → `namedChild(0)`; short-var → identifiers in the `left` field | **done** |
-| Python | `assignment` (module-level `NAME = …`) | LHS identifier(s) | to verify |
+| Python | `assignment` | `left` field: identifier, or iterate a `pattern_list`/`tuple_pattern` | **done** |
 | Rust | `const_item` / `static_item` (`let_declaration` = locals) | `name` field | to verify |
 | Ruby | `assignment` with constant LHS (`CONST`) | LHS | to verify |
 | C/C++ | `init_declarator` in a file-scope `declaration` | declarator id | to verify |
+
+**The prune rule is `declarators > file-scope-node-count`, NOT `> 1`.** A name can be bound
+twice *at file scope* legitimately — a **conditional module def** (`try: X = a; except: X = b`,
+or `if cond: X = a else: X = b`). Those make N file-scope nodes AND N declarators, so they're
+kept; a real local shadow makes declarators exceed file-scope nodes. Python forced this
+refinement (try/except const defs are everywhere); it's strictly more correct for all
+languages. `fileScopeValueCounts` (incremented in `captureValueRefScope`) tracks the file-scope
+node count per name. Also: same-name value-ref edges are suppressed (`refName !== scope.name`),
+since the two halves of a conditional def would otherwise cross-reference.
 
 **Go was the worked example of "step B matters":** the first pass added `go` to
 `VALUE_REF_LANGS` only, and a synthetic probe immediately showed a false positive —

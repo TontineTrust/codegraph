@@ -1,6 +1,6 @@
 # Design + status: same-file value-reference edges
 
-**Status:** SHIPPED (default-on for TS/JS/tsx + Go; `CODEGRAPH_VALUE_REFS=0` disables). The
+**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python; `CODEGRAPH_VALUE_REFS=0` disables). The
 emitter lives in `TreeSitterExtractor.flushValueRefs` (`src/extraction/tree-sitter.ts`).
 **Motivation:** close the impact-analysis hole for *value consumers*. Static
 extraction edges calls, imports, and inheritance, but never edges a constant to the
@@ -13,7 +13,7 @@ readers" class of change (the ReScript-PR false positive that motivated the work
 ## TL;DR for a new session
 
 We emit a `references` edge (`metadata: { valueRef: true }`) from a reader symbol to
-the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go. Those edges
+the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python. Those edges
 flow straight into `getImpactRadius` / `codegraph impact` and the impact trail in
 `codegraph_explore` / `codegraph_node` — no agent-behaviour change required.
 
@@ -33,15 +33,19 @@ The win is **impact-radius correctness**, not agent read-reduction (see "Agent A
 
 1. **`isGeneratedFile(path)`** — skip suffix-recognised generated files (`.pb.ts`,
    `.min.js`, …). Path-only; it cannot catch content-minified bundles.
-2. **Shadow prune (#895)** — drop any target whose name is bound by **more than one
-   `variable_declarator`** in the file. A bundled/Emscripten `const Module` re-declared
-   as an inner `var Module` / param resolves to the *inner* binding for nested readers,
-   so a file-scope edge to it is a false positive. The inner re-declarations aren't
-   extracted as graph nodes, so we count them at the syntax level. This is what catches
+2. **Shadow prune** — drop a target when its **declarator count exceeds its file-scope node
+   count**, i.e. it's also bound in an *inner* (local) scope. A bundled/Emscripten `const
+   Module` re-declared as an inner `var Module`, a Go package const shadowed by a local `:=`,
+   or a Python module const shadowed by a local `=` all resolve to the inner binding for nested
+   readers — a file-scope edge would be a false positive. Inner re-bindings aren't graph nodes,
+   so declarators are counted at the syntax level (per-grammar node types: `variable_declarator`
+   for TS/JS, `const_spec`/`var_spec`/`short_var_declaration` for Go, `assignment` for Python).
+   Comparing against file-scope node count (not a flat ">1") keeps **conditional module defs**
+   (`try: X=…; except: X=…`), which legitimately bind a name twice at file scope. This catches
    the content-minified bundles guard #1 misses.
 3. **Distinctive-name + same-file** as above.
 
-## Validation matrix — TypeScript / JavaScript / Go
+## Validation matrix — TypeScript / JavaScript / Go / Python
 
 Method per repo: index the same tree twice (value-refs on vs `CODEGRAPH_VALUE_REFS=0`),
 diff node/edge counts, spot-check precision, and measure `codegraph impact` on a few
@@ -72,8 +76,16 @@ file-scope consts. Node count must be **identical** on/off (edges-only feature).
 | prometheus/prometheus | large | 1,329 | 23,322 (stable) | +3,466 (3.3%) | all sampled TP; guard holds | `rdsLabelInstance` 1→**82**, `ec2Label` 1→24 |
 | kubernetes/kubernetes | very large | 19,160 | 251,086 (stable) | +20,574 (1.9%) | all sampled TP; guard holds on 250 targets | `KubeletSubsystem` 3→**138**, `LEVEL_0` 1→102 |
 
-Across S/M/L in all three languages: node count never moved, the precision guards held, and
-the `impact` OFF column is the bug — a const that 80–90 symbols read reports "1 affected"
+**Python** (module-level `NAME = …`; required extending the prune *and* refining its rule — see below)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| psf/requests | small | 49 | 1,299 (stable) | +85 (2.9%) | all sampled TP; guard holds | `ITER_CHUNK_SIZE` 1→4, `DEFAULT_POOLBLOCK` 1→4 |
+| sqlalchemy/sqlalchemy | medium | 679 | 59,963 (stable) | +1,929 (0.8%) | all sampled TP; guard holds | `COMPARE_FAILED` 1→**26**, `DB_LINK_PLACEHOLDER` 1→19 |
+| django/django | large | 3,005 | 61,748 (stable) | +1,328 (0.7%) | all sampled TP; guard holds | `_trans` 1→**138**, `SEARCH_VAR` 4→8 |
+
+Across S/M/L in all four languages: node count never moved, the precision guards held, and
+the `impact` OFF column is the bug — a const that 80–140 symbols read reports "1 affected"
 without value-refs.
 
 **Go required a code change** (unlike JS/tsx, which the existing guards covered unchanged).
@@ -84,6 +96,17 @@ the shadow prune was a no-op for Go and a package `const Timeout` shadowed by a 
 types fixed it (one synthetic repro, then clean across gin/hugo/prometheus). This is the
 template for the next language: **the shadow prune is per-grammar and must be wired per
 language** (see the playbook).
+
+**Python forced a refinement of the prune *rule* — a general improvement.** Python's
+declarator is `assignment` (added to the switch). But Python also **conditionally defines
+module constants** (`try: HAS_SSL = True; except: HAS_SSL = False`) — a very common idiom that
+binds the name twice *at module scope*. The old "bound more than once → drop" rule over-pruned
+these (dropping a real const and its readers). The fix distinguishes a conditional module def
+from a real shadow by comparing declarator count against the number of **file-scope nodes** the
+name has: a conditional def makes them equal (both bindings are file-scope), a local shadow
+makes declarators exceed file-scope nodes (the excess is the local). This is strictly more
+correct for *all* languages. (It also made the two halves of a conditional def cross-reference
+via their own names, so same-name value-ref edges are now suppressed.)
 
 **`tsx` is covered by the TS rows** — excalidraw is a React/.tsx codebase, so the headline
 `tablerIconProps` (1→170) and most of its targets live in `.tsx` files. The one

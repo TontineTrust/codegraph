@@ -12,13 +12,20 @@ import * as os from 'os';
 import CodeGraph from '../src';
 
 function valueRefReaders(cg: CodeGraph, constName: string): string[] {
-  const target = cg.searchNodes(constName).map((r) => r.node).find((n) => n.name === constName);
-  if (!target) return [];
-  return cg
-    .getIncomingEdges(target.id)
-    .filter((e) => e.kind === 'references' && (e.metadata as { valueRef?: boolean } | undefined)?.valueRef)
-    .map((e) => cg.getNode(e.source)?.name)
-    .filter((n): n is string => Boolean(n));
+  // Aggregate across ALL nodes of this name — a conditionally-defined module
+  // const (`try: X=…; except: X=…`) has more than one, and the edge targets
+  // whichever one ended up in the target map.
+  const targets = cg.searchNodes(constName).map((r) => r.node).filter((n) => n.name === constName);
+  const readers = new Set<string>();
+  for (const t of targets) {
+    for (const e of cg.getIncomingEdges(t.id)) {
+      if (e.kind === 'references' && (e.metadata as { valueRef?: boolean } | undefined)?.valueRef) {
+        const r = cg.getNode(e.source)?.name;
+        if (r) readers.add(r);
+      }
+    }
+  }
+  return [...readers];
 }
 
 describe('value-reference edges', () => {
@@ -159,6 +166,28 @@ describe('value-reference edges', () => {
     await cg.indexAll();
 
     expect(valueRefReaders(cg, 'Timeout')).toEqual([]);
+  });
+
+  it('keeps a conditionally-defined module const (try/except), not a shadow (Python)', async () => {
+    // `HAS_SSL` is defined twice but BOTH at module scope (a conditional def, a
+    // very common Python idiom). It is one logical const, not a shadow, so its
+    // reader must stay edged — and the two halves must not edge each other.
+    fs.writeFileSync(
+      path.join(dir, 'cond.py'),
+      [
+        'try:',
+        '\tHAS_SSL = True',
+        'except ImportError:',
+        '\tHAS_SSL = False',
+        '',
+        'def uses_ssl():',
+        '\treturn HAS_SSL',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'HAS_SSL')).toEqual(['uses_ssl']);
   });
 
   it('emits nothing when CODEGRAPH_VALUE_REFS=0', async () => {

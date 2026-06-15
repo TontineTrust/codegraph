@@ -224,11 +224,12 @@ export class TreeSitterExtractor {
   // Value-reference edges (default ON; set CODEGRAPH_VALUE_REFS=0 to disable; see flushValueRefs).
   // Same-file reads of file-scope const/var symbols → `references` edges so impact analysis catches
   // value consumers ("change this constant/table, affect its readers").
-  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go']);
+  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go', 'python']);
   private static readonly MAX_VALUE_REF_NODES = 20_000;
   private readonly valueRefsEnabled = process.env.CODEGRAPH_VALUE_REFS !== '0';
   private fileScopeValues = new Map<string, string>();
-  private valueRefScopes: Array<{ id: string; node: SyntaxNode }> = [];
+  private fileScopeValueCounts = new Map<string, number>(); // file-scope nodes per name (conditional-def detection)
+  private valueRefScopes: Array<{ id: string; node: SyntaxNode; name: string }> = [];
   private errors: ExtractionError[] = [];
   private extractor: LanguageExtractor | null = null;
   private nodeStack: string[] = []; // Stack of parent node IDs
@@ -533,10 +534,16 @@ export class TreeSitterExtractor {
   private captureValueRefScope(kind: NodeKind, name: string, id: string, node: SyntaxNode): void {
     if ((kind === 'constant' || kind === 'variable') && name.length >= 3 && /[A-Z_]/.test(name)) {
       const parentId = this.nodeStack[this.nodeStack.length - 1];
-      if (parentId?.startsWith('file:')) this.fileScopeValues.set(name, id);
+      if (parentId?.startsWith('file:')) {
+        this.fileScopeValues.set(name, id);
+        // How many file-scope nodes carry this name. A conditional module-level
+        // def (`try: X = a; except: X = b`) makes >1 — distinct from a local
+        // shadow, which adds a binding the prune must catch (see flushValueRefs).
+        this.fileScopeValueCounts.set(name, (this.fileScopeValueCounts.get(name) ?? 0) + 1);
+      }
     }
     if (kind === 'function' || kind === 'method' || kind === 'constant' || kind === 'variable') {
-      this.valueRefScopes.push({ id, node });
+      this.valueRefScopes.push({ id, node, name });
     }
   }
 
@@ -551,20 +558,26 @@ export class TreeSitterExtractor {
   private flushValueRefs(): void {
     const scopes = this.valueRefScopes;
     const targets = this.fileScopeValues;
+    const fileScopeCounts = this.fileScopeValueCounts;
     this.valueRefScopes = [];
     this.fileScopeValues = new Map();
+    this.fileScopeValueCounts = new Map();
     if (!this.valueRefsEnabled || !TreeSitterExtractor.VALUE_REF_LANGS.has(this.language)) return;
     if (targets.size === 0 || scopes.length === 0 || isGeneratedFile(this.filePath)) return;
 
-    // Prune SHADOWED targets. A name bound more than once in the file (e.g. a
-    // bundled/Emscripten `const Module` re-declared as an inner `var Module`, or
-    // a Go package `const Timeout` shadowed by a local `Timeout := …`) may
-    // resolve to the INNER binding for nested readers, so a file-scope edge to
-    // it is a false positive. Those inner re-declarations aren't extracted as
-    // graph nodes, so detect them at the syntax level: count every declarator
-    // name across the tree and drop any target bound twice or more. Single-
-    // binding (unambiguous) names are kept. Complements the path-based
-    // isGeneratedFile() check, which can't catch content-minified bundles.
+    // Prune SHADOWED targets. A target re-bound in an INNER scope (a
+    // bundled/Emscripten `const Module` re-declared as a nested `var Module`; a
+    // Go package `const Timeout` shadowed by a local `Timeout := …`; a Python
+    // module `CONFIG` shadowed by a local `CONFIG = …`) resolves to the inner
+    // binding for nested readers, so a file-scope edge is a false positive.
+    // Inner re-bindings aren't graph nodes, so detect them at the syntax level:
+    // count every declarator of the name across the tree and compare against how
+    // many FILE-SCOPE nodes carry it. A real shadow makes (declarators >
+    // file-scope nodes) — the excess is the local binding. A conditional
+    // module-level def (`try: X = a; except: X = b`) makes them EQUAL (both
+    // declarators are file-scope nodes), so it's correctly kept. Complements the
+    // path-based isGeneratedFile() check, which can't catch content-minified
+    // bundles.
     //
     // Declarator node types are per-grammar; a file only contains its own
     // language's nodes, so matching all of them in one switch is safe.
@@ -587,7 +600,8 @@ export class TreeSitterExtractor {
           case 'var_spec':            // Go  `var X = …`
             bump(n.namedChild(0));
             break;
-          case 'short_var_declaration': { // Go  `x, Y := …`
+          case 'short_var_declaration': // Go  `x, Y := …`
+          case 'assignment': {          // Python  `X = …` / `X: T = …` / `A, B = …`
             const left = getChildByField(n, 'left') ?? n.namedChild(0);
             if (left?.type === 'identifier') bump(left);
             else if (left) for (const c of left.namedChildren) bump(c);
@@ -599,7 +613,7 @@ export class TreeSitterExtractor {
           if (c) dstack.push(c);
         }
       }
-      for (const [nm, c] of declCounts) if (c > 1) targets.delete(nm);
+      for (const [nm, c] of declCounts) if (c > (fileScopeCounts.get(nm) ?? 1)) targets.delete(nm);
       if (targets.size === 0) return;
     }
 
@@ -611,8 +625,12 @@ export class TreeSitterExtractor {
         const n = stack.pop()!;
         visited++;
         if (n.type === 'identifier') {
-          const targetId = targets.get(getNodeText(n, this.source));
-          if (targetId && targetId !== scope.id && !seen.has(targetId)) {
+          const refName = getNodeText(n, this.source);
+          const targetId = targets.get(refName);
+          // Skip self and same-name targets: a symbol referencing a file-scope
+          // sibling of its own name (the two halves of a conditional `try: X=…;
+          // except: X=…`) is never a meaningful value read.
+          if (targetId && targetId !== scope.id && refName !== scope.name && !seen.has(targetId)) {
             seen.add(targetId);
             this.edges.push({
               source: scope.id,
