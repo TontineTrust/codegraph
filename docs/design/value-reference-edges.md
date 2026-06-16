@@ -1,6 +1,6 @@
 # Design + status: same-file value-reference edges
 
-**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin + Swift; `CODEGRAPH_VALUE_REFS=0` disables). The
+**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin + Swift + Dart; `CODEGRAPH_VALUE_REFS=0` disables). The
 emitter lives in `TreeSitterExtractor.flushValueRefs` (`src/extraction/tree-sitter.ts`).
 **Motivation:** close the impact-analysis hole for *value consumers*. Static
 extraction edges calls, imports, and inheritance, but never edges a constant to the
@@ -13,7 +13,7 @@ readers" class of change (the ReScript-PR false positive that motivated the work
 ## TL;DR for a new session
 
 We emit a `references` edge (`metadata: { valueRef: true }`) from a reader symbol to
-the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin + Swift. Those edges
+the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin + Swift + Dart. Those edges
 flow straight into `getImpactRadius` / `codegraph impact` and the impact trail in
 `codegraph_explore` / `codegraph_node` — no agent-behaviour change required.
 
@@ -46,7 +46,7 @@ The win is **impact-radius correctness**, not agent read-reduction (see "Agent A
    the content-minified bundles guard #1 misses.
 3. **Distinctive-name + same-file** as above.
 
-## Validation matrix — TS / JS / Go / Python / Rust / Ruby / C / Java / C# / PHP / Scala / Kotlin / Swift
+## Validation matrix — TS / JS / Go / Python / Rust / Ruby / C / Java / C# / PHP / Scala / Kotlin / Swift / Dart
 
 Method per repo: index the same tree twice (value-refs on vs `CODEGRAPH_VALUE_REFS=0`),
 diff node/edge counts, spot-check precision, and measure `codegraph impact` on a few
@@ -158,7 +158,15 @@ extracting the nodes first — see below)
 | apple/swift-argument-parser | medium | 165 | 4,435 (stable) | +36 | all sampled TP; 1 sibling-type collision (`usageString`) | `usageString` 8→**18**, `labelColumnWidth` 1→2 |
 | apple/swift-nio | large | 554 | 20,136 (stable) | +589 | all sampled TP; 0 collisions; `eventLoop` (static let) verified TP | `CONNECT_DELAYER` 1→**15**, `SINGLE_IPv4_RESULT` 1→12 |
 
-Across S/M/L in all thirteen languages: node count never moved, the precision guards held, and
+**Dart** (top-level `const`/`final` + class `static const`/`static final` = the `static_final_declaration` node → `constant`)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| dart-lang/http | small | 324 | 4,860 (stable) | +668 | real source TP; numbers skewed by a JNIGEN `_bindings.dart` (sibling-class collapse) | `Finishing` 1→**10**, `CONNECTION_PREFACE` 5→7 |
+| flame-engine/flame | medium | 1,655 | 19,608 (stable) | +465 | all sampled TP; bounded const-vs-getter collisions | `cardWidth` 4→**15**, `tileSize` 3→12 |
+| flutter/packages | large | 3,452 | 116,075 (stable) | +10,015 | real Flutter consts; some `.gen.dart` (pigeon) generated noise | `iconFont` 1→**1790**, `_channel` 6→72, `kMaxId` 1→23 |
+
+Across S/M/L in all fourteen languages: node count never moved, the precision guards held, and
 the `impact` OFF column is the bug — a const that 80–140 symbols read reports "1 affected"
 without value-refs.
 
@@ -344,6 +352,27 @@ dependencies like `@Published`/`@State`), so that behavior is untouched. Validat
 constants (`defaultRetryLimit`, swift-nio's `CONNECT_DELAYER`/`SINGLE_IPv4_RESULT` test constants, a
 shared `static let eventLoop` read by 37 methods), computed properties skipped, 0–1 collisions per
 repo (the same sibling-type name-overlap bound as Kotlin/Ruby).
+
+**Dart — the grammar did the scope separation; the catch was a sibling body.** Dart's tree-sitter
+grammar is unusually helpful here: a **`static_final_declaration`** node is *exactly* a top-level or
+class-`static` `const`/`final` — the shared-constant idiom — while instance fields and `var` use
+`initialized_identifier` and method-locals use `initialized_variable_definition`. So a single
+`visitNode` rule (`static_final_declaration` → `constant`, named by its `identifier` child) captures
+all and only the constants, with **no instance/local leaks to guard** and no scope-walk needed (the
+node stack gives `file:` for top-level, `class:` for a static member). The reader-scan was already
+covered (Dart references are plain `identifier`). The non-obvious bug: **Dart attaches a method/function
+`body` as a next *sibling* of the signature node** — and the signature is what gets stored as the
+reader scope — so the scan walked only the signature and produced *zero* edges until it was taught to
+also pull in a `function_body` next-sibling (Dart is the only value-ref language that structures bodies
+this way, so the check is inert elsewhere). The shadow prune counts all three Dart declarator nodes so
+a method-local `const X` correctly drops a file-scope `const X`. Validated S/M/L (http /
+flame-engine/flame / flutter/packages): node count identical on/off, genuine static consts on real
+source (flame's `cardWidth` 4→15, `tileSize` 3→12; HTTP/2's `Finishing` 1→10), the same bounded
+const-vs-getter name overlap as Kotlin/Scala. **The one caveat is generated code:** the common Dart
+codegen suffixes (`.g.dart` / `.freezed.dart` / `.pb.dart`) are already skipped by `isGeneratedFile`,
+but a header-only-marked generator (a JNIGEN `_bindings.dart` with hundreds of `static final _class`)
+isn't suffix-detected, so it collapses to the file-wide target and dominates a small repo's numbers
+(http) — real source stays clean.
 
 **C++ was attempted and reverted** — the machinery (file/namespace-scope + class `field_declaration`
 extraction) is correct on clean C++, but tree-sitter-cpp's parse fidelity on real template/macro-heavy

@@ -597,6 +597,54 @@ describe('value-reference edges', () => {
     expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
   });
 
+  it('edges readers to a top-level const and a class static const/final (Dart)', async () => {
+    // Dart's grammar uses `static_final_declaration` for exactly the top-level
+    // `const`/`final` and class `static const`/`static final` — the shared
+    // constants — so those extract as `constant`. Instance fields and `var`
+    // (`initialized_identifier`) and locals (`initialized_variable_definition`)
+    // are NOT this node, so they never become targets. Dart attaches a method
+    // body as a sibling of the signature, so the reader-scan pulls that in.
+    fs.writeFileSync(
+      path.join(dir, 'demo.dart'),
+      [
+        'const TOP_LEVEL_MAX = 100;',
+        'class Config {',
+        '  static const TIMEOUT_MS = 30;',
+        '  static final STATUS_NAMES = ["ok", "fail"];',
+        '  final int instanceField = 1;',
+        '  int capped(int n) => n > TIMEOUT_MS ? TIMEOUT_MS : n;',
+        '  String label(int i) { return STATUS_NAMES[i]; }',
+        '  int withinLimit(int n) => n < TOP_LEVEL_MAX ? n : TOP_LEVEL_MAX;',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT_MS')).toEqual(expect.arrayContaining(['capped']));
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['label']));
+    expect(valueRefReaders(cg, 'TOP_LEVEL_MAX')).toEqual(expect.arrayContaining(['withinLimit']));
+    // An instance field is per-object state, never a value-ref target.
+    expect(valueRefReaders(cg, 'instanceField')).toEqual([]);
+  });
+
+  it('does NOT edge a Dart const shadowed by a method-local const of the same name', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'shadow.dart'),
+      [
+        'const TIMEOUT = 30;',
+        'class C {',
+        '  int usesConst() => TIMEOUT;',
+        '  int shadows() { const TIMEOUT = 5; return TIMEOUT; }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
+  });
+
   it('emits nothing when CODEGRAPH_VALUE_REFS=0', async () => {
     const prev = process.env.CODEGRAPH_VALUE_REFS;
     process.env.CODEGRAPH_VALUE_REFS = '0';

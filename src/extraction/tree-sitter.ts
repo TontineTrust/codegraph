@@ -302,7 +302,7 @@ export class TreeSitterExtractor {
   // Value-reference edges (default ON; set CODEGRAPH_VALUE_REFS=0 to disable; see flushValueRefs).
   // Same-file reads of file-scope const/var symbols → `references` edges so impact analysis catches
   // value consumers ("change this constant/table, affect its readers").
-  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go', 'python', 'rust', 'ruby', 'c', 'java', 'csharp', 'php', 'scala', 'kotlin', 'swift']);
+  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go', 'python', 'rust', 'ruby', 'c', 'java', 'csharp', 'php', 'scala', 'kotlin', 'swift', 'dart']);
   private static readonly MAX_VALUE_REF_NODES = 20_000;
   private readonly valueRefsEnabled = process.env.CODEGRAPH_VALUE_REFS !== '0';
   private fileScopeValues = new Map<string, string>();
@@ -710,6 +710,13 @@ export class TreeSitterExtractor {
             if (pat?.type === 'identifier') bump(pat);
             break;
           }
+          case 'static_final_declaration':         // Dart  top-level/`static` `const`/`final` (the target itself)
+          case 'initialized_identifier':           // Dart  instance field / `var`
+          case 'initialized_variable_definition': { // Dart  a method-local `const`/`final`/`var` that shadows a const
+            const id = n.namedChildren.find((c) => c.type === 'identifier');
+            if (id) bump(id);
+            break;
+          }
           case 'property_declaration': { // Kotlin / Swift  `val`/`let X = …` (object/static const AND a method-local that shadows it)
             // Kotlin: variable_declaration → simple_identifier; Swift: a `pattern`
             // (`<name>` field) → simple_identifier. Resolve either shape.
@@ -737,6 +744,13 @@ export class TreeSitterExtractor {
     for (const scope of scopes) {
       const seen = new Set<string>();
       const stack: SyntaxNode[] = [scope.node];
+      // Dart attaches a method/function BODY as a *next sibling* of the
+      // signature node (`method_signature` ← stored as the scope ← `function_body`),
+      // not as a child — so the scope subtree is just the signature and the
+      // reads live in the sibling. Pull it in. (`function_body` is a next sibling
+      // only in Dart among the value-ref languages, so this is safe elsewhere.)
+      const sib = scope.node.nextNamedSibling;
+      if (sib && sib.type === 'function_body') stack.push(sib);
       let visited = 0;
       while (stack.length > 0 && visited < TreeSitterExtractor.MAX_VALUE_REF_NODES) {
         const n = stack.pop()!;
