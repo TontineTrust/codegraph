@@ -11,7 +11,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### New Features
 
-- Impact and blast-radius analysis for TypeScript, JavaScript, Go, Python, and Rust now understands the readers of a constant. When you change a file-scope, package-level, or module-level constant — a config object, a lookup table, a shared constant — the other symbols in that file that read it now show up as affected, where before they were invisible (impact only followed calls, imports, and inheritance, so a constant's consumers looked like "nothing depends on this"). This makes `codegraph impact`, and the impact trail in `codegraph_explore`/`codegraph_node`, catch the "change this table, break its readers" class of change. It's on by default and adds no nodes to your graph; bundled/minified files and ambiguously-shadowed names are skipped to keep results precise. Set `CODEGRAPH_VALUE_REFS=0` to turn it off.
+- Impact and blast-radius analysis for TypeScript, JavaScript, Go, Python, Rust, and Ruby now understands the readers of a constant. When you change a file-scope, package-level, module-level, or class-level constant — a config object, a lookup table, a shared constant — the other symbols in that file that read it now show up as affected, where before they were invisible (impact only followed calls, imports, and inheritance, so a constant's consumers looked like "nothing depends on this"). This makes `codegraph impact`, and the impact trail in `codegraph_explore`/`codegraph_node`, catch the "change this table, break its readers" class of change. It's on by default and adds no nodes to your graph; bundled/minified files and ambiguously-shadowed names are skipped to keep results precise. Set `CODEGRAPH_VALUE_REFS=0` to turn it off.
 
 ### Fixes
 

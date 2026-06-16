@@ -45,7 +45,7 @@ agent read-reduction (see §4.3).
 
 | Symbol | Role |
 |---|---|
-| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`, `go`, `python`, `rust`. **Add the new language here.** |
+| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`, `go`, `python`, `rust`, `ruby`. **Add the new language here.** |
 | `valueRefsEnabled` | `process.env.CODEGRAPH_VALUE_REFS !== '0'` — default ON, env opts out. |
 | `MAX_VALUE_REF_NODES` (20_000) | per-scope traversal cap (and the shadow-scan cap). |
 | `captureValueRefScope(kind, name, id, node)` | called from `createNode` on every node. Records **targets** (file-scope `const`/`var`) and **reader scopes** (`function`/`method`/`const`/`var`). |
@@ -55,7 +55,7 @@ agent read-reduction (see §4.3).
 
 - **Target gate:** `kind ∈ {constant, variable}` **and** `name.length >= 3` **and**
   `/[A-Z_]/.test(name)` (distinctive name — dodges single-letter / all-lowercase shadowing)
-  **and** the node's parent id starts with `file:` (file/module scope).
+  **and** the node's parent id starts with `file:`, `class:`, or `module:` (file/class/module scope).
 - **Reader gate:** `kind ∈ {function, method, constant, variable}`.
 
 **The emit loop in `flushValueRefs`:** same-file only (targets + scopes are per-file, reset
@@ -66,10 +66,10 @@ targets** (see §3).
 
 ## 2. Current state (what's shipped + validated)
 
-- **Default ON** for TS/JS/tsx + Go + Python + Rust (`CODEGRAPH_VALUE_REFS=0` disables). Shipped in **PR #895**
+- **Default ON** for TS/JS/tsx + Go + Python + Rust + Ruby (`CODEGRAPH_VALUE_REFS=0` disables). Shipped in **PR #895**
   (flip-on + the shadow prune); Go added in a later PR (the shadow-prune declarator switch +
   `VALUE_REF_LANGS`).
-- **Validated S/M/L** in **TypeScript, JavaScript, tsx, Go, Python, and Rust** — see the matrix in the
+- **Validated S/M/L** in **TS, JS, tsx, Go, Python, Rust, and Ruby** — see the matrix in the
   design doc. All clean: node count identical on/off, precision guards held, impact win
   reproduced. Go required extending the shadow prune (per-grammar declarators) — the worked
   example of "step B is load-bearing."
@@ -196,16 +196,25 @@ reads — the win is blast-radius correctness** (impact API / CodeGraph Pro's ve
 
 ### A. Where do "constants worth tracking" live? (decide FIRST)
 
-value-refs captures **file/module-scope** `const`/`var` (target gate requires parent id
-`file:`). Before anything:
+The target gate now accepts **`file:`, `class:`, and `module:`** parents. Before anything:
 
 - If the language puts shareable constants at **file/module scope** (TS/JS, Python module
-  consts, Go package vars, Rust module `const`/`static`) → the existing scope check fits;
-  proceed.
-- If constants live at **class scope** (Java `static final`, C# `const`/`static readonly`,
-  Swift `static let`) → the `file:`-parent check **won't match**, and the feature is a silent
-  no-op. Extending to class-scope targets is a **bigger change** (capture class-scope values,
-  decide same-file semantics). Flag this to the maintainer before building.
+  consts, Go package vars, Rust module/impl `const`/`static`) → fits as-is; proceed.
+- If constants live **inside a class/module** (Ruby — done) → the `class:`/`module:` gate now
+  covers them, BUT two things may need fixing first: (1) the extractor must actually *extract*
+  the class-internal constant as a node (the dispatch at the `variableTypes` branch skips
+  class-internal assignments — Ruby needed an exception for `constant`-LHS assignments); (2) the
+  reader-scan must match however the grammar represents a constant *reference* (Ruby uses
+  `constant` nodes, not `identifier`). See the Ruby block in the design doc.
+- **Class-scope precision** uses a **file-wide** target map (one target per name per file), NOT
+  strict same-class matching — because lexical-scope languages (Ruby) let a nested class read an
+  enclosing class's constant, and strict matching would drop those valid reads. The only real FP
+  is the same constant name in *sibling* classes in one file (~1.7% of Ruby targets on rails);
+  valid code rarely hits it (a bare sibling-class constant is a NameError in Ruby).
+- **Still untested:** Java `static final`, C# `const`, Swift `static let`. The gate covers them
+  now, but confirm the extractor emits them as `constant`/`variable` nodes with a `class:`/
+  `struct:` parent (Swift stored properties, for one, aren't extracted as their own nodes) — and
+  if the parent kind is `struct:`/`interface:` rather than `class:`/`module:`, widen the gate.
 
 ### B. Confirm the declarator node type (for the shadow prune)
 
@@ -223,6 +232,7 @@ silently does nothing for the new language and intra-file shadowing produces fal
 | Go | `const_spec`, `var_spec`, `short_var_declaration` | spec → `namedChild(0)`; short-var → identifiers in the `left` field | **done** |
 | Python | `assignment` | `left` field: identifier, or iterate a `pattern_list`/`tuple_pattern` | **done** |
 | Rust | `const_item`, `static_item`, `let_declaration` | const/static → `name` field; let → `pattern` field | **done** |
+| Ruby | `assignment` (LHS is a `constant` node) | already in the switch; Ruby can't local-shadow a constant, so the prune is effectively a no-op for it | **done** (class-scope) |
 | Ruby | `assignment` with constant LHS (`CONST`) | LHS | to verify |
 | C/C++ | `init_declarator` in a file-scope `declaration` | declarator id | to verify |
 

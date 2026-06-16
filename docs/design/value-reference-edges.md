@@ -1,6 +1,6 @@
 # Design + status: same-file value-reference edges
 
-**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust; `CODEGRAPH_VALUE_REFS=0` disables). The
+**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust + Ruby; `CODEGRAPH_VALUE_REFS=0` disables). The
 emitter lives in `TreeSitterExtractor.flushValueRefs` (`src/extraction/tree-sitter.ts`).
 **Motivation:** close the impact-analysis hole for *value consumers*. Static
 extraction edges calls, imports, and inheritance, but never edges a constant to the
@@ -13,7 +13,7 @@ readers" class of change (the ReScript-PR false positive that motivated the work
 ## TL;DR for a new session
 
 We emit a `references` edge (`metadata: { valueRef: true }`) from a reader symbol to
-the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust. Those edges
+the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust + Ruby. Those edges
 flow straight into `getImpactRadius` / `codegraph impact` and the impact trail in
 `codegraph_explore` / `codegraph_node` — no agent-behaviour change required.
 
@@ -46,7 +46,7 @@ The win is **impact-radius correctness**, not agent read-reduction (see "Agent A
    the content-minified bundles guard #1 misses.
 3. **Distinctive-name + same-file** as above.
 
-## Validation matrix — TypeScript / JavaScript / Go / Python / Rust
+## Validation matrix — TS / JS / Go / Python / Rust / Ruby
 
 Method per repo: index the same tree twice (value-refs on vs `CODEGRAPH_VALUE_REFS=0`),
 diff node/edge counts, spot-check precision, and measure `codegraph impact` on a few
@@ -93,7 +93,15 @@ file-scope consts. Node count must be **identical** on/off (edges-only feature).
 | tokio-rs/tokio | medium | 795 | 13,281 (stable) | +476 (1.1%) | all sampled TP; `#[cfg]`-conditional consts kept | `PERMIT_SHIFT` 1→**97**, `LOCAL_QUEUE_CAPACITY` 2→46 |
 | rust-lang/rust-analyzer | large | 1,530 | 38,780 (stable) | +475 (0.25%) | all sampled TP; 0 real shadow leaks | `INLINE_CAP` 2→**183**, `SPAN_PARTS_BIT` 2→18 |
 
-Across S/M/L in all five languages: node count never moved, the precision guards held, and
+**Ruby** (`CONST = …`, almost always **inside a class/module** — needed the class-scope extension)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| sinatra/sinatra | small | 96 | 1,800 (stable) | +73 (2.1%) | ~100% TP (flags are valid nested reads) | `HEADER_PARAM` 1→**5** |
+| jekyll/jekyll | medium | 218 | 1,906 (stable) | +100 (2.4%) | ~100% TP | `DEFAULT_PRIORITY` 1→3, `LOG_LEVELS` 4→5 |
+| rails/rails | large | 1,452 | 61,911 (stable) | +2,255 (1.2%) | ~98% TP (same-file ambiguity 21/1208 targets) | `Post` (Struct const) 75 readers |
+
+Across S/M/L in all six languages: node count never moved, the precision guards held, and
 the `impact` OFF column is the bug — a const that 80–140 symbols read reports "1 affected"
 without value-refs.
 
@@ -125,6 +133,27 @@ SEP = …` — and the Python-era file-scope-count rule already keeps those corr
 tokio's `io/interest.rs` cfg-gated flags). One nice property fell out: consts written inside a
 config macro (`cfg_aio! { … }`) live in an unparsed token tree, so the prune's syntax walk
 doesn't even see them.
+
+**Ruby is the class-scope case — and required three changes.** Ruby keeps almost all constants
+*inside* a class/module (jekyll's `lib/`: 0 top-level vs 58 class-internal), so the original
+file-scope-only target gate covered ~nothing. Three Ruby-specific fixes: (1) the extractor now
+creates nodes for constant assignments (`CONST = …` has a `constant`-typed LHS, not
+`identifier`, so they were never extracted at all) — including class-internal ones; (2) the
+value-ref target gate accepts `class:`/`module:` parents, not just `file:`; (3) the reader-scan
+matches `constant` nodes, since in Ruby both a constant's definition and its references are
+`constant`-typed. **Effectively Ruby-only:** Rust impl consts are parented to `file:` already
+(so the gate change doesn't touch them — ripgrep stayed at 144 edges), and TS/Python class
+members aren't `constant`/`variable` kind.
+
+The interesting precision question — *which* class does a class-scope target belong to — turns
+out to favor a **file-wide** target map (a name maps to one target per file), because Ruby's
+constant lookup is **lexical + ancestor**: a method in a nested class legitimately reads an
+enclosing class's constant (verified on jekyll's `ERBRenderer→ThemeBuilder::SCAFFOLD_DIRECTORIES`
+and sinatra's `AcceptEntry→Request::HEADER_PARAM`). Strict same-class matching would wrongly drop
+those. The only real false positive is the same constant name defined in *sibling* (un-nested)
+classes in one file — 21 of 1,208 targets (1.7%) on rails, and most of those resolve fine too;
+referencing a sibling class's bare constant is a NameError in real Ruby, so valid code rarely
+hits it. Net precision ~98–100%.
 
 **`tsx` is covered by the TS rows** — excalidraw is a React/.tsx codebase, so the headline
 `tablerIconProps` (1→170) and most of its targets live in `.tsx` files. The one

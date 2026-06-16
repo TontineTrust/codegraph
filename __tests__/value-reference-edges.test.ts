@@ -227,6 +227,37 @@ describe('value-reference edges', () => {
     expect(valueRefReaders(cg, 'HAS_SSL')).toEqual(['uses_ssl']);
   });
 
+  it('edges readers to a top-level AND a class-internal constant (Ruby)', async () => {
+    // Ruby keeps almost all constants inside a class/module. Both the top-level
+    // `MAX_RETRIES` and the class-internal `Config::TIMEOUT` must be targets, and
+    // their same-file readers edged (TIMEOUT is read by two methods of Config).
+    fs.writeFileSync(
+      path.join(dir, 'app.rb'),
+      [
+        'MAX_RETRIES = 3',
+        '',
+        'def retry_count',
+        '  MAX_RETRIES',
+        'end',
+        '',
+        'class Config',
+        '  TIMEOUT = 30',
+        '  def self.get_timeout',
+        '    TIMEOUT',
+        '  end',
+        '  def describe',
+        '    "timeout=#{TIMEOUT}"',
+        '  end',
+        'end',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'MAX_RETRIES')).toEqual(expect.arrayContaining(['retry_count']));
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual(expect.arrayContaining(['get_timeout', 'describe']));
+  });
+
   it('emits nothing when CODEGRAPH_VALUE_REFS=0', async () => {
     const prev = process.env.CODEGRAPH_VALUE_REFS;
     process.env.CODEGRAPH_VALUE_REFS = '0';
