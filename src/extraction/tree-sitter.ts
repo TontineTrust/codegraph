@@ -181,6 +181,43 @@ function cDeclaratorIdentifier(node: SyntaxNode | null): SyntaxNode | null {
   return null;
 }
 
+/** First `simple_identifier` in `node`'s subtree (breadth-ish, first-found).
+ * Swift's property name nests as `property_declaration → <name> pattern →
+ * bound_identifier → simple_identifier`; this resolves it (and the bound name of
+ * a Kotlin/Swift property declarator for the shadow prune). For a tuple pattern
+ * (`let (a, b)`) it returns the first — acceptable, those are rare for consts. */
+function firstSimpleIdentifier(node: SyntaxNode | null): SyntaxNode | null {
+  const stack: SyntaxNode[] = node ? [node] : [];
+  let guard = 0;
+  while (stack.length > 0 && guard++ < 40) {
+    const n = stack.shift()!;
+    if (n.type === 'simple_identifier') return n;
+    for (let i = 0; i < n.namedChildCount; i++) {
+      const c = n.namedChild(i);
+      if (c) stack.push(c);
+    }
+  }
+  return null;
+}
+
+/** Swift property facts: the bound name, whether it's a `let`, and whether it's
+ * a *computed* property (a getter block, no stored value — never a constant). */
+function swiftPropertyInfo(
+  node: SyntaxNode,
+  source: string,
+): { nameNode: SyntaxNode | null; isLet: boolean; isComputed: boolean } {
+  const pattern =
+    getChildByField(node, 'name') ??
+    node.namedChildren.find((c) => c.type === 'value_binding_pattern' || c.type === 'pattern') ??
+    null;
+  const binding = node.namedChildren.find((c) => c.type === 'value_binding_pattern');
+  const isLet = binding != null && getNodeText(binding, source).trimStart().startsWith('let');
+  const isComputed = node.namedChildren.some(
+    (c) => c.type === 'computed_property' || c.type === 'protocol_property_requirements',
+  );
+  return { nameNode: firstSimpleIdentifier(pattern), isLet, isComputed };
+}
+
 /** True when `node` is (transitively) inside a C function body — i.e. a local,
  * not a file/namespace-scope declaration. Walks the parent chain to the root. */
 function hasFunctionAncestor(node: SyntaxNode): boolean {
@@ -265,7 +302,7 @@ export class TreeSitterExtractor {
   // Value-reference edges (default ON; set CODEGRAPH_VALUE_REFS=0 to disable; see flushValueRefs).
   // Same-file reads of file-scope const/var symbols → `references` edges so impact analysis catches
   // value consumers ("change this constant/table, affect its readers").
-  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go', 'python', 'rust', 'ruby', 'c', 'java', 'csharp', 'php', 'scala', 'kotlin']);
+  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go', 'python', 'rust', 'ruby', 'c', 'java', 'csharp', 'php', 'scala', 'kotlin', 'swift']);
   private static readonly MAX_VALUE_REF_NODES = 20_000;
   private readonly valueRefsEnabled = process.env.CODEGRAPH_VALUE_REFS !== '0';
   private fileScopeValues = new Map<string, string>();
@@ -575,10 +612,17 @@ export class TreeSitterExtractor {
   private captureValueRefScope(kind: NodeKind, name: string, id: string, node: SyntaxNode): void {
     if ((kind === 'constant' || kind === 'variable') && name.length >= 3 && /[A-Z_]/.test(name)) {
       const parentId = this.nodeStack[this.nodeStack.length - 1];
-      // file-scope OR class/module-scope constants are targets. Class/module
-      // scope matters for languages (Ruby) that keep nearly all constants inside
-      // a class or module; readers are same-file methods of that type.
-      if (parentId && (parentId.startsWith('file:') || parentId.startsWith('class:') || parentId.startsWith('module:'))) {
+      // file-scope OR class/module/struct/enum-scope constants are targets.
+      // Class/module scope matters for languages (Ruby) that keep nearly all
+      // constants inside a class or module; struct/enum scope matters for Swift,
+      // which namespaces shared constants in `struct`/`enum` (`enum Constants {
+      // static let X }`). Readers are same-file methods of that type.
+      if (
+        parentId &&
+        (parentId.startsWith('file:') || parentId.startsWith('class:') ||
+          parentId.startsWith('module:') || parentId.startsWith('struct:') ||
+          parentId.startsWith('enum:'))
+      ) {
         this.fileScopeValues.set(name, id);
         // How many target nodes carry this name. A conditional def
         // (`try: X = a; except: X = b`) makes >1 — distinct from a local shadow,
@@ -666,9 +710,17 @@ export class TreeSitterExtractor {
             if (pat?.type === 'identifier') bump(pat);
             break;
           }
-          case 'property_declaration': { // Kotlin  `val X = …` (object/top-level const AND a method-local that shadows it)
+          case 'property_declaration': { // Kotlin / Swift  `val`/`let X = …` (object/static const AND a method-local that shadows it)
+            // Kotlin: variable_declaration → simple_identifier; Swift: a `pattern`
+            // (`<name>` field) → simple_identifier. Resolve either shape.
             const vd = n.namedChildren.find((c) => c.type === 'variable_declaration');
-            const id = vd?.namedChildren.find((c) => c.type === 'simple_identifier');
+            const id = vd
+              ? vd.namedChildren.find((c) => c.type === 'simple_identifier')
+              : firstSimpleIdentifier(
+                  getChildByField(n, 'name') ??
+                    n.namedChildren.find((c) => c.type === 'value_binding_pattern' || c.type === 'pattern') ??
+                    null,
+                );
             if (id) bump(id);
             break;
           }
@@ -892,6 +944,21 @@ export class TreeSitterExtractor {
       this.isInsideClassLikeNode()
     ) {
       const ownerId = this.nodeStack[this.nodeStack.length - 1];
+      // A `static let`/`static var` member is a SHARED constant of the type
+      // (Swift's `static`-namespacing idiom, esp. in `enum`/`struct`) — extract
+      // it as `constant`/`variable` so value-reference edges can target it. An
+      // instance stored property stays a `field` (per-instance; Swift instance
+      // properties otherwise aren't own nodes — that's unchanged). A *computed*
+      // property (getter, no stored value) is never a constant — skip the node.
+      const { nameNode, isLet, isComputed } = swiftPropertyInfo(node, this.source);
+      if (nameNode && !isComputed) {
+        const isStatic = this.extractor.isStatic?.(node) ?? false;
+        this.createNode(isStatic ? (isLet ? 'constant' : 'variable') : 'field',
+          getNodeText(nameNode, this.source), node, {
+            visibility: this.extractor.getVisibility?.(node),
+            isStatic,
+          });
+      }
       if (ownerId) {
         this.extractDecoratorsFor(node, ownerId);
         this.extractVariableTypeAnnotation(node, ownerId);
@@ -2089,6 +2156,18 @@ export class TreeSitterExtractor {
             : undefined;
           this.createNode(kind, name, child, { docstring, signature: initSignature, isExported });
         }
+      }
+    } else if (this.language === 'swift') {
+      // Swift top-level property (`let X = …` / `var Y = …`). The name nests in
+      // a `pattern`, which the generic fallback can't read, so top-level Swift
+      // constants/globals went unextracted. A top-level `let`→`constant`,
+      // `var`→`variable`; a computed property (getter, no value) is skipped.
+      const { nameNode, isLet, isComputed } = swiftPropertyInfo(node, this.source);
+      if (nameNode && !isComputed) {
+        this.createNode(isLet ? 'constant' : 'variable', getNodeText(nameNode, this.source), node, {
+          docstring,
+          isExported,
+        });
       }
     } else {
       // Generic fallback for other languages

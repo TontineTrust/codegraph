@@ -1,6 +1,6 @@
 # Design + status: same-file value-reference edges
 
-**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin; `CODEGRAPH_VALUE_REFS=0` disables). The
+**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin + Swift; `CODEGRAPH_VALUE_REFS=0` disables). The
 emitter lives in `TreeSitterExtractor.flushValueRefs` (`src/extraction/tree-sitter.ts`).
 **Motivation:** close the impact-analysis hole for *value consumers*. Static
 extraction edges calls, imports, and inheritance, but never edges a constant to the
@@ -13,7 +13,7 @@ readers" class of change (the ReScript-PR false positive that motivated the work
 ## TL;DR for a new session
 
 We emit a `references` edge (`metadata: { valueRef: true }`) from a reader symbol to
-the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin. Those edges
+the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin + Swift. Those edges
 flow straight into `getImpactRadius` / `codegraph impact` and the impact trail in
 `codegraph_explore` / `codegraph_node` — no agent-behaviour change required.
 
@@ -46,7 +46,7 @@ The win is **impact-radius correctness**, not agent read-reduction (see "Agent A
    the content-minified bundles guard #1 misses.
 3. **Distinctive-name + same-file** as above.
 
-## Validation matrix — TS / JS / Go / Python / Rust / Ruby / C / Java / C# / PHP / Scala / Kotlin
+## Validation matrix — TS / JS / Go / Python / Rust / Ruby / C / Java / C# / PHP / Scala / Kotlin / Swift
 
 Method per repo: index the same tree twice (value-refs on vs `CODEGRAPH_VALUE_REFS=0`),
 diff node/edge counts, spot-check precision, and measure `codegraph impact` on a few
@@ -150,7 +150,15 @@ extracting the nodes first — see below)
 | Kotlin/kotlinx.coroutines | medium | 1,039 | 17,058 (stable) | +210 | all sampled TP; 1 cross-file collision | `BLOCKING_SHIFT` 1→**24**, `TERMINATED` 2→22 (companion bit-masks) |
 | ktorio/ktor | large | 2,302 | 43,272 (stable) | +849 | object/companion consts (HTTP header names); flagged collisions are real consts; `TYPE` is a sibling-companion ambiguity | `TYPE` 8→**109**, `FailedPath` 1→22 |
 
-Across S/M/L in all twelve languages: node count never moved, the precision guards held, and
+**Swift** (top-level `let` + `static let` in `struct`/`enum`/`class` → `constant`; instance `let` stays `field`; computed properties skipped)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| Alamofire/Alamofire | small | 98 | 4,192 (stable) | +108 | all sampled TP; 0 collisions; computed properties skipped | `defaultRetryLimit` 1→3, `defaultWait` 1→4 |
+| apple/swift-argument-parser | medium | 165 | 4,435 (stable) | +36 | all sampled TP; 1 sibling-type collision (`usageString`) | `usageString` 8→**18**, `labelColumnWidth` 1→2 |
+| apple/swift-nio | large | 554 | 20,136 (stable) | +589 | all sampled TP; 0 collisions; `eventLoop` (static let) verified TP | `CONNECT_DELAYER` 1→**15**, `SINGLE_IPv4_RESULT` 1→12 |
+
+Across S/M/L in all thirteen languages: node count never moved, the precision guards held, and
 the `impact` OFF column is the bug — a const that 80–140 symbols read reports "1 affected"
 without value-refs.
 
@@ -316,6 +324,26 @@ val/def-or-class name-overlap limitation as Scala applies (ktor's HTTP DSL names
 class the same), plus the sibling-companion case (several `companion object { const val TYPE }` in one
 file collapse to the file-wide target, like Ruby's sibling-class) — both bounded, and every flagged
 collision investigated was a real object/companion const.
+
+**Swift reused the Kotlin techniques and added two Swift-specific touches.** Swift has no `static`
+keyword for globals; its shared-constant idiom is a top-level `let` or a `static let` inside a type —
+and Swift idiomatically *namespaces* constants in `enum`/`struct` (`enum Constants { static let X }`).
+A property name nests (`property_declaration → <name> pattern → simple_identifier`), the C-style
+problem; the reader-scan already matched `simple_identifier` (added for Kotlin — Swift shares it). The
+kind rule: top-level `let` and `static let` (in any type) → `constant` (`var` → `variable`); an
+*instance* `let`/`var` stays `field` (Swift instance stored properties otherwise aren't own nodes —
+unchanged). The two Swift-specific touches: (1) **the value-ref target gate was widened to `struct:`/
+`enum:` parents**, because Swift namespaces constants in those (every other language's targets sit at
+`file:`/`class:`/`module:`); without it, the heavily-used `enum`/`struct` static consts would all be
+missed. (2) **Computed properties are skipped** — a `var x: Int { … }` has a getter block, no stored
+value, and isn't a constant; the extractor detects the `computed_property` child and emits no node
+(verified: no computed-property leaks across the sweep). The node creation slots into the *existing*
+Swift `property_declaration` handler (which already extracts property-wrapper / type-annotation
+dependencies like `@Published`/`@State`), so that behavior is untouched. Validated S/M/L
+(Alamofire/swift-argument-parser/swift-nio): node count identical on/off, genuine static-let
+constants (`defaultRetryLimit`, swift-nio's `CONNECT_DELAYER`/`SINGLE_IPv4_RESULT` test constants, a
+shared `static let eventLoop` read by 37 methods), computed properties skipped, 0–1 collisions per
+repo (the same sibling-type name-overlap bound as Kotlin/Ruby).
 
 **C++ was attempted and reverted** — the machinery (file/namespace-scope + class `field_declaration`
 extraction) is correct on clean C++, but tree-sitter-cpp's parse fidelity on real template/macro-heavy

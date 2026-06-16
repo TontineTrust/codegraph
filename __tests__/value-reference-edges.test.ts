@@ -548,6 +548,55 @@ describe('value-reference edges', () => {
     expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
   });
 
+  it('edges readers to a top-level let and static let in enum/struct, not an instance let (Swift)', async () => {
+    // Swift has no `static` keyword for globals; the shared-constant idiom is a
+    // top-level `let` or a `static let` inside a type — Swift namespaces these in
+    // `enum`/`struct`. Those extract as `constant`; an instance stored `let` is
+    // per-object (`field`, never a target); a *computed* property is skipped.
+    fs.writeFileSync(
+      path.join(dir, 'Demo.swift'),
+      [
+        'let topLevelMax = 100',
+        'enum Constants {',
+        '  static let TIMEOUT_MS = 30',
+        '  static let STATUS_NAMES = ["ok", "fail"]',
+        '}',
+        'struct Widget {',
+        '  static let MAX_RETRIES = 3',
+        '  let instanceField = 1',
+        '  func retries() -> Int { return Widget.MAX_RETRIES }',
+        '  func within(_ n: Int) -> Int { return n < topLevelMax ? n : topLevelMax }',
+        '}',
+        'func labels(_ i: Int) -> String { return Constants.STATUS_NAMES[i] }',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['labels']));
+    expect(valueRefReaders(cg, 'MAX_RETRIES')).toEqual(expect.arrayContaining(['retries']));
+    expect(valueRefReaders(cg, 'topLevelMax')).toEqual(expect.arrayContaining(['within']));
+    // An instance `let` is per-object state (kind `field`), never a target.
+    expect(valueRefReaders(cg, 'instanceField')).toEqual([]);
+  });
+
+  it('does NOT edge a Swift static const shadowed by a function-local let of the same name', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'Shadow.swift'),
+      [
+        'enum Config {',
+        '  static let TIMEOUT = 30',
+        '  static func usesConst() -> Int { return TIMEOUT }',
+        '  static func shadows() -> Int { let TIMEOUT = 5; return TIMEOUT }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
+  });
+
   it('emits nothing when CODEGRAPH_VALUE_REFS=0', async () => {
     const prev = process.env.CODEGRAPH_VALUE_REFS;
     process.env.CODEGRAPH_VALUE_REFS = '0';

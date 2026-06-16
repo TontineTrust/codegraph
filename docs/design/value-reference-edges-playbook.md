@@ -45,7 +45,7 @@ agent read-reduction (see §4.3).
 
 | Symbol | Role |
 |---|---|
-| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`, `go`, `python`, `rust`, `ruby`, `c`, `java`, `csharp`, `php`, `scala`, `kotlin`. **Add the new language here.** |
+| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`, `go`, `python`, `rust`, `ruby`, `c`, `java`, `csharp`, `php`, `scala`, `kotlin`, `swift`. **Add the new language here.** |
 | `valueRefsEnabled` | `process.env.CODEGRAPH_VALUE_REFS !== '0'` — default ON, env opts out. |
 | `MAX_VALUE_REF_NODES` (20_000) | per-scope traversal cap (and the shadow-scan cap). |
 | `captureValueRefScope(kind, name, id, node)` | called from `createNode` on every node. Records **targets** (file-scope `const`/`var`) and **reader scopes** (`function`/`method`/`const`/`var`). |
@@ -119,6 +119,15 @@ targets** (see §3).
   C++-style tail. One of the cleanest yields — companion-object bit-masks/state consts are a heavy
   same-file-read idiom. Validated S/M/L (okio/coroutines/ktor); only the bounded val/def-or-class and
   sibling-companion name overlaps remain (shared with Scala/Ruby).
+- **Swift reused Kotlin + two Swift-specific touches.** Top-level `let` + `static let` in a type are
+  the shared constants (`enum`/`struct` namespace them); instance `let` stays `field`. Nested name
+  (`property_declaration → <name> pattern → simple_identifier`); reader-scan already covered
+  (`simple_identifier`, from Kotlin). Two new things: **(1) the target gate was widened to `struct:`/
+  `enum:` parents** — Swift namespaces constants there (`enum Constants { static let X }`), and every
+  other language's targets are `file:`/`class:`/`module:`; **(2) computed properties are skipped** (a
+  `var x:Int{ … }` getter has no stored value — detect the `computed_property` child). Node creation
+  slots into the *existing* Swift `property_declaration` handler (property-wrapper/type deps), leaving
+  that untouched. Clean parse, no tail. Validated S/M/L (Alamofire/swift-argument-parser/swift-nio).
 - **Tests:** `__tests__/value-reference-edges.test.ts` — same-file readers edged; surfaced in
   impact radius; shadowed const NOT edged (verified to fail without the guard); JSX-only read
   edged (tsx); `CODEGRAPH_VALUE_REFS=0` emits nothing.
@@ -147,6 +156,7 @@ the bottom of this section).
 | PHP | top-level `const` + class `const` (both already `constant` kind). **Only** change was the reader-scan: a PHP const *reference* is a `name` node. No extractor change, no prune wiring (a `$var` local can't shadow a bare constant). Lower yield — PHP reads consts cross-file more than same-file |
 | Scala | top-level `val` (already `constant`) + **`object` val** (the singleton-constant idiom; re-kinded from `field` by walking to the enclosing `object_definition`). `class`/`trait`/`enum` vals stay `field`. `val_definition`/`var_definition` added to the shadow prune. Minor val/def name-collision limit |
 | Kotlin | top-level / `object` / `companion object` `val` (re-kinded from nothing — properties weren't extracted at all). Handled in `visitNode`: nested name (`variable_declaration → simple_identifier`, the C move) + scope-walk for kind (Scala move) + `simple_identifier` in the reader-scan (PHP move) + prune. `class` instance vals stay `field`. Clean — one of the best yields (companion bit-masks) |
+| Swift | top-level `let` + `static let` in `struct`/`enum`/`class`. Reused Kotlin (nested name + `simple_identifier` reader-scan). Two Swift touches: **gate widened to `struct:`/`enum:` parents** (Swift namespaces consts there), and **computed properties skipped**. `class`/instance stored props stay `field`. Slots into the existing Swift property-wrapper handler |
 | **Svelte, Vue, Astro** | **inherited for free** — their extractors re-parse the `<script>`/frontmatter block as `typescript`/`javascript`, which are in `VALUE_REF_LANGS` (verified: a `.svelte` `const` edges its readers). No separate work; no separate matrix row needed. |
 
 **🔜 Remaining — likely the easy path** (constants are file/module-scope, or top-level; do §5: add
@@ -160,8 +170,7 @@ column.**
 
 | Language | Constant forms | Note |
 |---|---|---|
-| Swift | top-level `let` (file) + `static let` in a type (class) | README notes Swift stored properties aren't extracted as own nodes — check |
-| Dart | top-level `const`/`final` (file) + `static const` (class) | mixed |
+| Dart | top-level `const`/`final` (file) + `static const` (class) | mixed; AST is a flat `static_final_declaration_list`, not a clean property node — messier than Swift |
 | Lua / Luau | file/chunk `local X =` + globals; no `const` keyword | distinctive-name gate (needs `[A-Z_]`) catches fewer — Lua casing varies |
 | R | file-scope `X <- …` / `X = …` | |
 
@@ -328,11 +337,12 @@ The target gate now accepts **`file:`, `class:`, and `module:`** parents. Before
   enclosing class's constant, and strict matching would drop those valid reads. The only real FP
   is the same constant name in *sibling* classes in one file (~1.7% of Ruby targets on rails);
   valid code rarely hits it (a bare sibling-class constant is a NameError in Ruby).
-- **Java `static final` + C# `const`/`static readonly` are DONE** (emitted as `field` → re-kinded to
-  `constant`). **Still untested:** Swift `static let`, Kotlin `companion`/`object`. The gate covers
-  them, but confirm the extractor emits them as `constant`/`variable` nodes with a `class:`/`struct:`
-  parent (Swift stored properties aren't extracted as their own nodes) — and if the parent kind is
-  `struct:`/`interface:` rather than `class:`/`module:`, widen the gate.
+- **Java/C#/Kotlin/Swift class-scope constants are DONE.** The gate now accepts `file:`/`class:`/
+  `module:`/**`struct:`/`enum:`** parents — the `struct:`/`enum:` widening was added for Swift, which
+  namespaces shared constants in `enum`/`struct` (`enum Constants { static let X }`). **Lesson for the
+  next class-scope language:** check the *parent kind* of a sample const (`select … substr(id…)`) — if
+  it's `struct:`/`enum:`/`interface:` and the gate doesn't list it, widen the gate (one line) or the
+  feature silently emits nothing despite the nodes existing.
 - **Confirm the reader-scan matches the language's constant *reference* node type (the PHP lesson).**
   The reader-scan in `flushValueRefs` matches `identifier` / `constant` / `name`. If the new language
   represents a constant *read* as some other node type, the scan finds nothing and **no edges form**
@@ -366,6 +376,7 @@ silently does nothing for the new language and intra-file shadowing produces fal
 | PHP | **none** | a `$var` local (`variable_name`) is a different namespace from a bare constant — a local can never shadow a constant, so the prune is a no-op and needs no PHP declarator | **done** (n/a) |
 | Scala | `val_definition`, `var_definition` | `pattern` field (identifier) — catches an object/top-level val shadowed by a method-local `val` | **done** |
 | Kotlin | `property_declaration` | `variable_declaration → simple_identifier` (and `bump` accepts `simple_identifier`) — catches an object/companion const shadowed by a method-local `val` | **done** |
+| Swift | `property_declaration` | `<name> pattern → simple_identifier` (`firstSimpleIdentifier`) — the prune case resolves both Kotlin and Swift shapes; catches a static const shadowed by a method-local `let` | **done** |
 
 **The prune rule is `declarators > file-scope-node-count`, NOT `> 1`.** A name can be bound
 twice *at file scope* legitimately — a **conditional module def** (`try: X = a; except: X = b`,
