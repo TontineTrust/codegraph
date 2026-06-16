@@ -258,6 +258,296 @@ describe('value-reference edges', () => {
     expect(valueRefReaders(cg, 'TIMEOUT')).toEqual(expect.arrayContaining(['get_timeout', 'describe']));
   });
 
+  it('edges same-file readers to a file-scope const/table (C)', async () => {
+    // C keeps shareable values at file scope as `static const` — scalars and,
+    // very commonly, pointer/array lookup tables. Both must be extracted as
+    // nodes (the generic fallback misses C's nested init_declarator name) and
+    // their same-file readers edged.
+    fs.writeFileSync(
+      path.join(dir, 'config.c'),
+      [
+        'static const int MAX_ITEMS = 100;',
+        'static const char *const STATUS_NAMES[] = { "ok", "fail", "pending" };',
+        '',
+        'int capped(int n) { return n > MAX_ITEMS ? MAX_ITEMS : n; }',
+        'const char *label(int i) { return STATUS_NAMES[i]; }',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'MAX_ITEMS')).toEqual(expect.arrayContaining(['capped']));
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['label']));
+  });
+
+  it('does NOT edge a C file const shadowed by a function-local of the same name', async () => {
+    // `TIMEOUT` is a file const AND a local `int TIMEOUT = 5` (init_declarator)
+    // in shadows(). The local read resolves to the inner binding, so a
+    // file-scope edge would be a false positive — the shadow prune drops it.
+    fs.writeFileSync(
+      path.join(dir, 'shadow.c'),
+      [
+        'static const int TIMEOUT = 30;',
+        '',
+        'int uses_const(void) { return TIMEOUT; }',
+        'int shadows(void) {',
+        '    int TIMEOUT = 5;',
+        '    return TIMEOUT;',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
+  });
+
+  it('does NOT mint a value target from a macro-prefixed C prototype (return-type misparse)', async () => {
+    // A prototype led by an unknown macro (`CURL_EXTERN CURLcode fn(args);`)
+    // makes tree-sitter-c misparse it as a declaration whose "variable" is the
+    // bare return-type identifier — which would mint a spurious `CURLcode`
+    // value target read by every function of that type. The bare-identifier
+    // skip prevents it, while real file-scope consts still edge their readers.
+    fs.writeFileSync(
+      path.join(dir, 'api.c'),
+      [
+        'typedef enum { CURLE_OK, CURLE_FAIL } CURLcode;',
+        'CURL_EXTERN CURLcode curl_easy_init(int x);',
+        'CURL_EXTERN CURLcode curl_easy_setopt(int y);',
+        '',
+        'static const int REAL_LIMIT = 42;',
+        'int use_real(void) { return REAL_LIMIT; }',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    // The return-type name is never extracted as a const/var, so it is not a
+    // value-ref target at all.
+    const curlcodeValues = cg
+      .searchNodes('CURLcode')
+      .map((r) => r.node)
+      .filter((n) => n.name === 'CURLcode' && (n.kind === 'constant' || n.kind === 'variable'));
+    expect(curlcodeValues).toEqual([]);
+    // Real file-scope consts alongside the misparse-prone prototypes still work.
+    expect(valueRefReaders(cg, 'REAL_LIMIT')).toEqual(expect.arrayContaining(['use_real']));
+  });
+
+  it('edges same-file methods to a class-scope static final constant (Java)', async () => {
+    // Java keeps constants as `static final` fields inside a class. They extract
+    // as `constant` kind (not `field`) so the value-ref gate targets them; a
+    // plain instance `final` field is NOT a constant and must not be a target.
+    fs.writeFileSync(
+      path.join(dir, 'Limits.java'),
+      [
+        'class Limits {',
+        '  public static final int MAX_ITEMS = 100;',
+        '  static final String[] STATUS_NAMES = { "ok", "fail" };',
+        '  final int instanceId = 1;',
+        '  int capped(int n) { return n > MAX_ITEMS ? MAX_ITEMS : n; }',
+        '  String label(int i) { return STATUS_NAMES[i]; }',
+        '  int id() { return instanceId; }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'MAX_ITEMS')).toEqual(expect.arrayContaining(['capped']));
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['label']));
+    // An instance `final` field is mutable per-object state, not a shared
+    // constant — it stays `field` kind and is never a value-ref target.
+    expect(valueRefReaders(cg, 'instanceId')).toEqual([]);
+  });
+
+  it('does NOT edge a Java class const shadowed by a method-local of the same name', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'Shadow.java'),
+      [
+        'class Shadow {',
+        '  static final int TIMEOUT = 30;',
+        '  int usesConst() { return TIMEOUT; }',
+        '  int shadows() { int TIMEOUT = 5; return TIMEOUT; }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
+  });
+
+  it('edges same-file methods to a class const / static readonly (C#)', async () => {
+    // C# constants are `const` (compile-time) or `static readonly` (runtime);
+    // both extract as `constant`. An instance `readonly` field is per-object and
+    // stays `field`.
+    fs.writeFileSync(
+      path.join(dir, 'Limits.cs'),
+      [
+        'class Limits {',
+        '  const int MAX_ITEMS = 100;',
+        '  static readonly string[] STATUS_NAMES = { "ok", "fail" };',
+        '  readonly int instanceId = 1;',
+        '  int Capped(int n) { return n > MAX_ITEMS ? MAX_ITEMS : n; }',
+        '  string Label(int i) { return STATUS_NAMES[i]; }',
+        '  int Id() { return instanceId; }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'MAX_ITEMS')).toEqual(expect.arrayContaining(['Capped']));
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['Label']));
+    expect(valueRefReaders(cg, 'instanceId')).toEqual([]);
+  });
+
+  it('does NOT edge a C# class const shadowed by a method-local of the same name', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'Shadow.cs'),
+      [
+        'class Shadow {',
+        '  const int TIMEOUT = 30;',
+        '  int UsesConst() { return TIMEOUT; }',
+        '  int Shadows() { int TIMEOUT = 5; return TIMEOUT; }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
+  });
+
+  it('edges same-file readers to a top-level and class const, incl. self:: / Class:: (PHP)', async () => {
+    // PHP keeps constants at file scope (`const X`) and inside classes (`const
+    // X`), both extracted as `constant`. A constant *reference* is a `name` node
+    // (bare `X`, or the const half of `self::X` / `Foo::X`), so the reader-scan
+    // must match `name`. A `$var` local is a different namespace and can never
+    // shadow a bare constant — so there is nothing to prune.
+    fs.writeFileSync(
+      path.join(dir, 'Config.php'),
+      [
+        '<?php',
+        'const APP_VERSION = "1.0";',
+        'class Config {',
+        '  const MAX_ITEMS = 100;',
+        '  const STATUS_NAMES = ["ok", "fail"];',
+        '  public static $counter = 0;',
+        '  function capped($n) { return $n > self::MAX_ITEMS ? self::MAX_ITEMS : $n; }',
+        '  function label($i) { return Config::STATUS_NAMES[$i]; }',
+        '  function version() { return APP_VERSION; }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'MAX_ITEMS')).toEqual(expect.arrayContaining(['capped']));
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['label']));
+    expect(valueRefReaders(cg, 'APP_VERSION')).toEqual(expect.arrayContaining(['version']));
+    // A static property is mutable class state, not a constant — never a target.
+    expect(valueRefReaders(cg, 'counter')).toEqual([]);
+  });
+
+  it('edges readers to a top-level and object-scope val, not a class instance val (Scala)', async () => {
+    // Scala has no `static`: an `object` is a singleton, so its `val`s are the
+    // shared-constant idiom (extracted as `constant`, like a top-level val). A
+    // `class` val is a per-instance immutable field (`field`, never a target).
+    fs.writeFileSync(
+      path.join(dir, 'Demo.scala'),
+      [
+        'val AppVersion = "1.0"',
+        'object Config {',
+        '  val TIMEOUT_MS = 30',
+        '  val STATUS_NAMES = List("ok", "fail")',
+        '  def capped(n: Int): Int = if (n > TIMEOUT_MS) TIMEOUT_MS else n',
+        '  def label(i: Int): String = STATUS_NAMES(i)',
+        '}',
+        'class Widget {',
+        '  val MaxItems = 100',
+        '  def within(n: Int): Int = if (n < MaxItems) n else MaxItems',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT_MS')).toEqual(expect.arrayContaining(['capped']));
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['label']));
+    // A class instance `val` is per-object state (kind `field`), not a shared
+    // constant — never a value-ref target even though `within` reads it.
+    expect(valueRefReaders(cg, 'MaxItems')).toEqual([]);
+  });
+
+  it('does NOT edge a Scala object val shadowed by a method-local val of the same name', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'Shadow.scala'),
+      [
+        'object Config {',
+        '  val TIMEOUT = 30',
+        '  def usesConst(): Int = TIMEOUT',
+        '  def shadows(): Int = { val TIMEOUT = 5; TIMEOUT }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
+  });
+
+  it('edges readers to top-level, object, and companion-object constants, not a class val (Kotlin)', async () => {
+    // Kotlin has no `static`: a top-level property, an `object` (singleton), and a
+    // class's `companion object` all hold shared constants (`val`→constant). A
+    // class instance `val` is per-object state (`field`, never a target). The
+    // property name nests as variable_declaration→simple_identifier, and a const
+    // reference is a `simple_identifier`.
+    fs.writeFileSync(
+      path.join(dir, 'Demo.kt'),
+      [
+        'const val TOP_LEVEL_MAX = 100',
+        'object Config {',
+        '  const val TIMEOUT_MS = 30',
+        '  val STATUS_NAMES = listOf("ok", "fail")',
+        '  fun capped(n: Int): Int = if (n > TIMEOUT_MS) TIMEOUT_MS else n',
+        '  fun label(i: Int): String = STATUS_NAMES[i]',
+        '}',
+        'class Widget {',
+        '  companion object { const val MAX_RETRIES = 3 }',
+        '  val instanceField = 1',
+        '  fun retries(): Int = MAX_RETRIES',
+        '  fun within(n: Int): Int = if (n < TOP_LEVEL_MAX) n else TOP_LEVEL_MAX',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'STATUS_NAMES')).toEqual(expect.arrayContaining(['label']));
+    expect(valueRefReaders(cg, 'MAX_RETRIES')).toEqual(expect.arrayContaining(['retries']));
+    expect(valueRefReaders(cg, 'TOP_LEVEL_MAX')).toEqual(expect.arrayContaining(['within']));
+    // A class instance `val` is per-object state (kind `field`), never a target.
+    expect(valueRefReaders(cg, 'instanceField')).toEqual([]);
+  });
+
+  it('does NOT edge a Kotlin object const shadowed by a method-local val of the same name', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'Shadow.kt'),
+      [
+        'object Config {',
+        '  const val TIMEOUT = 30',
+        '  fun usesConst(): Int = TIMEOUT',
+        '  fun shadows(): Int { val TIMEOUT = 5; return TIMEOUT }',
+        '}',
+      ].join('\n'),
+    );
+    cg = index();
+    await cg.indexAll();
+
+    expect(valueRefReaders(cg, 'TIMEOUT')).toEqual([]);
+  });
+
   it('emits nothing when CODEGRAPH_VALUE_REFS=0', async () => {
     const prev = process.env.CODEGRAPH_VALUE_REFS;
     process.env.CODEGRAPH_VALUE_REFS = '0';

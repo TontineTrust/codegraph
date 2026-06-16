@@ -152,6 +152,47 @@ function scalaBaseTypeName(node: SyntaxNode | null, source: string): string | nu
 }
 
 /**
+ * Resolve the declared identifier inside a C declarator. A `declaration`'s
+ * `declarator` field nests the name through `init_declarator` (with value),
+ * `pointer_declarator`/`array_declarator`/`parenthesized_declarator`
+ * wrappers (each via their own `declarator` field) down to an `identifier`.
+ * A `function_declarator` means the declaration is a function prototype (or a
+ * function-pointer var) — return null so it isn't extracted as a variable.
+ */
+function cDeclaratorIdentifier(node: SyntaxNode | null): SyntaxNode | null {
+  let cur: SyntaxNode | null = node;
+  let guard = 0;
+  while (cur && guard++ < 12) {
+    switch (cur.type) {
+      case 'identifier':
+        return cur;
+      case 'function_declarator':
+        return null;
+      case 'init_declarator':
+      case 'pointer_declarator':
+      case 'array_declarator':
+      case 'parenthesized_declarator':
+        cur = getChildByField(cur, 'declarator');
+        break;
+      default:
+        return null;
+    }
+  }
+  return null;
+}
+
+/** True when `node` is (transitively) inside a C function body — i.e. a local,
+ * not a file/namespace-scope declaration. Walks the parent chain to the root. */
+function hasFunctionAncestor(node: SyntaxNode): boolean {
+  let p = node.parent;
+  while (p) {
+    if (p.type === 'function_definition') return true;
+    p = p.parent;
+  }
+  return false;
+}
+
+/**
  * PHP type-position wrapper node kinds (a type-hint is `named_type`,
  * `?Foo` is `optional_type`, `A|B` is `union_type`, `A&B` is
  * `intersection_type`). Used to find the type subtree inside a parameter /
@@ -224,7 +265,7 @@ export class TreeSitterExtractor {
   // Value-reference edges (default ON; set CODEGRAPH_VALUE_REFS=0 to disable; see flushValueRefs).
   // Same-file reads of file-scope const/var symbols → `references` edges so impact analysis catches
   // value consumers ("change this constant/table, affect its readers").
-  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go', 'python', 'rust', 'ruby']);
+  private static readonly VALUE_REF_LANGS = new Set<string>(['typescript', 'javascript', 'tsx', 'go', 'python', 'rust', 'ruby', 'c', 'java', 'csharp', 'php', 'scala', 'kotlin']);
   private static readonly MAX_VALUE_REF_NODES = 20_000;
   private readonly valueRefsEnabled = process.env.CODEGRAPH_VALUE_REFS !== '0';
   private fileScopeValues = new Map<string, string>();
@@ -587,7 +628,8 @@ export class TreeSitterExtractor {
     if (this.tree) {
       const declCounts = new Map<string, number>();
       const bump = (nameNode: SyntaxNode | null) => {
-        if (nameNode && nameNode.type === 'identifier') {
+        // `simple_identifier` is Kotlin's name node (a property declarator's name).
+        if (nameNode && (nameNode.type === 'identifier' || nameNode.type === 'simple_identifier')) {
           const nm = getNodeText(nameNode, this.source);
           if (targets.has(nm)) declCounts.set(nm, (declCounts.get(nm) ?? 0) + 1);
         }
@@ -615,6 +657,21 @@ export class TreeSitterExtractor {
             else if (left) for (const c of left.namedChildren) bump(c);
             break;
           }
+          case 'init_declarator':       // C  `T X = …` (file-scope const AND the local that shadows it)
+            bump(cDeclaratorIdentifier(n));
+            break;
+          case 'val_definition':        // Scala  `val X = …` (object/top-level const AND a method-local that shadows it)
+          case 'var_definition': {      // Scala  `var X = …`
+            const pat = getChildByField(n, 'pattern');
+            if (pat?.type === 'identifier') bump(pat);
+            break;
+          }
+          case 'property_declaration': { // Kotlin  `val X = …` (object/top-level const AND a method-local that shadows it)
+            const vd = n.namedChildren.find((c) => c.type === 'variable_declaration');
+            const id = vd?.namedChildren.find((c) => c.type === 'simple_identifier');
+            if (id) bump(id);
+            break;
+          }
         }
         for (let i = 0; i < n.namedChildCount; i++) {
           const c = n.namedChild(i);
@@ -633,8 +690,18 @@ export class TreeSitterExtractor {
         const n = stack.pop()!;
         visited++;
         // `constant` covers Ruby, where both a constant's definition and its
-        // references are `constant`-typed nodes, not `identifier`.
-        if (n.type === 'identifier' || n.type === 'constant') {
+        // references are `constant`-typed nodes, not `identifier`. `name` covers
+        // PHP, where a constant reference — bare `MAX_ITEMS` or the const half of
+        // `self::MAX_ITEMS` / `Foo::MAX_ITEMS` — is a `name` node (a `$var` local
+        // is a `variable_name`, a different namespace, so it can never shadow a
+        // bare constant — no prune wiring needed). `simple_identifier` covers
+        // Kotlin, whose every name reference (a const read included) is that
+        // node type. Safe across languages: a file only holds its own grammar's
+        // nodes; `name` is PHP-only and `simple_identifier` is Kotlin-only here.
+        if (
+          n.type === 'identifier' || n.type === 'constant' ||
+          n.type === 'name' || n.type === 'simple_identifier'
+        ) {
           const refName = getNodeText(n, this.source);
           const targetId = targets.get(refName);
           // Skip self and same-name targets: a symbol referencing a file-scope
@@ -1581,6 +1648,17 @@ export class TreeSitterExtractor {
     const visibility = this.extractor.getVisibility?.(node);
     const isStatic = this.extractor.isStatic?.(node) ?? false;
 
+    // A class field that is actually a CONSTANT (Java `static final`, C# `const`
+    // / `static readonly`) is extracted as `constant` kind, not `field`, so
+    // value-reference edges treat it as a target (the gate accepts
+    // constant/variable, not field). Scoped to languages whose `isConst`
+    // predicate is field-shaped — other languages' fields stay `field`.
+    const fieldKind: NodeKind =
+      (this.language === 'java' || this.language === 'csharp') &&
+      (this.extractor.isConst?.(node) ?? false)
+        ? 'constant'
+        : 'field';
+
     // Java field_declaration: "private final String name = value;" → variable_declarator(s) are direct children
     // C# field_declaration: wraps in variable_declaration → variable_declarator(s)
     let declarators = node.namedChildren.filter(
@@ -1641,7 +1719,7 @@ export class TreeSitterExtractor {
         if (!nameNode) continue;
         const name = getNodeText(nameNode, this.source);
         const signature = typeText ? `${typeText} ${name}` : name;
-        const fieldNode = this.createNode('field', name, decl, {
+        const fieldNode = this.createNode(fieldKind, name, decl, {
           docstring,
           signature,
           visibility,
@@ -1665,7 +1743,7 @@ export class TreeSitterExtractor {
         || node.namedChildren.find(c => c.type === 'identifier');
       if (nameNode) {
         const name = getNodeText(nameNode, this.source);
-        this.createNode('field', name, node, {
+        this.createNode(fieldKind, name, node, {
           docstring,
           visibility,
           isStatic,
@@ -1967,6 +2045,51 @@ export class TreeSitterExtractor {
         const initSignature = initValue ? `= ${initValue}${initValue.length >= 100 ? '...' : ''}` : undefined;
         this.createNode(kind, name, nameNode, { docstring, signature: initSignature, isExported });
       });
+    } else if (this.language === 'c') {
+      // C: a `declaration` node's name nests inside the `declarator` field —
+      // `init_declarator` (with value) or bare/pointer/array declarators (no
+      // value); a `function_declarator` is a prototype, not a variable. The
+      // generic fallback below only finds a *direct* identifier child, which C
+      // never has, so file-scope consts/globals went unextracted entirely (and
+      // so had no impact-radius edges). Only file-scope declarations are tracked
+      // — locals inside a function body are skipped (a `static const` table read
+      // by same-file functions is the value the impact graph wants, not every
+      // block-local). C allows several declarators per declaration
+      // (`int a = 1, b = 2;`), so iterate them.
+      if (!hasFunctionAncestor(node)) {
+        for (let i = 0; i < node.namedChildCount; i++) {
+          const child = node.namedChild(i);
+          if (!child) continue;
+          // Accept only `init_declarator` (has a value) and pointer/array
+          // declarators. A *bare* `identifier` declarator is deliberately
+          // skipped: an unknown leading macro (`CURL_EXTERN`, `XXH_PUBLIC_API`)
+          // makes tree-sitter-c misparse a prototype `MACRO RetType fn(args);`
+          // as a declaration whose "variable" is the bare return-type
+          // identifier, splitting `fn(args)` off as a bogus expression — minting
+          // a spurious type-named global for every macro-prefixed prototype in a
+          // header. Those misparses are always bare identifiers; real
+          // consts/tables always carry an initializer. The only legit loss is
+          // uninitialized scalar globals (`static int g;`).
+          if (
+            child.type !== 'init_declarator' &&
+            child.type !== 'pointer_declarator' &&
+            child.type !== 'array_declarator'
+          ) {
+            continue;
+          }
+          const nameNode = cDeclaratorIdentifier(child);
+          if (!nameNode) continue;
+          const name = getNodeText(nameNode, this.source);
+          if (!name) continue;
+          const valueNode =
+            child.type === 'init_declarator' ? getChildByField(child, 'value') : null;
+          const initValue = valueNode ? getNodeText(valueNode, this.source).slice(0, 100) : undefined;
+          const initSignature = initValue
+            ? `= ${initValue}${initValue.length >= 100 ? '...' : ''}`
+            : undefined;
+          this.createNode(kind, name, child, { docstring, signature: initSignature, isExported });
+        }
+      }
     } else {
       // Generic fallback for other languages
       // Try to find identifier children

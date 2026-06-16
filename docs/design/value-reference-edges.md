@@ -1,6 +1,6 @@
 # Design + status: same-file value-reference edges
 
-**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust + Ruby; `CODEGRAPH_VALUE_REFS=0` disables). The
+**Status:** SHIPPED (default-on for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin; `CODEGRAPH_VALUE_REFS=0` disables). The
 emitter lives in `TreeSitterExtractor.flushValueRefs` (`src/extraction/tree-sitter.ts`).
 **Motivation:** close the impact-analysis hole for *value consumers*. Static
 extraction edges calls, imports, and inheritance, but never edges a constant to the
@@ -13,7 +13,7 @@ readers" class of change (the ReScript-PR false positive that motivated the work
 ## TL;DR for a new session
 
 We emit a `references` edge (`metadata: { valueRef: true }`) from a reader symbol to
-the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust + Ruby. Those edges
+the **file/package-scope `const`/`var` it reads**, same-file only, for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# + PHP + Scala + Kotlin. Those edges
 flow straight into `getImpactRadius` / `codegraph impact` and the impact trail in
 `codegraph_explore` / `codegraph_node` — no agent-behaviour change required.
 
@@ -46,7 +46,7 @@ The win is **impact-radius correctness**, not agent read-reduction (see "Agent A
    the content-minified bundles guard #1 misses.
 3. **Distinctive-name + same-file** as above.
 
-## Validation matrix — TS / JS / Go / Python / Rust / Ruby
+## Validation matrix — TS / JS / Go / Python / Rust / Ruby / C / Java / C# / PHP / Scala / Kotlin
 
 Method per repo: index the same tree twice (value-refs on vs `CODEGRAPH_VALUE_REFS=0`),
 diff node/edge counts, spot-check precision, and measure `codegraph impact` on a few
@@ -101,7 +101,56 @@ file-scope consts. Node count must be **identical** on/off (edges-only feature).
 | jekyll/jekyll | medium | 218 | 1,906 (stable) | +100 (2.4%) | ~100% TP | `DEFAULT_PRIORITY` 1→3, `LOG_LEVELS` 4→5 |
 | rails/rails | large | 1,452 | 61,911 (stable) | +2,255 (1.2%) | ~98% TP (same-file ambiguity 21/1208 targets) | `Post` (Struct const) 75 readers |
 
-Across S/M/L in all six languages: node count never moved, the precision guards held, and
+**C** (file-scope `static const` scalars + pointer/array lookup tables + mutable globals; required
+extracting the nodes first — see below)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| redis/hiredis | small | 52 | 1,161 (stable) | +29 (2.5%) | all sampled TP; guard holds | `hiredisAllocFns` 1→**71** |
+| curl/curl | large | 994 | 16,124 (stable) | +597 (3.7%) | all sampled TP; guard holds; no minified FPs | `Curl_ssl` 3→**57** |
+| redis/redis | medium | 782 | 19,446 (stable) | +1,634 (8.4%) | all sampled TP after the macro-misparse fix; guard holds | `asmManager` 2→**97**, `keyMetaClass` 1→36, `XXH3_kSecret` 1→27, `helpEntries` 1→13 |
+
+**Java** (class-scope `static final` constants; required emitting them as `constant` kind — see below)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| google/gson | small | 262 | 8,563 (stable) | +387 | all sampled TP; guard holds | `PEEKED_NONE` 1→**31** |
+| apache/commons-lang | medium | 623 | 19,976 (stable) | +2,087 | all sampled TP; guard holds; no minified FPs | `INDEX_NOT_FOUND` 4→**165**, `EMPTY` 5→161 |
+| google/guava | large | 3,227 | 130,945 (stable) | +6,354 | all sampled TP; guard holds; no minified FPs | `APPLICATION_TYPE` 2→**126**, `ABSENT` 4→66 |
+
+**C#** (class-scope `const` / `static readonly`; same `field`→`constant` change as Java)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| AutoMapper/AutoMapper | small | 511 | 19,254 (stable) | +133 | all sampled TP; guard holds | `ContextParameter` 1→**17**, `InstanceFlags` 1→14 |
+| JamesNK/Newtonsoft.Json | medium | 945 | 20,208 (stable) | +344 | all sampled TP; guard holds | `DefaultFlags` 1→**37**, `JsonNamespaceUri` 1→15 |
+| dotnet/efcore | large | 5,731 | 140,847 (stable) | +3,720 | all sampled TP; guard holds; no minified FPs | `_resourceManager` 22→**1664**, `Prefix` 40→237, `Guid77` 2→191 |
+
+**PHP** (top-level `const` + class `const`, both already `constant`; needed only a reader-scan tweak — see below)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| guzzle/guzzle | small | 81 | 1,655 (stable) | +5 (sparse — see note) | all sampled TP; no collisions | `CONNECTION_ERRORS` 1→3 |
+| Seldaek/monolog | medium | 217 | 3,047 (stable) | +79 | all sampled TP; no class/const collisions | `DEFAULT_JSON_FLAGS` 1→**18**, `RFC_5424_LEVELS` 1→17 |
+| laravel/framework | large | 2,956 | 57,519 (stable) | +86 | all sampled TP; no minified/collision FPs | `INVISIBLE_CHARACTERS` 1→**93**, `SESSION_ID_LENGTH` 1→9 |
+
+**Scala** (top-level `val` + `object` val — re-kinded from `field`; `class` instance vals stay `field`)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| com-lihaoyi/upickle | small | 145 | 3,052 (stable) | +82 | all sampled TP; no class/method collisions | `IntegralPattern` 1→**9** |
+| typelevel/cats | medium | 835 | 15,774 (stable) | +89 | sampled TP; flagged val/def name-collisions were real object vals read by siblings | `maxArity` 3→**17**, `fusionMaxStackDepth` 1→13, `minIntValue` 1→7 |
+| apache/pekko | large | 2,720 | 135,041 (stable) | +8,453 (2,065 Scala) | Scala object vals clean; the bulk are valid Java `PARSER`/`DEFAULT_INSTANCE` from generated protobuf `.java` | `ErrorLevel` 5→**33**, `WarningLevel` 5→29 |
+
+**Kotlin** (top-level / `object` / `companion object` `val` → `constant`; `class` instance vals stay `field`)
+
+| Repo | size | files | nodes (on=off) | +value-ref edges | precision | `impact` on→off example |
+|---|---|---|---|---|---|---|
+| square/okio | small | 307 | 8,540 (stable) | +157 | all sampled TP; 0 collisions | `STATE_IN_QUEUE` 1→**32**, `HMAC_KEY` 1→9 |
+| Kotlin/kotlinx.coroutines | medium | 1,039 | 17,058 (stable) | +210 | all sampled TP; 1 cross-file collision | `BLOCKING_SHIFT` 1→**24**, `TERMINATED` 2→22 (companion bit-masks) |
+| ktorio/ktor | large | 2,302 | 43,272 (stable) | +849 | object/companion consts (HTTP header names); flagged collisions are real consts; `TYPE` is a sibling-companion ambiguity | `TYPE` 8→**109**, `FailedPath` 1→22 |
+
+Across S/M/L in all twelve languages: node count never moved, the precision guards held, and
 the `impact` OFF column is the bug — a const that 80–140 symbols read reports "1 affected"
 without value-refs.
 
@@ -154,6 +203,129 @@ those. The only real false positive is the same constant name defined in *siblin
 classes in one file — 21 of 1,208 targets (1.7%) on rails, and most of those resolve fine too;
 referencing a sibling class's bare constant is a NameError in real Ruby, so valid code rarely
 hits it. Net precision ~98–100%.
+
+**C was NOT the "easy path" the language tracker first assumed — it needed the extractor to emit
+the nodes first.** C keeps shareable values at file scope (`static const` scalars, and very
+commonly pointer/array **lookup tables** + mutable global state), which fits the file-scope target
+gate. But unlike Go/Rust (whose const nodes already existed), C's file-scope `const`/`var` were
+**never extracted as nodes at all**: a C `declaration` nests its name inside an `init_declarator`
+(through `pointer_declarator`/`array_declarator`), and the generic variable-extraction fallback
+only finds a *direct* `identifier` child — so it produced nothing. Three changes (the same shape as
+Ruby's): (1) a C branch in `extractVariable` that resolves the name through the declarator chain and
+emits file-scope declarations as `constant`/`variable` (skipping function-body locals via an
+ancestor check, and `function_declarator` prototypes); (2) an `isConst` on the C extractor (a
+`const` `type_qualifier` → `constant` kind); (3) the shadow prune's declarator switch extended with
+`init_declarator`. Scoped to **C only** — C++ stays on the generic fallback (its class-scope members
+are the harder bucket).
+
+The one false-positive cluster the sweep surfaced was a **macro-prefixed-prototype misparse**, and
+the fix is the load-bearing C detail: an unknown leading macro (`CURL_EXTERN`, `XXH_PUBLIC_API`)
+makes tree-sitter-c misparse a prototype `MACRO RetType fn(args);` as a declaration whose declared
+"variable" is the **bare return-type identifier** (`XXH_errorcode`/`CURLcode`), splitting `fn(args)`
+off as a bogus expression — minting one spurious type-named global per prototype, then edged by
+every function returning that type (redis's `XXH_errorcode` 1→18 before the fix). These misparses
+*always* yield a **bare `identifier`** declarator (verified across pointer/array/sized return
+variants); real consts/tables always carry an initializer (`init_declarator`) and real
+pointer/array globals carry their own declarator. So the C branch **skips bare-`identifier`
+declarators entirely** — killing the whole FP class at the cost of only uninitialized scalar globals
+(`static int g;`), which are rare and low-value. After the fix: every sampled edge on
+hiredis/redis/curl was a true positive, the guard-invariant leak check found 0 shadows across all
+three, and `impact` deltas confirm the blind→real radius (`asmManager` 2→97, `Curl_ssl` 3→57,
+`hiredisAllocFns` 1→71).
+
+**Java + C# were the cleanest class-scope languages — one kind switch, no new guards.** Both keep
+constants *inside a class* (Java `static final` fields; C# `const` / `static readonly`), so unlike
+C the nodes already existed — but as **`field`** kind, which the value-ref gate (`constant`/
+`variable` only) rejects. The whole change was emitting the constant *subset* as `constant`: an
+`isConst` predicate on each extractor (Java = a `static final` field; C# = a `const`, or a `static
+readonly`) plus a kind switch in `extractField`. Everything else was already in place — the
+class-scope target gate (from Ruby), the `identifier` reader-scan, and crucially the shadow prune:
+a method-local that shadows a class const is a `variable_declarator` in both grammars, *already* in
+the prune switch, so a class const shadowed by a local is dropped with no new wiring (validated by
+the Java/C# shadow tests). Instance fields stay `field` — a Java instance `final` or a C# instance
+`readonly` is per-object state, not a shared constant, so it's never a target. The distinctive-name
+gate fits both conventions cleanly (Java `UPPER_SNAKE`, C# `PascalCase`), so no FP class emerged:
+across S/M/L (gson/commons-lang/guava, automapper/newtonsoft/efcore) every sampled edge was a true
+positive, 0 shadow leaks, no minified-file FPs, node count identical on/off. The `impact` wins are
+the headline — Java's canonical `public static final` constants (`INDEX_NOT_FOUND` 4→165, `EMPTY`
+5→161) and C#'s `const`/`static readonly` (`Prefix` 40→237, a generated `_resourceManager` 22→1664)
+all went from a blind "1 affected" to their real radius. The known sibling-class limitation (the
+same const name in two classes in one file resolves to the file-wide target) is shared with Ruby and
+stayed negligible.
+
+**PHP was a near-pure "easy path" — one reader-scan line, no extractor change, no prune wiring.**
+PHP already extracts both top-level `const X = …` and class `const X = …` as `constant` kind (a
+dedicated `const_declaration` handler), inside the right scope (`file:` / `class:`, both gated). The
+*only* change was the reader-scan: PHP represents a constant *reference* — bare `X`, or the const
+half of `self::X` / `Foo::X` / `static::X` — as a **`name`** node, which the scan (matching
+`identifier` / `constant`) missed, so it found nothing until `name` was added. That's safe across
+languages: `flushValueRefs` only runs for the value-ref set, and `name` is PHP-only among them. **No
+shadow prune was needed at all** — a PHP local is a `$var` (`variable_name`), a different namespace
+from a bare constant, so a local can *never* shadow a constant; there is nothing to prune (the
+cleanest case yet). Precision was excellent: UPPER_SNAKE constants fit the distinctive-name gate, and
+a dedicated check for a target whose name collides with a same-file *class* (PHP's one realistic FP —
+`name` nodes also name classes in `new Foo()` / `Foo::`) found **zero** collisions across
+guzzle/monolog/laravel; every sampled edge was a true positive, node count identical on/off.
+
+**The honest caveat: PHP is lower-yield than the class-scope languages, by design.** PHP idiom reads
+constants *across* files far more than within one (a `Logger::DEBUG` or a config constant consumed
+everywhere), and value-refs is **same-file only** — so laravel (2,956 files) produced only 86 edges
+vs. Ruby rails's 2,255 (1,452 files). This is not a miss: the cross-file reads are out of scope for
+*every* language (resolution would need import/scope analysis), and PHP simply leans on them more.
+The same-file reads it *does* capture are clean and the transitive impact wins are real
+(`INVISIBLE_CHARACTERS` 1→93 from 3 direct readers). Net: correct and additive, just a smaller
+absolute contribution than Java/C#/Go.
+
+**Scala — the `object` is the constant scope.** Scala has no `static`; the idiom for a shared
+constant is a `val` inside a singleton `object` (`object Config { val Timeout = 30 }`). A top-level
+`val` already extracted as `constant`, but `object` and `class` vals both came out as `field` (the
+gate rejects `field`). The fix is a kind refinement in the Scala `val_definition` handler: walk to
+the enclosing definition and treat an `object_definition` (or top level) val as `constant`/`variable`
+— while a `class`/`trait`/`enum` val stays `field`, because it is per-instance immutable state, the
+exact analogue of the Java instance `final` we also keep as `field`. (`object` and `class` both
+extract as `class` *kind*, so the distinction is the enclosing AST node type, not the node kind.)
+The shadow prune gained `val_definition`/`var_definition` (a method-local `val` can shadow an object
+val); the reader-scan needed nothing, since a Scala val reference is a plain `identifier`. Method-local
+vals are not extracted at all, so they're not a target source. The one **known limitation** is
+Scala's interchangeable `val`/`def` for members: a camelCase val can share a name with a method in the
+same file, and same-file name matching can't distinguish them — but it's bounded (like Ruby's
+sibling-class case), and on the sweep every flagged val/def collision turned out to be a real `object`
+val read by sibling vals (cats' typeclass instances: `val flatMap = monad`, read by
+`invariantSemigroupal`). Validated S/M/L (upickle/cats/pekko): node count identical on/off, top
+targets genuine object vals (`maxArity` `val = 22`, `DigitTens` lookup table), impact wins real
+(`maxArity` 3→17). The distinctive-name gate fits Scala's camelCase/PascalCase constants (`maxArity`,
+`IntegralPattern`) via their internal uppercase letter.
+
+**Kotlin combined three already-built techniques.** Kotlin has no `static`: shared constants live at
+top level, in an `object` (singleton), or in a class's `companion object` — all `val`/`const val`. A
+class instance `val` is per-object state. Nothing extracted before because a Kotlin property name
+nests (`property_declaration → variable_declaration → simple_identifier`) and the generic path reads
+only a direct child — the **C** problem. The fix handles `property_declaration` in the Kotlin
+`visitNode` hook (where the existing one already manages `fun interface` misparses): pull the nested
+name, then walk to the enclosing definition to set the kind — `object_declaration`/`companion_object`
+(or top level) → `constant`/`variable` (the **Scala** object-vs-class rule), `class_declaration` →
+`field`, and a property under a `function_body`/`init`/lambda is a local and skipped. The reader-scan
+gained `simple_identifier` (Kotlin's reference node — the **PHP `name`** move; `simple_identifier` is
+Kotlin-only among the value-ref set), and the shadow prune gained `property_declaration` (a method-local
+`val` can shadow an object const). Kotlin's parse fidelity is clean (its one known misparse,
+`fun interface`, is already handled), so unlike C++ no precision tail emerged. It validated as one of
+the *cleanest* languages: companion-object bit-masks and state constants are a heavy, same-file-read
+idiom (coroutines' `BLOCKING_SHIFT` 1→24, `TERMINATED` 2→22 in the scheduler; okio's `STATE_IN_QUEUE`
+1→32; ktor's content-type `TYPE` 8→109). okio had 0 collisions, coroutines 1 (cross-file). The same
+val/def-or-class name-overlap limitation as Scala applies (ktor's HTTP DSL names a header const and a
+class the same), plus the sibling-companion case (several `companion object { const val TYPE }` in one
+file collapse to the file-wide target, like Ruby's sibling-class) — both bounded, and every flagged
+collision investigated was a real object/companion const.
+
+**C++ was attempted and reverted** — the machinery (file/namespace-scope + class `field_declaration`
+extraction) is correct on clean C++, but tree-sitter-cpp's parse fidelity on real template/macro-heavy
+code (and the `.h`→C-grammar routing) leaks class members and parameters to file scope as bogus
+constants. Two guards (skip declarations under an `ERROR` or `compound_statement` ancestor) removed
+~83% of the gross leaks, but the residual pervaded even well-structured library source
+(template-class member leaks, amalgamated mega-headers, `.h`-as-C++). It did not reach the precision
+bar the other languages hold, so it was reverted. Reviving C++ needs prior work on C++ parse handling
+(template-class member scoping, `.h`-as-C++ detection, amalgamated-header exclusion), not a value-refs
+wiring pass. See the playbook's §2b C++ note.
 
 **`tsx` is covered by the TS rows** — excalidraw is a React/.tsx codebase, so the headline
 `tablerIconProps` (1→170) and most of its targets live in `.tsx` files. The one

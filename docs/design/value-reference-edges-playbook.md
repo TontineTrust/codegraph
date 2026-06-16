@@ -45,7 +45,7 @@ agent read-reduction (see §4.3).
 
 | Symbol | Role |
 |---|---|
-| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`, `go`, `python`, `rust`, `ruby`. **Add the new language here.** |
+| `VALUE_REF_LANGS` (static Set) | languages the feature runs for. Currently `typescript`, `javascript`, `tsx`, `go`, `python`, `rust`, `ruby`, `c`, `java`, `csharp`, `php`, `scala`, `kotlin`. **Add the new language here.** |
 | `valueRefsEnabled` | `process.env.CODEGRAPH_VALUE_REFS !== '0'` — default ON, env opts out. |
 | `MAX_VALUE_REF_NODES` (20_000) | per-scope traversal cap (and the shadow-scan cap). |
 | `captureValueRefScope(kind, name, id, node)` | called from `createNode` on every node. Records **targets** (file-scope `const`/`var`) and **reader scopes** (`function`/`method`/`const`/`var`). |
@@ -66,13 +66,59 @@ targets** (see §3).
 
 ## 2. Current state (what's shipped + validated)
 
-- **Default ON** for TS/JS/tsx + Go + Python + Rust + Ruby (`CODEGRAPH_VALUE_REFS=0` disables). Shipped in **PR #895**
+- **Default ON** for TS/JS/tsx + Go + Python + Rust + Ruby + C + Java + C# (`CODEGRAPH_VALUE_REFS=0` disables). Shipped in **PR #895**
   (flip-on + the shadow prune); Go added in a later PR (the shadow-prune declarator switch +
-  `VALUE_REF_LANGS`).
-- **Validated S/M/L** in **TS, JS, tsx, Go, Python, Rust, and Ruby** — see the matrix in the
+  `VALUE_REF_LANGS`); C added later still (extractor change to emit the nodes + the bare-identifier
+  misparse guard); Java + C# after that (field→constant kind switch for the const subset).
+- **Validated S/M/L** in **TS, JS, tsx, Go, Python, Rust, Ruby, C, Java, and C#** — see the matrix in the
   design doc. All clean: node count identical on/off, precision guards held, impact win
   reproduced. Go required extending the shadow prune (per-grammar declarators) — the worked
-  example of "step B is load-bearing."
+  example of "step B is load-bearing." **C required the Ruby treatment** (the extractor didn't emit
+  C file-scope const/var nodes at all) **plus** a C-specific FP guard (a macro-prefixed-prototype
+  misparse mints a bare-identifier "variable" named after the return type — skip bare-`identifier`
+  declarators). It was the worked example of "the §2b coverage table's *easy-path* guess can be
+  wrong — always do §5 step C (confirm the nodes exist) before trusting it."
+- **Java + C# were the cleanest class-scope ("Ruby treatment") languages.** The constants already
+  extract — but as `field` kind, which the gate rejects. The whole change was emitting the const
+  *subset* as `constant`: an `isConst` predicate on each extractor (Java `static final`; C# `const`
+  / `static readonly`) + a kind switch in `extractField`. **No new shadow-prune wiring** (method
+  locals are `variable_declarator`, already in the switch) and **no FP guards** (UPPER_SNAKE /
+  PascalCase fit the distinctive-name gate). Instance `final`/`readonly` fields correctly stay
+  `field`. Validated S/M/L: gson/commons-lang/guava, automapper/newtonsoft/efcore — 0 leaks, node
+  parity, big impact wins (`INDEX_NOT_FOUND` 4→165, `_resourceManager` 22→1664).
+- **PHP was the cleanest of all — one reader-scan line.** Constants already extract as `constant`
+  (top-level + class), so the only change was teaching the reader-scan that a PHP constant
+  *reference* is a `name` node (bare `X`, or the const half of `self::X` / `Foo::X`). **No extractor
+  change, no prune wiring** (a `$var` local can't shadow a bare constant — different namespace).
+  Validated S/M/L (guzzle/monolog/laravel), all clean, 0 class/const collisions. The honest caveat:
+  **lower yield** — PHP reads constants cross-file far more than same-file (laravel 2,956 files → 86
+  edges), and value-refs is same-file only; still correct, just a smaller contribution.
+- **Scala — an `object` is the constant scope.** Scala has no `static`; a singleton `object`'s `val`s
+  are the shared-constant idiom (`object Config { val Timeout = 30 }`). Top-level `val` already
+  extracted as `constant`, but object/class vals both came out as `field`. The fix: in the Scala
+  `val_definition` handler, walk to the enclosing definition — `object_definition` (or top-level) →
+  `constant`/`variable`; `class`/`trait`/`enum` → `field` (per-instance, like Java instance `final`).
+  Added `val_definition`/`var_definition` to the shadow prune (method-local `val` shadows). Reader-scan
+  needed nothing (refs are `identifier`). Minor known limitation: Scala uses `val`/`def`
+  interchangeably for members, so a camelCase val can share a name with a method — same-file name
+  matching can't tell them apart (bounded, like Ruby's sibling-class; sweep showed flagged collisions
+  were mostly real object vals read by siblings). Validated S/M/L (upickle/cats/pekko).
+- **C++ was attempted and reverted — DON'T retry without solving parse fidelity first.** tree-sitter-cpp
+  mis-parses real template/macro-heavy C++ (and `.h` files route to the C grammar): class members and
+  parameters leak to file scope as bogus constants/variables. Two guards (skip `ERROR`-ancestor and
+  `compound_statement`-ancestor declarations) removed ~83% of gross leaks, but the residual pervades
+  even well-structured library source (template-class member leaks, amalgamated mega-headers,
+  `.h`-as-C++). It did not reach the precision bar of the other languages. See the C++ section below.
+- **Kotlin = C + Scala + PHP techniques combined (and clean).** Nothing extracted before (property name
+  nests `property_declaration → variable_declaration → simple_identifier` — the C problem). Fix:
+  handle `property_declaration` in the Kotlin `visitNode` hook — pull the nested name, walk to the
+  enclosing definition for the kind (`object`/`companion object`/top-level → `constant`/`variable`;
+  `class` → `field` — the Scala rule; skip locals under a `function_body`/`init`/lambda), add
+  `simple_identifier` to the reader-scan (the PHP-`name` move), and `property_declaration` to the
+  shadow prune. Clean parse fidelity (the one `fun interface` misparse is already handled), so no
+  C++-style tail. One of the cleanest yields — companion-object bit-masks/state consts are a heavy
+  same-file-read idiom. Validated S/M/L (okio/coroutines/ktor); only the bounded val/def-or-class and
+  sibling-companion name overlaps remain (shared with Scala/Ruby).
 - **Tests:** `__tests__/value-reference-edges.test.ts` — same-file readers edged; surfaced in
   impact radius; shadowed const NOT edged (verified to fail without the guard); JSX-only read
   edged (tsx); `CODEGRAPH_VALUE_REFS=0` emits nothing.
@@ -95,16 +141,25 @@ the bottom of this section).
 | Go | package `const`/`var` |
 | Rust | module + impl `const`/`static` |
 | Ruby | class/module `CONST` (the class-scope extension) |
+| C | file-scope `static const` scalars + pointer/array lookup tables + mutable globals. **Needed an extractor change** (nodes weren't emitted) + a bare-identifier misparse guard — NOT the easy path the table below first guessed |
+| Java | class `static final` fields. Nodes existed as `field` kind; emitted the const subset as `constant` (`isConst` + `extractField` kind switch). No new prune wiring, no FP guards |
+| C# | class `const` / `static readonly`. Identical to Java — same `field`→`constant` change |
+| PHP | top-level `const` + class `const` (both already `constant` kind). **Only** change was the reader-scan: a PHP const *reference* is a `name` node. No extractor change, no prune wiring (a `$var` local can't shadow a bare constant). Lower yield — PHP reads consts cross-file more than same-file |
+| Scala | top-level `val` (already `constant`) + **`object` val** (the singleton-constant idiom; re-kinded from `field` by walking to the enclosing `object_definition`). `class`/`trait`/`enum` vals stay `field`. `val_definition`/`var_definition` added to the shadow prune. Minor val/def name-collision limit |
+| Kotlin | top-level / `object` / `companion object` `val` (re-kinded from nothing — properties weren't extracted at all). Handled in `visitNode`: nested name (`variable_declaration → simple_identifier`, the C move) + scope-walk for kind (Scala move) + `simple_identifier` in the reader-scan (PHP move) + prune. `class` instance vals stay `field`. Clean — one of the best yields (companion bit-masks) |
 | **Svelte, Vue, Astro** | **inherited for free** — their extractors re-parse the `<script>`/frontmatter block as `typescript`/`javascript`, which are in `VALUE_REF_LANGS` (verified: a `.svelte` `const` edges its readers). No separate work; no separate matrix row needed. |
 
 **🔜 Remaining — likely the easy path** (constants are file/module-scope, or top-level; do §5: add
 to `VALUE_REF_LANGS`, verify the declarator node type + extractor kind, sweep). Classify each
-*before* building — several are mixed file+class scope:
+*before* building — several are mixed file+class scope. **Caveat learned from C:** "easy path" here
+means *scope* fits — it does NOT promise the extractor already emits the const nodes. C was in this
+column but emitted *no* file-scope const/var nodes (its name nests in an `init_declarator` the
+generic fallback can't read), so it needed the Ruby-style extractor change after all. **Always run
+§5 step C (confirm `select kind,name from nodes …` actually shows the consts) before trusting this
+column.**
 
 | Language | Constant forms | Note |
 |---|---|---|
-| C | file-scope `const` / `static const` | `init_declarator` in a `declaration`; `#define` macros aren't value nodes |
-| Kotlin | top-level `const val`/`val` (file-scope) + `companion`/`object` (class-scope) | top-level is easy; companion needs the class-scope gate (present) |
 | Swift | top-level `let` (file) + `static let` in a type (class) | README notes Swift stored properties aren't extracted as own nodes — check |
 | Dart | top-level `const`/`final` (file) + `static const` (class) | mixed |
 | Lua / Luau | file/chunk `local X =` + globals; no `const` keyword | distinctive-name gate (needs `[A-Z_]`) catches fewer — Lua casing varies |
@@ -112,18 +167,24 @@ to `VALUE_REF_LANGS`, verify the declarator node type + extractor kind, sweep). 
 
 **🧱 Remaining — needs the Ruby treatment** (constants live almost entirely **inside a
 class/type**; the class-scope *gate* exists now, but first confirm the extractor emits them as
-`constant`/`variable` nodes — Ruby's weren't extracted at all, and Java/C# fields may come out as
-`field`/`property` kind):
+`constant`/`variable` nodes — Ruby's weren't extracted at all, and class fields often come out as
+`field`/`property` kind, which the gate rejects). **Java + C# (done) were this case**: their
+constants extracted as `field` kind, and the fix was emitting the const subset (`static final` /
+`const` / `static readonly`) as `constant` — the template for the rest of this bucket:
 
 | Language | Constant forms |
 |---|---|
-| Java | `static final` fields in a class |
-| C# | `const` / `static readonly` in a class |
-| Scala | `val` / `final val` in an `object`/`class` |
-| PHP | class `const` + top-level `const` + `define()` |
-| C++ | file-scope + class `static const`/`constexpr` (mixed) |
 | Pascal / Delphi | `const` sections at unit (file) or class scope (mixed) |
 | Objective-C | `static const` / `extern const` / `#define` (file-ish; macros unparsed; already "partial support") |
+
+**⛔ Attempted & reverted — C++.** file-scope + class `static const`/`constexpr` (mixed). Machinery
+built and correct on clean C++, but **tree-sitter-cpp parse fidelity is the blocker**: template/
+macro-heavy real C++ leaks class members + parameters to file scope as bogus constants/variables, and
+`.h` files route to the C grammar (mangling C++ classes). Two guards (skip `ERROR`-ancestor and
+`compound_statement`-ancestor declarations) cut ~83% of gross leaks but the residual pervades even
+well-structured library source. **Did not meet the precision bar; reverted.** Don't retry as a
+"value-refs" task — it needs prior work on C++ parse handling (template-class member scoping,
+`.h`-as-C++ detection, amalgamated-header exclusion).
 
 **🚫 N/A:** Liquid (template language — no value constants to track).
 
@@ -267,10 +328,18 @@ The target gate now accepts **`file:`, `class:`, and `module:`** parents. Before
   enclosing class's constant, and strict matching would drop those valid reads. The only real FP
   is the same constant name in *sibling* classes in one file (~1.7% of Ruby targets on rails);
   valid code rarely hits it (a bare sibling-class constant is a NameError in Ruby).
-- **Still untested:** Java `static final`, C# `const`, Swift `static let`. The gate covers them
-  now, but confirm the extractor emits them as `constant`/`variable` nodes with a `class:`/
-  `struct:` parent (Swift stored properties, for one, aren't extracted as their own nodes) — and
-  if the parent kind is `struct:`/`interface:` rather than `class:`/`module:`, widen the gate.
+- **Java `static final` + C# `const`/`static readonly` are DONE** (emitted as `field` → re-kinded to
+  `constant`). **Still untested:** Swift `static let`, Kotlin `companion`/`object`. The gate covers
+  them, but confirm the extractor emits them as `constant`/`variable` nodes with a `class:`/`struct:`
+  parent (Swift stored properties aren't extracted as their own nodes) — and if the parent kind is
+  `struct:`/`interface:` rather than `class:`/`module:`, widen the gate.
+- **Confirm the reader-scan matches the language's constant *reference* node type (the PHP lesson).**
+  The reader-scan in `flushValueRefs` matches `identifier` / `constant` / `name`. If the new language
+  represents a constant *read* as some other node type, the scan finds nothing and **no edges form**
+  even with targets correctly registered. PHP refs a const as a **`name`** node (bare `X`, and the
+  const half of `self::X` / `Foo::X`), which the scan missed until `name` was added. Dump a sample's
+  reader body (`scripts/agent-eval` or a quick `getParser` walk) and check the node type of a
+  constant reference *before* sweeping — a zero-edge sweep usually means this, not a target-gate bug.
 
 ### B. Confirm the declarator node type (for the shadow prune)
 
@@ -290,7 +359,13 @@ silently does nothing for the new language and intra-file shadowing produces fal
 | Rust | `const_item`, `static_item`, `let_declaration` | const/static → `name` field; let → `pattern` field | **done** |
 | Ruby | `assignment` (LHS is a `constant` node) | already in the switch; Ruby can't local-shadow a constant, so the prune is effectively a no-op for it | **done** (class-scope) |
 | Ruby | `assignment` with constant LHS (`CONST`) | LHS | to verify |
-| C/C++ | `init_declarator` in a file-scope `declaration` | declarator id | to verify |
+| C | `init_declarator` in a file-scope `declaration` | `cDeclaratorIdentifier` walks the `declarator` chain (init → pointer/array → identifier) | **done** |
+| C++ | **attempted & reverted** — parse fidelity (see the C++ note in §2b) | — | reverted |
+| Java | `variable_declarator` (field AND method-local) | `namedChild(0)` = name identifier — **already the TS/JS case**, no new wiring | **done** |
+| C# | `variable_declarator` (field AND method-local) | same as Java — already in the switch | **done** |
+| PHP | **none** | a `$var` local (`variable_name`) is a different namespace from a bare constant — a local can never shadow a constant, so the prune is a no-op and needs no PHP declarator | **done** (n/a) |
+| Scala | `val_definition`, `var_definition` | `pattern` field (identifier) — catches an object/top-level val shadowed by a method-local `val` | **done** |
+| Kotlin | `property_declaration` | `variable_declaration → simple_identifier` (and `bump` accepts `simple_identifier`) — catches an object/companion const shadowed by a method-local `val` | **done** |
 
 **The prune rule is `declarators > file-scope-node-count`, NOT `> 1`.** A name can be bound
 twice *at file scope* legitimately — a **conditional module def** (`try: X = a; except: X = b`,
@@ -367,6 +442,41 @@ fixed); impact delta shows the blind→real radius win; full test suite green.
 - **require-bindings (CommonJS) are not FPs** — see §3. Don't "fix" them.
 - **Don't over-engineer a guard for a gap that doesn't manifest** (e.g. param-only shadow):
   evidence-driven only. The maintainer steered toward minimal, surgical fixes.
+- **C macro-prefixed-prototype misparse (the C FP cluster):** an unknown leading macro
+  (`CURL_EXTERN`, `XXH_PUBLIC_API`) makes tree-sitter-c misparse a prototype `MACRO RetType
+  fn(args);` as a *declaration* whose declared "variable" is the bare return-type identifier
+  (`XXH_errorcode`), splitting `fn(args)` into a bogus expression. It mints one spurious type-named
+  global per prototype — then edged by every function of that type (redis `XXH_errorcode` 1→18).
+  These misparses *always* produce a **bare `identifier`** declarator (checked across
+  pointer/array/sized-return variants); real consts/tables always have an `init_declarator` and real
+  pointer/array globals their own declarator. Fix = **skip bare-`identifier` declarators** in the C
+  branch. The "extra" file-scope variable nodes also drop node-count vs an early pass — both arms
+  match, but don't be surprised the post-fix count is *lower*.
+- **"Easy path" ≠ "nodes already exist."** The §2b table classifies by *scope*; it does not promise
+  the language's consts are extracted. C sat in the easy column yet emitted zero file-scope const
+  nodes. Run §5 step C (`select kind,name from nodes where file_path like '%sample%'`) on a sample
+  *first* — if the consts aren't there, you're doing the Ruby treatment, not the easy path.
+- **Class consts may extract as `field` kind, not `constant` (Java/C#).** Step C must check the
+  *kind*, not just that a node exists: Java `static final` and C# `const`/`static readonly` came out
+  as `field`, which the value-ref target gate (`constant`/`variable` only) silently rejects — so the
+  feature emitted nothing despite the nodes being present. Fix = an `isConst` predicate on the
+  extractor (gated on the const modifiers) + a kind switch in `extractField` (scoped per-language so
+  other languages' fields stay `field`). Don't widen the *gate* to accept `field` — that would pull
+  in every mutable instance field as a target. And only the const *subset* converts: a Java instance
+  `final` or C# instance `readonly` is per-object state, must stay `field`.
+- **A zero-edge sweep with correctly-registered targets = the reader-scan node type (the PHP trap).**
+  Targets can register perfectly (right kind, right scope) and *still* produce zero edges if the
+  reader-scan doesn't recognise how the language writes a constant *read*. PHP refs a const as a
+  **`name`** node, not `identifier`/`constant`, so the scan saw nothing until `name` was added to the
+  match. Before assuming a target-gate bug on a sparse/empty sweep, dump a reader body and check the
+  node type of a known constant reference. (Adding a ref node type to the scan is safe across
+  languages — `flushValueRefs` only runs for the value-ref set, and a file holds only its own
+  grammar's nodes; `name` is PHP-only among the current set.)
+- **Same-file-only means cross-file-heavy languages yield less — that's correct, not a miss.** PHP
+  reads constants across files far more than within one (`Logger::DEBUG` everywhere), so laravel
+  (2,956 files) gave only 86 edges vs Ruby rails's 2,255. Don't chase it: cross-file value consumers
+  are out of scope for *every* language (would need import/scope resolution). Report the lower yield
+  honestly in the matrix rather than treating it as a bug to fix.
 
 ---
 
