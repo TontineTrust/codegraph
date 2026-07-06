@@ -253,6 +253,47 @@ local
     expect(importRefs).toEqual(['./x.nix', './dir']);
   });
 
+  it('should emit file imports for NixOS module imports/modules lists (literal paths only)', () => {
+    const code = `
+{ config, lib, ... }:
+{
+  imports = [ ./hardware.nix ../common inputs.foo.nixosModules.bar ];
+  home-manager.users.demo.imports = [ ./home.nix ];
+  flake.modules = [ ./configuration.nix ];
+  notAModuleList = [ ./ignored.nix ];
+}
+`;
+
+    const result = extractFromSource('configuration.nix', code);
+    const importRefs = result.unresolvedReferences.filter((r) => r.referenceKind === 'imports').map((r) => r.referenceName);
+
+    expect(importRefs).toEqual(['./hardware.nix', '../common', './home.nix', './configuration.nix']);
+    // The dynamic entry (inputs.foo.nixosModules.bar) must not create a ref.
+    expect(importRefs).not.toContain('inputs.foo.nixosModules.bar');
+  });
+
+  it('should emit file imports for callPackage with a literal path and skip dynamic ones', () => {
+    const code = `
+{ pkgs, newScope }:
+let
+  hello = pkgs.callPackage ./pkgs/hello { };
+  tools = pkgs.callPackages ../tools/all.nix { };
+  dynamic = pkgs.callPackage pkgPath { };
+in
+{
+  inherit hello tools dynamic;
+}
+`;
+
+    const result = extractFromSource('overlay.nix', code);
+    const importRefs = result.unresolvedReferences.filter((r) => r.referenceKind === 'imports').map((r) => r.referenceName);
+    const calls = result.unresolvedReferences.filter((r) => r.referenceKind === 'calls').map((r) => r.referenceName);
+
+    expect(importRefs).toEqual(['./pkgs/hello', '../tools/all.nix']);
+    // The call edge to callPackage itself is still recorded.
+    expect(calls).toContain('pkgs.callPackage');
+  });
+
   it('should mark returned top-level Nix attrset members exported and keep let or nested attrs private', () => {
     const code = `
 { lib, stdenv }:

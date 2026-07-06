@@ -1,6 +1,6 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getNodeText } from '../tree-sitter-helpers';
-import type { LanguageExtractor } from '../tree-sitter-types';
+import type { ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
 
 function unwrapVariableExpression(node: SyntaxNode): SyntaxNode {
   if (node.type !== 'variable_expression') return node;
@@ -124,6 +124,53 @@ function inheritedAttrs(node: SyntaxNode): SyntaxNode | null {
   return node.namedChildren.find((child) => child.type === 'inherited_attrs') ?? null;
 }
 
+/**
+ * `callPackage ./pkg.nix { }` and `pkgs.callPackage ../tools/foo { }` — the
+ * nixpkgs auto-wiring idiom — reference a file the same way `import` does.
+ */
+function isCallPackageName(name: string): boolean {
+  return (
+    name === 'callPackage' ||
+    name === 'callPackages' ||
+    name.endsWith('.callPackage') ||
+    name.endsWith('.callPackages')
+  );
+}
+
+/** Innermost argument of a curried apply chain: `f a b` → `a`. */
+function getFirstApplyArgument(node: SyntaxNode): SyntaxNode | null {
+  let inner = node;
+  for (;;) {
+    const fn = inner.childForFieldName('function') || inner.namedChild(0);
+    if (fn && fn.type === 'apply_expression') {
+      inner = fn;
+      continue;
+    }
+    break;
+  }
+  return inner.childForFieldName('argument') || inner.namedChild(1);
+}
+
+/** Import node + unresolved `imports` ref for a static project path. */
+function emitFileImport(ctx: ExtractorContext, importPath: string, anchorNode: SyntaxNode, source: string): void {
+  const impNode = ctx.createNode('import', importPath, anchorNode, {
+    signature: getNodeText(anchorNode, source).trim().slice(0, 100),
+  });
+
+  if (impNode && ctx.nodeStack.length > 0) {
+    const fromNodeId = ctx.nodeStack[ctx.nodeStack.length - 1];
+    if (fromNodeId) {
+      ctx.addUnresolvedReference({
+        fromNodeId,
+        referenceName: importPath,
+        referenceKind: 'imports',
+        line: anchorNode.startPosition.row + 1,
+        column: anchorNode.startPosition.column,
+      });
+    }
+  }
+}
+
 export const nixExtractor: LanguageExtractor = {
   functionTypes: [],
   classTypes: [],
@@ -170,6 +217,23 @@ export const nixExtractor: LanguageExtractor = {
           signature: initValue ? `= ${initValue}${initValue.length >= 100 ? '...' : ''}` : undefined,
           isExported: isReturnedAttrsetMember(node),
         });
+
+        // NixOS/home-manager module lists: `imports = [ ./hardware.nix ../common ]`
+        // (and the flake-era `modules = [ ./configuration.nix ]`) reference files
+        // without an `import` call. Only literal `path_expression` entries count —
+        // variables and interpolations stay dynamic (silent beats wrong).
+        const finalSegment = name.split('.').pop();
+        if ((finalSegment === 'imports' || finalSegment === 'modules') && valueNode.type === 'list_expression') {
+          for (const child of valueNode.namedChildren) {
+            if (child.type === 'path_expression') {
+              const entryPath = getNodeText(child, source).trim();
+              if (isStaticProjectPath(entryPath)) {
+                emitFileImport(ctx, entryPath, child, source);
+              }
+            }
+          }
+        }
+
         ctx.visitNode(valueNode);
       }
 
@@ -204,9 +268,14 @@ export const nixExtractor: LanguageExtractor = {
     if (node.type === 'apply_expression') {
       const directCallee = getDirectCalleeName(node, source);
       const isDirectImport = directCallee === 'import' || directCallee === 'builtins.import';
-      const isCalleeOfParent =
-        node.parent?.type === 'apply_expression' &&
-        (node.parent.childForFieldName('function') === node || node.parent.namedChild(0) === node);
+      // Wrapper objects are re-created per access, so compare with .equals(),
+      // never === — otherwise every level of a curried chain (`f a b`)
+      // re-emits the same refs.
+      const parentFn =
+        node.parent?.type === 'apply_expression'
+          ? (node.parent.childForFieldName('function') ?? node.parent.namedChild(0))
+          : null;
+      const isCalleeOfParent = parentFn ? parentFn.equals(node) : false;
 
       if (!(isCalleeOfParent && !isDirectImport)) {
         if (isDirectImport) {
@@ -214,22 +283,7 @@ export const nixExtractor: LanguageExtractor = {
           const importPath = argNode ? getStaticImportPath(argNode, source) : null;
 
           if (importPath) {
-            const impNode = ctx.createNode('import', importPath, node, {
-              signature: getNodeText(node, source).trim().slice(0, 100),
-            });
-
-            if (impNode && ctx.nodeStack.length > 0) {
-              const fromNodeId = ctx.nodeStack[ctx.nodeStack.length - 1];
-              if (fromNodeId) {
-                ctx.addUnresolvedReference({
-                  fromNodeId,
-                  referenceName: importPath,
-                  referenceKind: 'imports',
-                  line: node.startPosition.row + 1,
-                  column: node.startPosition.column,
-                });
-              }
-            }
+            emitFileImport(ctx, importPath, node, source);
           }
         } else {
           const calleeName = getCalleeName(node, source);
@@ -243,6 +297,17 @@ export const nixExtractor: LanguageExtractor = {
                 line: node.startPosition.row + 1,
                 column: node.startPosition.column,
               });
+            }
+          }
+
+          // `callPackage ./pkg.nix { }` loads the file like `import` does; the
+          // first argument of the apply chain is the package file. Only a
+          // literal static path counts (`callPackage pkgPath { }` stays dynamic).
+          if (calleeName && isCallPackageName(calleeName)) {
+            const firstArg = getFirstApplyArgument(node);
+            const importPath = firstArg ? getStaticImportPath(firstArg, source) : null;
+            if (importPath) {
+              emitFileImport(ctx, importPath, node, source);
             }
           }
         }

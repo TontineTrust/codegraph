@@ -840,7 +840,27 @@ export class ReferenceResolver {
     }
 
     // Strategy 3: Try name matching
-    const nameResult = this.gateLanguage(matchReference(ref, this.context), ref);
+    let nameResult = this.gateLanguage(matchReference(ref, this.context), ref);
+    // Nix has no ambient cross-file namespace — a callee binds lexically
+    // (same file) or through explicit import/callPackage wiring (the import
+    // path above). A cross-file name match is wrong by construction: every
+    // module `inherit (lib) mkOption`s the same nixpkgs helpers, so the
+    // matcher would link each `mkOption` call to whichever file's inherit
+    // binding it happened to pick. Same-file matches only.
+    if (nameResult) {
+      const target = this.queries.getNodeById(nameResult.targetNodeId);
+      if (ref.language === 'nix') {
+        if (!target || target.filePath !== ref.filePath) {
+          nameResult = null;
+        }
+      } else if (target && target.language === 'nix') {
+        // The reverse direction is just as impossible: no other language can
+        // symbolically call into a .nix binding (interop is eval/CLI, never a
+        // linkable symbol) — without this, a Python script's `split()` lands
+        // on some module's `split = ...` binding as a low-confidence match.
+        nameResult = null;
+      }
+    }
     if (nameResult) {
       candidates.push(nameResult);
     }
