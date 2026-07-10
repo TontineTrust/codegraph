@@ -94,9 +94,19 @@ export function defaultProbes(filename: string): RemoveBinaryProbes {
   };
 }
 
+/**
+ * Path math keyed on the TARGET platform (not the host) — same convention as
+ * `detectInstallMethod`, so the planner is deterministic when unit-tested with
+ * a win32 fixture on a POSIX host and vice versa. In production the probe's
+ * platform always matches the running host.
+ */
+function pathFor(platform: NodeJS.Platform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
 /** The machine-level state dir that must survive an artifacts-only removal. */
 function stateDir(p: RemoveBinaryProbes): string {
-  return path.join(p.homedir, '.codegraph');
+  return pathFor(p.platform).join(p.homedir, '.codegraph');
 }
 
 /**
@@ -113,6 +123,7 @@ export function npmInvocation(platform: NodeJS.Platform, npmArgs: string[]): { c
 
 /** Candidate bundle install dirs: the running binary's own, plus the defaults. */
 function installDirCandidates(p: RemoveBinaryProbes): string[] {
+  const P = pathFor(p.platform);
   const dirs: string[] = [];
   const method = detectInstallMethod({
     filename: p.filename,
@@ -125,14 +136,15 @@ function installDirCandidates(p: RemoveBinaryProbes): string[] {
   // Platform defaults — probed even when the RUNNING binary is npm/source,
   // because the whole point is clearing installs the user forgot about.
   if (p.platform === 'win32') {
-    if (p.env.LOCALAPPDATA) dirs.push(path.win32.join(p.env.LOCALAPPDATA, 'codegraph'));
+    if (p.env.LOCALAPPDATA) dirs.push(P.join(p.env.LOCALAPPDATA, 'codegraph'));
   } else {
     dirs.push(stateDir(p));
   }
-  return [...new Set(dirs.map((d) => path.resolve(d)))];
+  return [...new Set(dirs.map((d) => P.resolve(d)))];
 }
 
 export function planBinaryRemoval(p: RemoveBinaryProbes): BinaryRemovalPlan {
+  const P = pathFor(p.platform);
   const plan: BinaryRemovalPlan = {
     paths: [],
     npmGlobal: false,
@@ -156,11 +168,11 @@ export function planBinaryRemoval(p: RemoveBinaryProbes): BinaryRemovalPlan {
   for (const dir of installDirCandidates(p)) {
     // A dir counts as a bundle install only when it carries install artifacts.
     const artifacts = ['versions', 'current']
-      .map((a) => path.join(dir, a))
+      .map((a) => P.join(dir, a))
       .filter((a) => p.exists(a) || p.readlink(a) !== null); // `current` is a symlink on unix
     if (artifacts.length === 0) continue;
     installDirs.push(dir);
-    if (path.resolve(dir) === path.resolve(stateDir(p))) {
+    if (P.resolve(dir) === P.resolve(stateDir(p))) {
       // Shared with machine-level state: remove artifacts only.
       plan.paths.push(...artifacts);
       plan.summary.push(`bundle install at ${dir} (versions/ and current — state files kept)`);
@@ -172,17 +184,17 @@ export function planBinaryRemoval(p: RemoveBinaryProbes): BinaryRemovalPlan {
 
   // --- Bin-dir shim (unix installer's symlink) --------------------------------
   const binDir = p.env.CODEGRAPH_BIN_DIR
-    ?? (p.platform === 'win32' ? null : path.join(p.homedir, '.local', 'bin'));
+    ?? (p.platform === 'win32' ? null : P.join(p.homedir, '.local', 'bin'));
   if (binDir) {
-    const shim = path.join(binDir, 'codegraph');
+    const shim = P.join(binDir, 'codegraph');
     const target = p.readlink(shim);
     // Only when the link demonstrably points into a bundle install dir —
     // resolved against the link's own directory, since install.sh links an
     // absolute target but a hand-made relative link must still verify.
     if (target !== null) {
-      const resolved = path.resolve(binDir, target);
-      const ours = installDirs.some((d) => resolved.startsWith(path.resolve(d) + path.sep))
-        || resolved.includes(`${path.sep}.codegraph${path.sep}`);
+      const resolved = P.resolve(binDir, target);
+      const ours = installDirs.some((d) => resolved.startsWith(P.resolve(d) + P.sep))
+        || resolved.includes(`${P.sep}.codegraph${P.sep}`);
       if (ours) {
         plan.paths.push(shim);
         plan.summary.push(`launcher link at ${shim}`);
@@ -196,7 +208,7 @@ export function planBinaryRemoval(p: RemoveBinaryProbes): BinaryRemovalPlan {
   const rootInv = npmInvocation(p.platform, ['root', '-g']);
   const rootRes = p.capture(rootInv.cmd, rootInv.args);
   if (rootRes && rootRes.code === 0) {
-    const pkgDir = path.join(rootRes.stdout.trim(), NPM_PACKAGE);
+    const pkgDir = P.join(rootRes.stdout.trim(), NPM_PACKAGE);
     if (rootRes.stdout.trim() && p.exists(pkgDir)) {
       plan.npmGlobal = true;
       plan.npmRoot = rootRes.stdout.trim();
@@ -247,10 +259,11 @@ export function defaultRemoveDeps(): RemoveBinaryDeps {
  * it. Returns the leftover path, or null when nothing needed moving.
  */
 function moveLockedExeAside(dir: string, deps: RemoveBinaryDeps): string | null {
-  const resolvedDir = path.resolve(dir) + path.sep;
   if (deps.platform !== 'win32') return null;
-  if (!path.resolve(deps.execPath).startsWith(resolvedDir)) return null;
-  const leftover = path.join(path.dirname(path.resolve(dir)), `codegraph-old-node-${process.pid}.exe`);
+  const P = pathFor(deps.platform);
+  const resolvedDir = P.resolve(dir) + P.sep;
+  if (!P.resolve(deps.execPath).startsWith(resolvedDir)) return null;
+  const leftover = P.join(P.dirname(P.resolve(dir)), `codegraph-old-node-${process.pid}.exe`);
   try {
     deps.rename(deps.execPath, leftover);
     return leftover;
@@ -265,10 +278,11 @@ export function executeBinaryRemoval(
 ): BinaryRemovalResult {
   const result: BinaryRemovalResult = { removed: [], leftovers: [], npm: 'skipped' };
 
+  const P = pathFor(deps.platform);
   for (const p of plan.paths) {
     // Planner-emitted paths are always deep, specific artifacts; this guard
     // exists so no future planner bug can ever hand the executor a root.
-    if (path.resolve(p) === path.parse(path.resolve(p)).root) {
+    if (P.resolve(p) === P.parse(P.resolve(p)).root) {
       result.leftovers.push(p);
       continue;
     }
