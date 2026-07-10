@@ -9,6 +9,10 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### New Features
+
+- The MCP server now notices when a newer CodeGraph release exists and tells you — a long-running server used to drift behind releases silently until something broke. On startup it checks the latest release in the background (never blocking, at most once a day, cached across all servers on the machine) and surfaces a one-line "update available — run `codegraph upgrade`" notice in the server log, in the instructions your agent sees on connect, and in `codegraph_status`. Nothing updates by itself, and being offline just means no notice. Opt out with `CODEGRAPH_NO_UPDATE_CHECK=1`; `DO_NOT_TRACK=1` disables it too. (#1243)
+
 ### Fixes
 
 - `codegraph upgrade` on a Windows npm install actually runs npm again — modern Node refuses to launch `npm.cmd` directly, so the upgrade failed with a spawn error before doing anything. npm is now invoked the way a terminal would run it. (#1238)
