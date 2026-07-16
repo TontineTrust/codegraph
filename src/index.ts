@@ -55,6 +55,7 @@ import { deriveProjectNameTokens } from './search/query-utils';
 import { CodeGraphPackageVersion } from './mcp/version';
 import { segmentLookupVariants, splitIdentifierSegments } from './search/identifier-segments';
 import { createYielder } from './resolution/cooperative-yield';
+import { minRefsForPool } from './resolution/resolver-pool';
 
 // Re-export types for consumers
 export * from './types';
@@ -529,6 +530,19 @@ export class CodeGraph {
         if (result.success && result.filesIndexed > 0) {
           // Get count without loading all refs into memory
           const unresolvedCount = this.queries.getUnresolvedReferencesCount();
+
+          // Fast-init leaves the DB in memory-journal (rollback) mode, where
+          // the parallel resolver pool's read connections would contend with
+          // the main writer's exclusive commits. When the pool will actually
+          // run (enough pending refs), restore WAL BEFORE resolution so
+          // readers never block the writer; otherwise stay in the fast mode
+          // until the finally — sequential resolution has no readers.
+          if (fastInit && unresolvedCount >= minRefsForPool()) {
+            try {
+              this.db.getDb().pragma('synchronous = NORMAL');
+              this.db.getDb().pragma('journal_mode = WAL');
+            } catch { /* keep current mode; resolution still works sequentially */ }
+          }
 
           options.onProgress?.({
             phase: 'resolving',
@@ -1067,7 +1081,9 @@ export class CodeGraph {
     onProgress?: (current: number, total: number) => void,
     onSynthesisProgress?: (done: number, total: number) => void
   ): Promise<ResolutionResult> {
-    return this.resolver.resolveAndPersistBatched(onProgress, undefined, onSynthesisProgress);
+    return this.resolver.resolveAndPersistBatched(onProgress, undefined, onSynthesisProgress, {
+      dbPath: this.db.getPath(),
+    });
   }
 
   /**
