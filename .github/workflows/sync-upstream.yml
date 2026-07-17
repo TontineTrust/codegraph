@@ -1,0 +1,116 @@
+name: Sync upstream and Haskell PR branch
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-haskell
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: colbymchenry/codegraph
+  FEATURE_BRANCH: feat/haskell-support-clean
+  UPSTREAM_PR: '1337'
+
+jobs:
+  sync:
+    name: Merge, validate, and push upstream updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out fork main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags upstream main
+
+      - name: Merge upstream into fork main
+        id: main
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge --no-edit upstream/main
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Push fork main
+        if: steps.main.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          git push
+          "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          HEAD:main
+
+      - name: Check whether the upstream PR is still open
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh api "repos/${UPSTREAM_REPOSITORY}/pulls/${UPSTREAM_PR}" --jq .state)
+          echo "state=${state}" >> "$GITHUB_OUTPUT"
+          echo "Upstream PR #${UPSTREAM_PR} is ${state}."
+
+      - name: Merge upstream into the Haskell branch
+        if: steps.pr.outputs.state == 'open'
+        id: feature
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/${FEATURE_BRANCH}:refs/remotes/origin/${FEATURE_BRANCH}"
+          git switch --force-create "$FEATURE_BRANCH" "origin/${FEATURE_BRANCH}"
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge --no-edit upstream/main
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.feature.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.feature.outputs.changed == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.feature.outputs.changed == 'true'
+        run: npm run build
+
+      - name: Run the full test suite
+        if: steps.feature.outputs.changed == 'true'
+        run: npm test -- --maxWorkers=2 --minWorkers=1
+
+      - name: Verify the npm package
+        if: steps.feature.outputs.changed == 'true'
+        run: |
+          npm pack --dry-run
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Push the validated Haskell branch
+        if: steps.feature.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          git push
+          "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          "HEAD:${FEATURE_BRANCH}"
