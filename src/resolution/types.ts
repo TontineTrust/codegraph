@@ -249,6 +249,19 @@ export interface ImportMapping {
   isDefault: boolean;
   /** Whether it's a namespace import (import * as X) */
   isNamespace: boolean;
+  /**
+   * Optional parent export for languages with grouped exports, such as
+   * Haskell's `Type(Constructor)` and `Type(..)` import items.
+   */
+  parentExport?: string;
+  /** Namespace/wildcard allow-list of directly named exports. */
+  includedNames?: string[];
+  /** Namespace/wildcard allow-list of all children owned by these exports. */
+  includedParentExports?: string[];
+  /** Namespace/wildcard deny-list of directly named exports. */
+  excludedNames?: string[];
+  /** Namespace/wildcard deny-list of all children owned by these exports. */
+  excludedParentExports?: string[];
   /** Resolved file path (if local) */
   resolvedPath?: string;
 }

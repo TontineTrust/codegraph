@@ -1,604 +1,682 @@
-/**
- * Haskell extractor — basic-but-real coverage on top of the upstream
- * `tree-sitter-haskell` grammar (vendored at `../wasm/tree-sitter-haskell.wasm`,
- * ABI 14, sha256 d82f63a8…; see `../wasm/README.md` for the build recipe).
- *
- * What it extracts
- * ----------------
- *   function       — top-level `f x = …` (one node per clause; same-named clauses
- *                    dedupe at query time). Also parameterless top-level
- *                    bindings (`main = do …`, `pi = 3.14`, `constVal = 42`)
- *                    which the grammar parses as `bind` nodes — extracted as
- *                    function-kind because they're callable in Haskell.
- *                    Also operator definitions (`x === y = …` and `(===) x y = …`)
- *                    — extracted with the operator wrapped in parens
- *                    (`function:(===)`).
- *   method         — class method bodies + signatures, instance method bodies
- *                    (qualified as `T.method` via getReceiverType)
- *   interface      — type class declarations (`class C a where …`)
- *   enum           — data types and newtypes
- *   enum_member    — data / newtype constructors; GADT constructors
- *                    (`data Term a where IntT :: Int -> Term Int`) too
- *   field          — record-syntax fields (`data Foo = Foo { x :: Int }`),
- *                    scoped to the parent enum (Haskell record selectors live
- *                    at the type level: `x :: Foo -> Int`)
- *   type_alias     — `type T = U` (grammar mis-spells the node `type_synomym`)
- *   import         — `import Data.List (sort)` → moduleName "Data.List"
- *
- * Edges
- * -----
- *   calls          — direct `apply` chains, leaf-only to avoid spurious
- *                    "f x"-text callees on nested/curried apply, PLUS
- *                    higher-order synthesis (see "Higher-order calls" below).
- *   contains       — standard scope nesting
- *   imports        — module-name based
- *   implements     — emitted from `instance C T where …` (T → C) when T is
- *                    defined in the same file; also from `data T … deriving (C1, C2)`
- *                    (and the `newtype` analogue) → one per derived class
- *   extends        — emitted by core `extractInheritance` from class superclass
- *                    constraints `class (Eq a, Show a) => Ord a where …`
- *                    (Haskell `context:` AST field; see tree-sitter.ts)
- *
- * Higher-order calls
- * ------------------
- * Haskell pervasively passes functions as data: `totalArea xs = sum (map area xs)`
- * calls `area` once per list element, but tree-sitter sees `area` only as the
- * first argument of `map`. Without synthesis the call graph is broken at every
- * idiomatic combinator. We bridge this by emitting an additional `calls` edge
- * from the caller to the FIRST positional argument of a known higher-order
- * function (see HOF_NAMES). Scope is deliberately narrow:
- *   - Only the FIRST positional arg of a curried application is treated as the
- *     "function" arg. In `mapM_ putStrLn shapes`, `putStrLn` is bridged;
- *     `shapes` (the data) is NOT (it's the argument of the outer apply, whose
- *     function field is itself an apply, not a leaf HOF variable).
- *   - Only when the argument is a bare `variable` or `constructor` name —
- *     lambdas, sections, and composed expressions (`(f . g)`, `(\\x -> …)`) are
- *     skipped.
- *   - The HOF must be a known function-first combinator. The list is the
- *     Foldable/Traversable / list-utility combinators that take their function
- *     argument FIRST: `map`, `fmap`, `mapM_`, `filter`, `foldr`, `traverse`,
- *     `concatMap`, `find`, `takeWhile`, `sortBy`, `zipWith`, … (see HOF_NAMES
- *     for the full list and rationale). Data-first variants like `forM_`,
- *     `for_`, `forM`, `for` are *deliberately excluded* — their signature is
- *     `t a -> (a -> f b) -> …` so including them would bridge the data list
- *     to the call graph, not the function.
- *   - Operators (`(>>=)`, `(<$>)`, `(.)`) are parsed as `infix` not `apply`
- *     and are NOT bridged — that's the monadic-bind frontier and needs a
- *     separate, scoped pass.
- *
- * What it does NOT extract yet (known gaps)
- * -----------------------------------------
- *   - Monadic-bind / operator-as-call flows: `xs >>= f`, `f <$> xs`. These
- *     parse as `infix` nodes; the higher-order bridge above only covers
- *     `apply`-shaped combinators.
- *   - Orphan instances: `instance C T` where `T` is defined in another file
- *     produces no `implements` edge. The receiver-type lookup is local-only;
- *     fixing this needs a resolver pass that matches by receiver-name across
- *     files.
- *   - Operator sections / infix as calls: `x + y` does not emit a call to `(+)`,
- *     `xs >>= f` does not emit a call to `(>>=)`. The operator DEFINITIONS are
- *     extracted (see above), but operator-as-call (infix usage) needs a
- *     separate pass over `infix` AST nodes that we haven't done.
- *   - `.lhs` (literate Haskell), `.cabal`, `package.yaml`: not parsed.
- *   - No build-graph awareness: imports resolve module-name → module-name; the
- *     extractor doesn't know which Cabal/Stack package a module belongs to.
- *
- * How it's tested
- * ---------------
- *   1. Unit tests — `__tests__/extraction.test.ts` "Haskell Extraction" block.
- *      27 cases cover function extraction, type class, ADT/newtype as enum,
- *      GADT constructors, type synonym, dotted-module imports, call
- *      attribution (including the regression guards that the file is NOT the
- *      attribution scope for operator/instance-method bodies), instance
- *      method receivers, instance/deriving → implements, superclass → extends,
- *      record fields, higher-order calls (positive: `map` / `filter` /
- *      `mapM_` / `traverse` / `zipWith`; negative: data-arg / data-first
- *      `forM_`/`for_` / non-HOF caller — none of those bridge), where-clause
- *      call resolution (both top-level and inside instance methods),
- *      operator function definitions, and top-level `bind` extraction
- *      (`main = do …`, `constVal = 42`). All green via
- *      `npx vitest run __tests__/extraction.test.ts -t "Haskell"`.
- *
- *   2. Real-repo extraction integrity — `scripts/add-lang/verify-extraction.mjs`
- *      on 4 pinned repos: xmonad (v0.18.1, commit 1a875b34, 39 files / 799
- *      nodes / 1630 edges / 12 implements / 57 fields), shellcheck (v0.11.0,
- *      aac0823e, 33 / 2034 / 4137 / 143 fields), pandoc (3.9.0.2, f1e06147,
- *      557 / 16220 / 35985 / 67 implements + 3 extends / 1119 fields),
- *      purescript (c4a35b34, 270 / 8185 / 15757 / 277 implements / 578 fields).
- *      All PASS.
- *
- *   3. Agent A/B benchmark — `scripts/add-lang/bench.sh haskell <name> <url> "<Q>"`
- *      runs Claude Opus headlessly twice per repo (WITH codegraph MCP /
- *      WITHOUT), parses tool calls + cost + duration. Across the 4 repos,
- *      WITH-arm uses 0 Read + 0 Grep + 0 Bash for the canonical flow question
- *      per repo (windows-arrangement for xmonad, parse-analyze for shellcheck,
- *      reader-pipeline for pandoc, compile-pipeline for purescript) where the
- *      WITHOUT-arm runs ~17 Read + ~14 Bash + 1 sub-agent per repo. The
- *      ab-matrix doc has the per-cell numbers.
- */
-
 import type { Node as SyntaxNode } from 'web-tree-sitter';
-import { getNodeText } from '../tree-sitter-helpers';
-import type { LanguageExtractor } from '../tree-sitter-types';
+import { getChildByField, getNodeText, getPrecedingDocstring } from '../tree-sitter-helpers';
+import type { ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
 
-function joinModuleIds(moduleNode: SyntaxNode, source: string): string {
-  const parts: string[] = [];
-  for (let i = 0; i < moduleNode.namedChildCount; i++) {
-    const c = moduleNode.namedChild(i);
-    if (c?.type === 'module_id') parts.push(getNodeText(c, source));
+// tree-sitter-haskell emits signatures, default signatures, and equations as
+// separate syntax nodes. Keep them under one graph node per lexical declaration.
+// The syntax-parent span distinguishes same-named locals in separate let blocks;
+// methods are already uniquely scoped by their typeclass/instance owner.
+// The core creates a lightweight ExtractorContext wrapper for every visited
+// syntax node, so key the per-extraction state by the stable nodes array rather
+// than by the ephemeral context object. Once an extraction result is released,
+// the WeakMap entry can be collected; daemon re-indexing cannot accumulate old
+// source coordinates indefinitely.
+const declarationGroups = new WeakMap<object, Map<string, string>>();
+
+function declarationGroupMap(ctx: ExtractorContext): Map<string, string> {
+  const owner = ctx.nodes as object;
+  let groups = declarationGroups.get(owner);
+  if (!groups) {
+    groups = new Map();
+    declarationGroups.set(owner, groups);
   }
-  return parts.join('.');
+  return groups;
 }
 
-function getInstanceReceiverFromAncestor(node: SyntaxNode, source: string): string | undefined {
-  let p: SyntaxNode | null = node.parent;
-  while (p) {
-    if (p.type === 'instance') {
-      const patterns = p.childForFieldName('patterns');
-      if (patterns) {
-        for (let i = 0; i < patterns.namedChildCount; i++) {
-          const c = patterns.namedChild(i);
-          if (c?.type === 'name') return getNodeText(c, source);
-        }
-      }
-      return undefined;
-    }
-    p = p.parent;
-  }
-  return undefined;
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Pull the class names out of a `deriving:` field — accepts the three shapes
- * the grammar emits: `deriving (Show, Eq)` → `classes: tuple`,
- * `deriving (Show)` → `classes: parens`, and `deriving Show` → `classes: name`.
- */
-function derivedClassNames(derivingNode: SyntaxNode, source: string): Array<{ name: string; node: SyntaxNode }> {
-  const out: Array<{ name: string; node: SyntaxNode }> = [];
-  const classes = derivingNode.childForFieldName('classes');
-  if (!classes) return out;
-  const collect = (n: SyntaxNode) => {
-    if (n.type === 'name') out.push({ name: getNodeText(n, source), node: n });
-    else for (let i = 0; i < n.namedChildCount; i++) {
-      const c = n.namedChild(i);
-      if (c) collect(c);
-    }
+function firstDescendant(node: SyntaxNode, types: ReadonlySet<string>): SyntaxNode | null {
+  if (types.has(node.type)) return node;
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    const hit = firstDescendant(child, types);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+interface HaskellModuleExports {
+  direct: Set<string>;
+  allChildren: Set<string>;
+  children: Map<string, Set<string>>;
+  exportsSelf: boolean;
+}
+
+function syntaxRoot(node: SyntaxNode): SyntaxNode {
+  let root = node;
+  while (root.parent) root = root.parent;
+  return root;
+}
+
+function normalizedExportName(node: SyntaxNode, source: string): string {
+  const text = getNodeText(node, source).replace(/\s+/g, '').trim();
+  return text.startsWith('(') && text.endsWith(')') ? text.slice(1, -1) : text;
+}
+
+/** Parse the module header's explicit export list from the existing AST. */
+function moduleExports(node: SyntaxNode, source: string): HaskellModuleExports | null {
+  const root = syntaxRoot(node);
+  const header = root.namedChildren.find((child) => child.type === 'header');
+  if (!header) return null;
+  const exportsNode = getChildByField(header, 'exports');
+  if (!exportsNode) return null; // No list means Haskell's normal "export all".
+
+  const result: HaskellModuleExports = {
+    direct: new Set(),
+    allChildren: new Set(),
+    children: new Map(),
+    exportsSelf: false,
   };
-  collect(classes);
-  return out;
+  const ownModule = getChildByField(header, 'module');
+  const ownModuleName = ownModule ? getNodeText(ownModule, source).replace(/\s+/g, '') : '';
+
+  for (const entry of exportsNode.namedChildren) {
+    if (entry.type === 'module_export') {
+      const reexported = getChildByField(entry, 'module');
+      if (reexported && getNodeText(reexported, source).replace(/\s+/g, '') === ownModuleName) {
+        result.exportsSelf = true;
+      }
+      continue;
+    }
+    if (entry.type !== 'export') continue;
+    const value = getChildByField(entry, 'variable')
+      ?? getChildByField(entry, 'type')
+      ?? firstDescendant(entry, new Set(['variable', 'constructor', 'name', 'prefix_id']));
+    if (!value) continue;
+    const name = normalizedExportName(value, source);
+    if (!name) continue;
+    result.direct.add(name);
+
+    const children = getChildByField(entry, 'children');
+    if (!children) continue;
+    if (children.namedChildren.some((child) => child.type === 'all_names')) {
+      result.allChildren.add(name);
+      continue;
+    }
+    const names = new Set<string>();
+    const stack = [...children.namedChildren];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (['variable', 'constructor', 'name', 'prefix_id'].includes(current.type)) {
+        const childName = normalizedExportName(current, source);
+        if (childName) names.add(childName);
+      } else {
+        stack.push(...current.namedChildren);
+      }
+    }
+    result.children.set(name, names);
+  }
+  return result;
 }
 
-/**
- * Higher-order-function allowlist for call-edge synthesis. When one of these
- * names appears as the function of an `apply` whose first argument is a bare
- * variable / constructor name, that name is also emitted as a callee from the
- * enclosing function. This bridges idiomatic Haskell patterns like
- * `totalArea xs = sum (map area xs)` — without it, `area` is invisible to the
- * call graph because tree-sitter sees it as data passed to `map`, not a call.
- *
- * The set is deliberately conservative — only "applies its first argument as
- * a function" combinators. Operators like `(>>=)`, `(<$>)`, `(<*>)`, `(.)` are
- * NOT in here because the grammar parses them as `infix` not `apply`, and
- * monadic-bind-style flows are a wider frontier that needs deliberate scoping
- * (CLAUDE.md "partial coverage is worse than none").
- */
-// Allowlist of combinators whose FIRST positional argument is the function
-// (so an identifier passed there is a callable). The strict rule keeps the
-// bridge deterministic: `mapM_ action xs` emits `action` (function-first);
-// `forM_ xs action` and `for xs action` do NOT — they are list-first /
-// function-second and would emit the list as a bogus callee. Same for
-// `flip f x y`, `zipWith f xs ys` only emits f, etc. Stdlib signatures
-// confirmed against `base-4` Prelude / Data.List / Data.Foldable /
-// Data.Traversable. If you add a name here, verify the signature.
-const HOF_NAMES = new Set<string>([
-  // Functor / Foldable / Traversable basics (function-first)
+function isNameExported(
+  node: SyntaxNode,
+  source: string,
+  name: string,
+  parentName?: string,
+): boolean {
+  const exports = moduleExports(node, source);
+  if (!exports || exports.exportsSelf) return true;
+  const canonical = name.startsWith('(') && name.endsWith(')') ? name.slice(1, -1) : name;
+  const canonicalParent = parentName?.startsWith('(') && parentName.endsWith(')')
+    ? parentName.slice(1, -1)
+    : parentName;
+  if (!canonicalParent) return exports.direct.has(canonical);
+  return exports.direct.has(canonical)
+    || exports.allChildren.has(canonicalParent)
+    || exports.children.get(canonicalParent)?.has(canonical)
+    || false;
+}
+
+function precedingSignature(node: SyntaxNode, name: string, source: string): SyntaxNode | null {
+  let previous = node.previousNamedSibling;
+  while (previous) {
+    if (previous.type === 'comment' || previous.type === 'function' || previous.type === 'bind') {
+      previous = previous.previousNamedSibling;
+      continue;
+    }
+    if (previous.type !== 'signature') return null;
+    const beforeType = getNodeText(previous, source).split('::', 1)[0] ?? '';
+    const names = beforeType.split(',').map((part) => part.trim());
+    return names.includes(name) ? previous : null;
+  }
+  return null;
+}
+
+function declarationGroupKey(
+  node: SyntaxNode,
+  name: string,
+  kind: 'function' | 'method' | 'constant',
+  ctx: ExtractorContext,
+): string {
+  const scopeId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
+  if (kind === 'method') return `${ctx.filePath}:method:${scopeId}:${name}`;
+  const container = node.parent;
+  const containerSpan = container ? `${container.startIndex}:${container.endIndex}` : 'root';
+  return `${ctx.filePath}:${kind}:${scopeId}:${containerSpan}:${name}`;
+}
+
+function groupedNode(key: string, ctx: ExtractorContext) {
+  const id = declarationGroupMap(ctx).get(key);
+  return id ? ctx.nodes.find((candidate) => candidate.id === id) : undefined;
+}
+
+function extendGroupedNode(node: SyntaxNode, existing: NonNullable<ReturnType<typeof groupedNode>>): void {
+  const startLine = node.startPosition.row + 1;
+  const endLine = node.endPosition.row + 1;
+  if (startLine < existing.startLine) {
+    existing.startLine = startLine;
+    existing.startColumn = node.startPosition.column;
+  } else if (startLine === existing.startLine) {
+    existing.startColumn = Math.min(existing.startColumn, node.startPosition.column);
+  }
+  if (endLine > existing.endLine) {
+    existing.endLine = endLine;
+    existing.endColumn = node.endPosition.column;
+  } else if (endLine === existing.endLine) {
+    existing.endColumn = Math.max(existing.endColumn, node.endPosition.column);
+  }
+}
+
+function visitFunctionPayload(node: SyntaxNode, functionId: string, ctx: ExtractorContext): void {
+  ctx.pushScope(functionId);
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    if (child.type === 'match' || child.type === 'local_binds' || child.type === 'where') {
+      // Route through the full visitor, not the calls-only body walker: Haskell
+      // permits named local functions in let/where blocks and those need the
+      // language hook for clause grouping and signature attachment.
+      ctx.visitNode(child);
+    }
+  }
+  ctx.popScope();
+}
+
+function isFunctionBinding(node: SyntaxNode, signatureNode: SyntaxNode | null, source: string): boolean {
+  if (signatureNode && getNodeText(signatureNode, source).includes('->')) return true;
+  const match = getChildByField(node, 'match');
+  let expression = match ? getChildByField(match, 'expression') : null;
+  while (expression?.type === 'parens' && expression.namedChildCount === 1) {
+    expression = expression.namedChild(0);
+  }
+  if (expression?.type === 'lambda' || expression?.type === 'lambda_case') return true;
+  if (expression?.type === 'infix') {
+    const operator = getChildByField(expression, 'operator');
+    const operatorName = operator ? getNodeText(operator, source).trim() : '';
+    return operatorName === '.' || operatorName === '>=>' || operatorName === '<=<';
+  }
+  return false;
+}
+
+// Function-first combinators for which a bare first argument is genuinely
+// invoked by the combinator. Data-first variants (`forM_`, `for_`, …) are
+// intentionally excluded.
+const HOF_NAMES = new Set([
   'map', 'fmap', 'filter', 'foldr', 'foldl', "foldl'", 'foldr1', 'foldl1',
-  'concatMap', 'find', 'any', 'all',
-  // Monadic action runners (function-first ONLY — NOT `forM`/`for`, those are
-  // `flip mapM` / `flip traverse` and put the data list first)
-  'mapM', 'mapM_', 'foldM', 'foldM_',
-  // Traversable (function-first)
-  'traverse', 'traverse_', 'mapAccumL', 'mapAccumR',
-  // List utilities that take a predicate / comparator as the FIRST arg
-  'takeWhile', 'dropWhile', 'span', 'break', 'partition',
-  'groupBy', 'sortBy', 'nubBy', 'deleteBy', 'insertBy', 'unionBy', 'intersectBy',
-  // Two-list / multi-arg HOFs (function-first)
-  'zipWith', 'zipWith3', 'zipWithM', 'zipWithM_',
-  // Misc function-first combinators
-  'iterate', 'unfoldr', 'until',
+  'concatMap', 'find', 'any', 'all', 'mapM', 'mapM_', 'foldM', 'foldM_',
+  'traverse', 'traverse_', 'mapAccumL', 'mapAccumR', 'takeWhile', 'dropWhile',
+  'span', 'break', 'partition', 'groupBy', 'sortBy', 'nubBy', 'deleteBy',
+  'insertBy', 'unionBy', 'intersectBy', 'zipWith', 'zipWith3', 'zipWithM',
+  'zipWithM_', 'iterate', 'unfoldr', 'until',
 ]);
 
-/**
- * For an `apply` node, return the callee name when its `function:` field is
- * a leaf (variable / constructor / qualified path). Skip when the function is
- * itself another `apply` — the inner curried call carries the leaf name and
- * gets its own bareCall pass. This avoids emitting bogus "f x"-text callee
- * names for nested applications like `f x y`.
- *
- * Additionally synthesizes a call edge for higher-order patterns: when a bare
- * `variable` / `constructor` node is the direct `argument:` of an `apply`
- * whose `function:` is a known HOF (see `HOF_NAMES`), the argument's name is
- * also emitted as a callee. This catches `map area xs` → `caller → area`. The
- * regular `caller → map` call edge is still emitted by the apply-node pass.
- */
-function bareCallFromApply(node: SyntaxNode, source: string): string | undefined {
-  if (node.type === 'apply') {
-    const fn = node.childForFieldName('function');
-    if (!fn) return undefined;
-    if (fn.type === 'variable' || fn.type === 'constructor') {
-      return getNodeText(fn, source);
+function patternContainsName(pattern: SyntaxNode | null, name: string, source: string): boolean {
+  if (!pattern) return false;
+  const stack = [pattern];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.type === 'variable' && getNodeText(current, source).trim() === name) return true;
+    stack.push(...current.namedChildren);
+  }
+  return false;
+}
+
+function declarationBindsName(node: SyntaxNode, name: string, source: string): boolean {
+  const stack = [node];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.type === 'bind' || current.type === 'function') {
+      if (
+        patternContainsName(getChildByField(current, 'pattern'), name, source)
+        || patternContainsName(getChildByField(current, 'patterns'), name, source)
+        || patternContainsName(getChildByField(current, 'name'), name, source)
+      ) return true;
+      continue; // Never inspect a declaration RHS as if it introduced names.
     }
-    if (fn.type === 'qualified' || fn.type === 'qualified_variable') {
-      return getNodeText(fn, source).replace(/\s+/g, '');
+    stack.push(...current.namedChildren);
+  }
+  return false;
+}
+
+/** Haskell lexical bindings that must not become global/imported callees. */
+function isLexicallyBound(name: string, node: SyntaxNode, source: string): boolean {
+  if (!name || name.includes('::')) return false;
+  let branch = node;
+  let ancestor = node.parent;
+  while (ancestor) {
+    if (ancestor.type === 'function' || ancestor.type === 'lambda') {
+      if (patternContainsName(getChildByField(ancestor, 'patterns'), name, source)) return true;
     }
-    return undefined;
+    if (ancestor.type === 'alternative') {
+      if (patternContainsName(getChildByField(ancestor, 'pattern'), name, source)) return true;
+    }
+    if (ancestor.type === 'let') {
+      const binds = getChildByField(ancestor, 'binds');
+      if (binds && !(
+        branch.startIndex >= binds.startIndex && branch.endIndex <= binds.endIndex
+      ) && declarationBindsName(binds, name, source)) return true;
+    }
+    if (ancestor.type === 'do') {
+      for (const statement of ancestor.namedChildren) {
+        if (statement.startIndex >= branch.startIndex) break;
+        if (declarationBindsName(statement, name, source)) return true;
+      }
+    }
+    if (ancestor.type === 'function') break;
+    branch = ancestor;
+    ancestor = ancestor.parent;
+  }
+  return false;
+}
+
+function extractHaskellBareCall(node: SyntaxNode, source: string): string | undefined {
+  if (node.type !== 'variable' && node.type !== 'constructor') return undefined;
+  const name = getNodeText(node, source).trim();
+  if (!name || isLexicallyBound(name, node, source)) return undefined;
+  const parent = node.parent;
+  if (!parent) return undefined;
+
+  // `do { initialise; serve }`: a bare expression statement executes the
+  // action even though there is no `apply` node.
+  if (parent.type === 'exp' && parent.namedChildCount === 1) return name;
+
+  // `map handler xs`: bridge the function-first argument, but never data args
+  // or parameters bound by the enclosing function.
+  if (parent.type !== 'apply') return undefined;
+  const argument = getChildByField(parent, 'argument');
+  if (!argument || argument.startIndex !== node.startIndex || argument.endIndex !== node.endIndex) return undefined;
+  const fn = getChildByField(parent, 'function');
+  if (!fn || (fn.type !== 'variable' && fn.type !== 'constructor')) return undefined;
+  return HOF_NAMES.has(getNodeText(fn, source).trim()) ? name : undefined;
+}
+
+function derivedClassNames(node: SyntaxNode, source: string): Array<{ name: string; node: SyntaxNode }> {
+  const deriving = getChildByField(node, 'deriving')
+    ?? node.namedChildren.find((child) => child.type === 'deriving');
+  if (!deriving) return [];
+  const classes = getChildByField(deriving, 'classes') ?? deriving;
+  const result: Array<{ name: string; node: SyntaxNode }> = [];
+  const stack = [classes];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.type === 'name') {
+      const name = getNodeText(current, source).trim();
+      if (name) result.push({ name, node: current });
+    } else {
+      stack.push(...current.namedChildren);
+    }
+  }
+  return result;
+}
+
+function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  // A `bind` under `do` is a monadic pattern bind (`x <- action`), not a named
+  // declaration. Local value binds stay attributed to their enclosing symbol;
+  // only function-valued local binds become their own graph nodes.
+  const nameNode = getChildByField(node, 'name');
+  if (!nameNode) return false;
+  const name = getNodeText(nameNode, ctx.source).trim();
+  if (!name) return false;
+
+  const scopeId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
+  const owner = ctx.nodes.find((candidate) => candidate.id === scopeId);
+  const isMethod = !!owner && (owner.kind === 'trait' || owner.decorators?.includes('haskell-instance'));
+  const isTopLevel = !owner || owner.kind === 'file' || owner.kind === 'namespace';
+  const signatureNode = precedingSignature(node, name, ctx.source);
+  const functionBinding = isMethod || isFunctionBinding(node, signatureNode, ctx.source);
+  if (!isTopLevel && !functionBinding) return false;
+
+  const kind = isMethod ? 'method' : functionBinding ? 'function' : 'constant';
+  const groupKey = declarationGroupKey(node, name, kind, ctx);
+  const existing = groupedNode(groupKey, ctx);
+  if (existing) {
+    extendGroupedNode(node, existing);
+    visitFunctionPayload(node, existing.id, ctx);
+    return true;
+  }
+  const signature = signatureNode
+    ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
+    : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
+  const bindingNode = ctx.createNode(kind, name, node, {
+    signature: signature || undefined,
+    docstring: getPrecedingDocstring(signatureNode ?? node, ctx.source),
+    isExported: isTopLevel
+      ? isNameExported(node, ctx.source, name)
+      : owner?.kind === 'trait' && isNameExported(node, ctx.source, name, owner.name),
+  });
+  if (!bindingNode) return true;
+
+  declarationGroupMap(ctx).set(groupKey, bindingNode.id);
+  visitFunctionPayload(node, bindingNode.id, ctx);
+  return true;
+}
+
+function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const nameNode = getChildByField(node, 'name');
+  let name = nameNode ? getNodeText(nameNode, ctx.source).trim() : '';
+  if (!name) {
+    const infix = node.namedChildren.find((child) => child.type === 'infix');
+    const operator = infix ? getChildByField(infix, 'operator') : null;
+    const operatorName = operator ? getNodeText(operator, ctx.source).trim() : '';
+    if (operatorName) name = `(${operatorName})`;
+  }
+  if (!name) return true;
+
+  const scopeId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
+  const parent = ctx.nodes.find((candidate) => candidate.id === scopeId);
+  const kind = parent && (parent.kind === 'trait' || parent.decorators?.includes('haskell-instance'))
+    ? 'method'
+    : 'function';
+  const isTopLevel = !parent || parent.kind === 'file' || parent.kind === 'namespace';
+  const groupKey = declarationGroupKey(node, name, kind, ctx);
+  const existing = groupedNode(groupKey, ctx);
+  if (existing) {
+    extendGroupedNode(node, existing);
+    visitFunctionPayload(node, existing.id, ctx);
+    return true;
   }
 
-  // Higher-order synthesis: only when this node is the direct `argument:` of
-  // an `apply` whose `function:` is a leaf variable/constructor in HOF_NAMES.
-  // The "direct argument of a leaf-HOF apply" check intentionally rules out
-  // the second-or-later positional arg of curried HOFs (e.g. in
-  // `mapM_ putStrLn shapes`, `shapes` is the argument of the OUTER apply whose
-  // function is itself an apply — so it never matches and we don't emit a
-  // bogus call to the data list).
-  if (node.type === 'variable' || node.type === 'constructor') {
-    const parent = node.parent;
-    if (!parent) return undefined;
+  const signatureNode = precedingSignature(node, name, ctx.source);
+  const signature = signatureNode
+    ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
+    : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
+  const functionNode = ctx.createNode(kind, name, node, {
+    signature: signature || undefined,
+    docstring: getPrecedingDocstring(signatureNode ?? node, ctx.source),
+    // Instance implementations and let/where helpers are lexical; class
+    // methods are importable only when their parent class exports them.
+    isExported: isTopLevel
+      ? isNameExported(node, ctx.source, name)
+      : parent?.kind === 'trait' && isNameExported(node, ctx.source, name, parent.name),
+  });
+  if (!functionNode) return true;
 
-    // Do-block bare statement: `main = do { hi; bye }`. The `do` contains
-    // `statement: exp` children, each wrapping a single expression. When that
-    // expression is just a bare variable, the variable IS the monadic action
-    // being run — emit a call edge from the caller to it. Without this,
-    // every monadic helper invoked statement-style in a do-block is missed.
-    if (parent.type === 'exp' && parent.namedChildCount === 1) {
-      return getNodeText(node, source);
+  declarationGroupMap(ctx).set(groupKey, functionNode.id);
+  visitFunctionPayload(node, functionNode.id, ctx);
+  return true;
+}
+
+const CONSTRUCTOR_DECLARATIONS = new Set([
+  'data_constructor',
+  'newtype_constructor',
+  'gadt_constructor',
+  'constructor_synonym',
+]);
+
+function handleDataDeclaration(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const nameNode = getChildByField(node, 'name');
+  if (!nameNode) return true;
+  const name = getNodeText(nameNode, ctx.source).trim();
+  if (!name) return true;
+
+  const typeNode = ctx.createNode(node.type === 'newtype' ? 'struct' : 'enum', name, node, {
+    signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
+    docstring: getPrecedingDocstring(node, ctx.source),
+    isExported: isNameExported(node, ctx.source, name),
+  });
+  if (!typeNode) return true;
+
+  ctx.pushScope(typeNode.id);
+  const walk = (current: SyntaxNode): void => {
+    if (CONSTRUCTOR_DECLARATIONS.has(current.type)) {
+      const constructorName = getChildByField(current, 'name')
+        ?? firstDescendant(current, new Set(['constructor']));
+      if (constructorName) {
+        const constructor = getNodeText(constructorName, ctx.source).trim();
+        ctx.createNode('enum_member', constructor, current, {
+          signature: collapseWhitespace(getNodeText(current, ctx.source)).slice(0, 260),
+          isExported: isNameExported(current, ctx.source, constructor, name),
+        });
+      }
+      // Record fields can live below a constructor, so continue walking.
+    } else if (current.type === 'field') {
+      const fieldName = getChildByField(current, 'name')
+        ?? firstDescendant(current, new Set(['field_name', 'variable']));
+      if (fieldName) {
+        const field = getNodeText(fieldName, ctx.source).trim();
+        ctx.createNode('field', field, current, {
+          isExported: isNameExported(current, ctx.source, field, name),
+        });
+      }
     }
+    for (let i = 0; i < current.namedChildCount; i++) {
+      const child = current.namedChild(i);
+      if (child) walk(child);
+    }
+  };
+  walk(node);
+  ctx.popScope();
 
-    if (parent.type !== 'apply') return undefined;
-    // Identity comparison would seem natural here, but web-tree-sitter creates
-    // fresh JS wrappers for the same underlying AST node on each access — so
-    // `parent.childForFieldName('argument') !== node` is always true even when
-    // they refer to the same syntax node. Compare by the tree-sitter numeric
-    // node id instead.
-    const arg = parent.childForFieldName('argument');
-    if (!arg || arg.id !== node.id) return undefined;
-    const fn = parent.childForFieldName('function');
-    if (!fn) return undefined;
-    if (fn.type !== 'variable' && fn.type !== 'constructor') return undefined;
-    if (!HOF_NAMES.has(getNodeText(fn, source))) return undefined;
-    return getNodeText(node, source);
+  for (const derived of derivedClassNames(node, ctx.source)) {
+    ctx.addUnresolvedReference({
+      fromNodeId: typeNode.id,
+      referenceName: derived.name,
+      referenceKind: 'implements',
+      line: derived.node.startPosition.row + 1,
+      column: derived.node.startPosition.column,
+    });
   }
+  return true;
+}
 
-  return undefined;
+function handleTypeAlias(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const nameNode = getChildByField(node, 'name')
+    ?? firstDescendant(node, new Set(['name', 'constructor']));
+  if (nameNode) {
+    const name = getNodeText(nameNode, ctx.source).trim();
+    ctx.createNode('type_alias', name, node, {
+      signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
+      docstring: getPrecedingDocstring(node, ctx.source),
+      isExported: isNameExported(node, ctx.source, name),
+    });
+  }
+  return true;
+}
+
+function handleTypeFamily(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const nameNode = getChildByField(node, 'name');
+  if (!nameNode) return true;
+  const patterns = getChildByField(node, 'patterns');
+  const baseName = getNodeText(nameNode, ctx.source).trim();
+  const name = node.type === 'type_instance' && patterns
+    ? collapseWhitespace(`${baseName} ${getNodeText(patterns, ctx.source)}`)
+    : baseName;
+  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
+  const owner = ctx.nodes.find((candidate) => candidate.id === ownerId);
+  ctx.createNode('type_alias', name, node, {
+    signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
+    docstring: getPrecedingDocstring(node, ctx.source),
+    isExported: node.type !== 'type_instance' && (
+      owner?.kind === 'trait'
+        ? isNameExported(node, ctx.source, baseName, owner.name)
+        : isNameExported(node, ctx.source, baseName)
+    ),
+  });
+  return true;
+}
+
+function visitDeclarationBody(node: SyntaxNode, bodyType: string, ownerId: string, ctx: ExtractorContext): void {
+  const body = getChildByField(node, 'declarations')
+    ?? node.namedChildren.find((child) => child.type === bodyType)
+    ?? null;
+  if (!body) return;
+  ctx.pushScope(ownerId);
+  ctx.visitNode(body);
+  ctx.popScope();
+}
+
+function handleTypeclass(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const nameNode = getChildByField(node, 'name');
+  if (!nameNode) return true;
+  const name = getNodeText(nameNode, ctx.source).trim();
+  const typeclass = ctx.createNode('trait', name, node, {
+    signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
+    docstring: getPrecedingDocstring(node, ctx.source),
+    isExported: isNameExported(node, ctx.source, name),
+  });
+  if (typeclass) {
+    const context = getChildByField(node, 'context');
+    const inner = context ? getChildByField(context, 'context') : null;
+    const constraints = inner?.type === 'tuple' ? inner.namedChildren : inner ? [inner] : [];
+    for (const constraint of constraints) {
+      if (constraint.type !== 'apply') continue;
+      const superclass = getChildByField(constraint, 'constructor');
+      if (!superclass) continue;
+      ctx.addUnresolvedReference({
+        fromNodeId: typeclass.id,
+        referenceName: getNodeText(superclass, ctx.source).trim(),
+        referenceKind: 'extends',
+        line: superclass.startPosition.row + 1,
+        column: superclass.startPosition.column,
+      });
+    }
+    visitDeclarationBody(node, 'class_declarations', typeclass.id, ctx);
+  }
+  return true;
+}
+
+function handleInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const classNameNode = getChildByField(node, 'name');
+  if (!classNameNode) return true;
+  const className = getNodeText(classNameNode, ctx.source).trim();
+  const patterns = getChildByField(node, 'patterns');
+  const instanceName = collapseWhitespace(`${className} ${patterns ? getNodeText(patterns, ctx.source) : ''}`);
+  const instanceNode = ctx.createNode('class', instanceName, node, {
+    signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
+    decorators: ['haskell-instance'],
+  });
+  if (!instanceNode) return true;
+  ctx.addUnresolvedReference({
+    fromNodeId: instanceNode.id,
+    referenceName: className,
+    referenceKind: 'implements',
+    line: classNameNode.startPosition.row + 1,
+    column: classNameNode.startPosition.column,
+  });
+  visitDeclarationBody(node, 'instance_declarations', instanceNode.id, ctx);
+  return true;
+}
+
+function handleDerivingInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const classNameNode = getChildByField(node, 'name');
+  if (!classNameNode) return true;
+  const className = getNodeText(classNameNode, ctx.source).trim();
+  const patterns = getChildByField(node, 'patterns');
+  const instanceName = collapseWhitespace(`${className} ${patterns ? getNodeText(patterns, ctx.source) : ''}`);
+  const instanceNode = ctx.createNode('class', instanceName, node, {
+    signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
+    decorators: ['haskell-instance', 'haskell-deriving-instance'],
+  });
+  if (instanceNode) {
+    ctx.addUnresolvedReference({
+      fromNodeId: instanceNode.id,
+      referenceName: className,
+      referenceKind: 'implements',
+      line: classNameNode.startPosition.row + 1,
+      column: classNameNode.startPosition.column,
+    });
+  }
+  return true;
+}
+
+function handleClassSignature(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1];
+  if (!ownerId) return false;
+  const owner = ctx.nodes.find((candidate) => candidate.id === ownerId);
+  if (!owner || (owner.kind !== 'trait' && !owner.decorators?.includes('haskell-instance'))) return false;
+
+  const nameNode = getChildByField(node, 'name');
+  if (nameNode) {
+    const name = getNodeText(nameNode, ctx.source).trim();
+    const groupKey = declarationGroupKey(node, name, 'method', ctx);
+    const existing = groupedNode(groupKey, ctx);
+    if (existing) {
+      extendGroupedNode(node, existing);
+      return true;
+    }
+    const method = ctx.createNode('method', name, node, {
+      signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
+      isExported: owner.kind === 'trait' && isNameExported(node, ctx.source, name, owner.name),
+    });
+    if (method) declarationGroupMap(ctx).set(groupKey, method.id);
+  }
+  return true;
 }
 
 export const haskellExtractor: LanguageExtractor = {
-  functionTypes: ['function'],
+  // Haskell's significant declarations need clause grouping and type-position
+  // filtering, so they are dispatched through visitNode rather than the generic
+  // one-node-per-declaration paths.
+  functionTypes: [],
   classTypes: [],
   methodTypes: [],
-  interfaceTypes: ['class'],
+  interfaceTypes: [],
   structTypes: [],
-  // data_type / newtype handled in visitNode — the grammar's body field is
-  // `constructors`, not the function-shaped `match`, and constructor names
-  // are nested inside `record` children, so the generic enum walker can't
-  // pick them up.
   enumTypes: [],
-  enumMemberTypes: [],
-  typeAliasTypes: ['type_synomym'],
+  typeAliasTypes: [],
   importTypes: ['import'],
-  callTypes: [],
+  callTypes: ['apply', 'infix'],
   variableTypes: [],
-
   nameField: 'name',
-  bodyField: 'match',
+  bodyField: 'declarations',
   paramsField: 'patterns',
-  interfaceKind: 'class',
-  // `where`-clause bindings live in a `binds:` sibling field on the function
-  // node (NOT inside `match:`), so the core needs to walk it explicitly or
-  // calls inside `where` are lost. See LanguageExtractor.extraBodyFields.
-  extraBodyFields: ['binds'],
+  extractBareCall: extractHaskellBareCall,
+  isLexicallyBound,
+  higherOrderFunctionNames: HOF_NAMES,
 
-  getSignature: (node, source) => {
-    const patterns = node.childForFieldName('patterns');
-    if (!patterns) return undefined;
-    return getNodeText(patterns, source);
+  packageTypes: ['header'],
+  extractPackage: (node, source) => {
+    const moduleNode = getChildByField(node, 'module');
+    return moduleNode ? getNodeText(moduleNode, source).replace(/\s+/g, '') : null;
   },
 
-  getVisibility: () => 'public',
-  isExported: () => true,
-
-  getReceiverType: (node, source) => getInstanceReceiverFromAncestor(node, source),
-
-  // visitFunctionBody calls extractBareCall on every body node, so this is
-  // how we pick up `apply` calls inside function/method bodies (visitNode is
-  // not invoked there).
-  extractBareCall: (node, source) => bareCallFromApply(node, source),
-
   extractImport: (node, source) => {
-    const importText = getNodeText(node, source).trim();
-    const moduleNode = node.childForFieldName('module');
-    if (!moduleNode) return { moduleName: importText, signature: importText };
-    const moduleName = joinModuleIds(moduleNode, source);
-    return { moduleName: moduleName || importText, signature: importText };
+    const moduleNode = getChildByField(node, 'module');
+    if (!moduleNode) return null;
+    return {
+      moduleName: getNodeText(moduleNode, source).replace(/\s+/g, ''),
+      signature: collapseWhitespace(getNodeText(node, source)).slice(0, 300),
+    };
   },
 
   visitNode: (node, ctx) => {
-    const t = node.type;
-
-    if (t === 'signature') {
-      const nameNode = node.childForFieldName('name');
-      if (!nameNode) return true;
-      const name = getNodeText(nameNode, ctx.source);
-
-      let p: SyntaxNode | null = node.parent;
-      while (p && p.type !== 'class_declarations' && p.type !== 'instance_declarations') {
-        p = p.parent;
-      }
-      if (!p) return true;
-
-      let hasMatchingFunction = false;
-      for (let i = 0; i < p.namedChildCount; i++) {
-        const sib = p.namedChild(i);
-        if (!sib || sib === node) continue;
-        if (sib.type === 'function') {
-          const sibName = sib.childForFieldName('name');
-          if (sibName && getNodeText(sibName, ctx.source) === name) {
-            hasMatchingFunction = true;
-            break;
-          }
-        }
-      }
-      if (hasMatchingFunction) return true;
-
-      ctx.createNode('method', name, node, {
-        signature: getNodeText(node, ctx.source).trim(),
-        visibility: 'public',
-      });
-      return true;
-    }
-
-    if (t === 'function') {
-      // Operator definition: `x === y = …` has no `name:` field — instead
-      // the grammar puts an `infix` child holding the left operand, operator,
-      // and right operand. Detect this and create a function node named
-      // `(<op>)`. Without this, operator definitions are silently dropped.
-      const hasName = node.childForFieldName('name') != null;
-      if (!hasName) {
-        let infix: SyntaxNode | null = null;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const c = node.namedChild(i);
-          if (c?.type === 'infix') { infix = c; break; }
-        }
-        if (infix) {
-          const opNode = infix.childForFieldName('operator');
-          if (opNode) {
-            const opText = getNodeText(opNode, ctx.source).trim();
-            const opName = `(${opText})`;
-            const left = infix.childForFieldName('left_operand');
-            const right = infix.childForFieldName('right_operand');
-            const sig = left && right
-              ? `${getNodeText(left, ctx.source)} ${opText} ${getNodeText(right, ctx.source)}`
-              : undefined;
-            const created = ctx.createNode('function', opName, node, {
-              signature: sig,
-              visibility: 'public',
-            });
-            if (created) {
-              // Push the operator node onto the scope stack so calls inside
-              // its body attribute to it, not to the enclosing file. The
-              // framework's extractFunction does this around its
-              // visitFunctionBody call; since we bypass extractFunction here,
-              // we must do it manually.
-              ctx.pushScope(created.id);
-              const body = node.childForFieldName('match');
-              if (body) ctx.visitFunctionBody(body, created.id);
-              const binds = node.childForFieldName('binds');
-              if (binds) ctx.visitFunctionBody(binds, created.id);
-              ctx.popScope();
-            }
-            return true;
-          }
-        }
-        // Unnamed function with no infix child — skip (let framework decide).
+    switch (node.type) {
+      case 'function':
+        return handleFunction(node, ctx);
+      case 'bind':
+        return handleBind(node, ctx);
+      case 'data_type':
+      case 'newtype':
+        return handleDataDeclaration(node, ctx);
+      case 'type_synomym':
+        return handleTypeAlias(node, ctx);
+      case 'type_family':
+      case 'type_instance':
+        return handleTypeFamily(node, ctx);
+      case 'class':
+        return handleTypeclass(node, ctx);
+      case 'instance':
+        return handleInstance(node, ctx);
+      case 'deriving_instance':
+        return handleDerivingInstance(node, ctx);
+      case 'signature':
+        return handleClassSignature(node, ctx);
+      default:
         return false;
-      }
-
-      const parent = node.parent;
-      if (parent && (parent.type === 'instance_declarations' || parent.type === 'class_declarations')) {
-        const nameNode = node.childForFieldName('name');
-        if (!nameNode) return true;
-        const name = getNodeText(nameNode, ctx.source);
-        const receiver = getInstanceReceiverFromAncestor(node, ctx.source);
-        const qualifiedName = receiver ? `${receiver}.${name}` : name;
-        const patterns = node.childForFieldName('patterns');
-        const sig = patterns ? getNodeText(patterns, ctx.source) : undefined;
-        const created = ctx.createNode('method', qualifiedName, node, {
-          signature: sig,
-          visibility: 'public',
-        });
-        if (created) {
-          // Push for call attribution (see operator-handler comment above).
-          ctx.pushScope(created.id);
-          const body = node.childForFieldName('match');
-          if (body) ctx.visitFunctionBody(body, created.id);
-          // Method bodies can also have `where` clauses.
-          const binds = node.childForFieldName('binds');
-          if (binds) ctx.visitFunctionBody(binds, created.id);
-          ctx.popScope();
-        }
-        return true;
-      }
-      return false;
     }
-
-    // Top-level value bindings like `main = do …`, `pi = 3.14`, `constVal = 42`
-    // are parsed as `bind` nodes (no `patterns:` field), NOT `function`. Without
-    // this case `main` would not exist in the graph — a huge miss for any
-    // Haskell program. Nested binds inside `where`/`let` are skipped (the call
-    // walker still descends into their bodies and attributes to the outer
-    // function — the desired behavior for "describe's effective calls").
-    if (t === 'bind') {
-      const parent = node.parent;
-      if (!parent || parent.type !== 'declarations') return false;
-      const nameNode = node.childForFieldName('name');
-      if (!nameNode) return false;
-      const name = getNodeText(nameNode, ctx.source);
-      if (!name) return false;
-      const created = ctx.createNode('function', name, node, {
-        visibility: 'public',
-      });
-      if (created) {
-        ctx.pushScope(created.id);
-        const body = node.childForFieldName('match');
-        if (body) ctx.visitFunctionBody(body, created.id);
-        const binds = node.childForFieldName('binds');
-        if (binds) ctx.visitFunctionBody(binds, created.id);
-        ctx.popScope();
-      }
-      return true;
-    }
-
-    if (t === 'data_type' || t === 'newtype') {
-      const nameNode = node.childForFieldName('name');
-      if (!nameNode) return true;
-      const typeName = getNodeText(nameNode, ctx.source);
-      const firstLine = getNodeText(node, ctx.source).split('\n')[0] ?? '';
-      const enumNode = ctx.createNode('enum', typeName, node, {
-        signature: firstLine.trim(),
-        visibility: 'public',
-      });
-      if (!enumNode) return true;
-
-      ctx.pushScope(enumNode.id);
-      // data_type wraps constructors under field `constructors` → either
-      // `data_constructors` (Haskell 98 syntax: `data T = A | B`) OR
-      // `gadt_constructors` (GADT syntax: `data T where A :: T; B :: T`).
-      // newtype has a direct `constructor:` field whose child is
-      // `newtype_constructor`.
-      const ctorsWrapper = node.childForFieldName('constructors');
-      const ctors: SyntaxNode[] = [];
-      const gadtCtors: SyntaxNode[] = [];
-      if (ctorsWrapper) {
-        for (let i = 0; i < ctorsWrapper.namedChildCount; i++) {
-          const c = ctorsWrapper.namedChild(i);
-          if (!c) continue;
-          if (c.type === 'data_constructor') ctors.push(c);
-          else if (c.type === 'gadt_constructor') gadtCtors.push(c);
-        }
-      }
-      const single = node.childForFieldName('constructor');
-      if (single) ctors.push(single);
-
-      // GADT constructors have their name directly as a `name:` field (a
-      // `constructor` typed child), no nested `record`. Emit them upfront.
-      for (const g of gadtCtors) {
-        const nameOnG = g.childForFieldName('name');
-        if (nameOnG) {
-          const ctorName = getNodeText(nameOnG, ctx.source);
-          ctx.createNode('enum_member', ctorName, g, {
-            signature: getNodeText(g, ctx.source).trim(),
-          });
-        }
-      }
-
-      for (const ctor of ctors) {
-        // newtype_constructor: name is a direct `name:` field of type `constructor`.
-        // data_constructor: holds a `constructor:` child which is a `record` (or
-        // `prefix`) carrying the `name:` field.
-        let nameOnCtor = ctor.childForFieldName('name');
-        let inner: SyntaxNode | null = null;
-        if (!nameOnCtor) {
-          inner = ctor.childForFieldName('constructor');
-          if (inner) nameOnCtor = inner.childForFieldName('name');
-        }
-        if (nameOnCtor) {
-          ctx.createNode('enum_member', getNodeText(nameOnCtor, ctx.source), ctor);
-        }
-
-        // Record-syntax fields: data Foo = Foo { a :: Int, b :: String }.
-        // The constructor's inner node is a `record` with a `fields:` child wrapping
-        // one `field` per declared field; each `field` has `name: field_name`. Emit
-        // a `field` node per field so accessor functions become navigable. Field is
-        // scoped to the enum (the data type), not the constructor — Haskell record
-        // selectors live at the type level (`a :: Foo -> Int`).
-        const recordNode = inner?.type === 'record' ? inner : (ctor.childForFieldName('constructor')?.type === 'record' ? ctor.childForFieldName('constructor') : null);
-        if (recordNode) {
-          const fieldsWrap = recordNode.childForFieldName('fields');
-          if (fieldsWrap) {
-            for (let i = 0; i < fieldsWrap.namedChildCount; i++) {
-              const f = fieldsWrap.namedChild(i);
-              if (f?.type !== 'field') continue;
-              const fnameNode = f.childForFieldName('name');
-              if (!fnameNode) continue;
-              const fname = getNodeText(fnameNode, ctx.source);
-              if (!fname) continue;
-              const typeNode = f.childForFieldName('type');
-              const sig = typeNode
-                ? `${fname} :: ${getNodeText(typeNode, ctx.source)}`
-                : undefined;
-              ctx.createNode('field', fname, f, { signature: sig, visibility: 'public' });
-            }
-          }
-        }
-      }
-      ctx.popScope();
-
-      // `deriving (Show, Eq)` → emit one `implements` reference per derived class
-      // from the data type to the class. Mirrors how an explicit `instance` does
-      // it; deriving is just an auto-generated instance.
-      const deriving = node.childForFieldName('deriving');
-      if (deriving) {
-        for (const dc of derivedClassNames(deriving, ctx.source)) {
-          ctx.addUnresolvedReference({
-            fromNodeId: enumNode.id,
-            referenceName: dc.name,
-            referenceKind: 'implements',
-            line: dc.node.startPosition.row + 1,
-            column: dc.node.startPosition.column,
-          });
-        }
-      }
-      return true;
-    }
-
-    // Top-level `instance C T where …` declarations. The grammar's `instance`
-    // node has `name:` = the class and `patterns: type_patterns` containing the
-    // receiver type. Emit an `implements` reference from the receiver type's
-    // node (if defined in this file) to the class. Method bodies inside the
-    // instance are extracted by the `function` case above with the correct
-    // receiver via getReceiverType. We return false so the framework still
-    // descends into instance_declarations and visits those method bodies.
-    if (t === 'instance') {
-      const classNameNode = node.childForFieldName('name');
-      const patterns = node.childForFieldName('patterns');
-      if (classNameNode && patterns) {
-        const className = getNodeText(classNameNode, ctx.source);
-        for (let i = 0; i < patterns.namedChildCount; i++) {
-          const c = patterns.namedChild(i);
-          if (c?.type !== 'name') continue;
-          const typeName = getNodeText(c, ctx.source);
-          // Local lookup only — Haskell orphan instances (type defined in
-          // another file) won't resolve through this path. The receiver type
-          // must be one of the type-shaped node kinds we emit: enum (data /
-          // newtype) or, in principle, struct/class — keep the set wide so
-          // future extractor changes don't silently break this.
-          const typeNode = ctx.nodes.find((n) =>
-            n.name === typeName && (n.kind === 'enum' || n.kind === 'struct' || n.kind === 'class' || n.kind === 'interface')
-          );
-          if (typeNode) {
-            ctx.addUnresolvedReference({
-              fromNodeId: typeNode.id,
-              referenceName: className,
-              referenceKind: 'implements',
-              line: classNameNode.startPosition.row + 1,
-              column: classNameNode.startPosition.column,
-            });
-          }
-        }
-      }
-      return false;
-    }
-
-    return false;
   },
 };

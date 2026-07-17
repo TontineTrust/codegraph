@@ -61,6 +61,9 @@ const VUE_STORE_FACTORY_CALLEES = new Set(['defineStore', 'createStore']);
  *  `const actions = {…}` as a store collection — see looksLikeVueStoreFile). */
 const VUE_STORE_FILE_SIGNAL = /\bdefineStore\b|\bcreateStore\b|\bVuex\b|\bmutations\b|\bactions\b|\bgetters\b|\bnamespaced\b/g;
 
+/** Haskell operators whose operands are themselves functions. */
+const HASKELL_FUNCTION_COMPOSITION_OPERATORS = new Set(['.', '>=>', '<=<', '>>>', '<<<']);
+
 /**
  * Erlang calls that take their real callee as (Module, Function, Args)
  * ARGUMENTS — the spawn/apply family. Keys are the callee as the call site
@@ -1236,6 +1239,23 @@ export class TreeSitterExtractor {
     // Check for function calls
     else if (this.extractor.callTypes.includes(nodeType)) {
       this.extractCall(node);
+    }
+    // Custom visitors may route a handled function body back through the full
+    // visitor so nested declarations are still extracted (Haskell `where` /
+    // `let` blocks). Honour bare semantic calls on that path too; the regular
+    // function-body walker has the equivalent branch below.
+    else if (this.language === 'haskell' && this.extractor.extractBareCall) {
+      const calleeName = this.extractor.extractBareCall(node, this.source);
+      const callerId = this.nodeStack[this.nodeStack.length - 1];
+      if (calleeName && callerId) {
+        this.unresolvedReferences.push({
+          fromNodeId: callerId,
+          referenceName: calleeName,
+          referenceKind: 'calls',
+          line: node.startPosition.row + 1,
+          column: node.startPosition.column,
+        });
+      }
     }
     // `new Foo(...)` / `Foo::new(...)` / object_creation_expression —
     // produce an `instantiates` reference. Children still walked so
@@ -3687,6 +3707,160 @@ export class TreeSitterExtractor {
 
     const callerId = this.nodeStack[this.nodeStack.length - 1];
     if (!callerId) return;
+
+    // Haskell function application is left-associative (`f a b` nests two
+    // `apply` nodes) and the grammar uses the same `variable` shape for a
+    // statically named function and a higher-order parameter. Emit one call for
+    // the OUTERMOST application, unwrap it to the leftmost callee, and suppress
+    // names bound by the enclosing equation/lambda patterns. This avoids the
+    // classic false edge where `runEventExpr (... f) = f err` links to an
+    // unrelated top-level function named `f`.
+    if (this.language === 'haskell') {
+      const sameSyntaxNode = (a: SyntaxNode | null, b: SyntaxNode): boolean =>
+        !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex;
+      const normalizeQualified = (text: string): string => {
+        const compact = text.replace(/\s+/g, '');
+        const lastDot = compact.lastIndexOf('.');
+        return lastDot > 0
+          ? `${compact.slice(0, lastDot)}::${compact.slice(lastDot + 1)}`
+          : compact;
+      };
+      const patternBinds = (name: string): boolean => {
+        if (name.includes('::')) return false;
+        if (this.extractor?.isLexicallyBound?.(name, node, this.source)) return true;
+        let ancestor: SyntaxNode | null = node.parent;
+        while (ancestor) {
+          if (ancestor.type === 'function' || ancestor.type === 'lambda') {
+            const patterns = getChildByField(ancestor, 'patterns');
+            if (patterns) {
+              const stack: SyntaxNode[] = [patterns];
+              while (stack.length > 0) {
+                const current = stack.pop()!;
+                if (current.type === 'variable' && getNodeText(current, this.source) === name) {
+                  return true;
+                }
+                for (let i = 0; i < current.namedChildCount; i++) {
+                  const child = current.namedChild(i);
+                  if (child) stack.push(child);
+                }
+              }
+            }
+          }
+          if (ancestor.type === 'function') break;
+          ancestor = ancestor.parent;
+        }
+        return false;
+      };
+      const simpleReference = (candidate: SyntaxNode | null): { name: string; node: SyntaxNode } | null => {
+        let current = candidate;
+        while (current?.type === 'parens' && current.namedChildCount === 1) {
+          current = current.namedChild(0);
+        }
+        if (!current || !['variable', 'constructor', 'qualified', 'prefix_id'].includes(current.type)) {
+          return null;
+        }
+        let name = getNodeText(current, this.source).trim();
+        if (current.type === 'qualified') name = normalizeQualified(name);
+        if (!name || patternBinds(name)) return null;
+        return { name, node: current };
+      };
+      const emitFunctionRef = (candidate: SyntaxNode | null): void => {
+        const reference = simpleReference(candidate);
+        if (!reference) return;
+        this.unresolvedReferences.push({
+          fromNodeId: callerId,
+          referenceName: reference.name,
+          referenceKind: 'function_ref',
+          line: reference.node.startPosition.row + 1,
+          column: reference.node.startPosition.column,
+        });
+      };
+      const emitCall = (candidate: SyntaxNode | null): boolean => {
+        const reference = simpleReference(candidate);
+        if (!reference) return false;
+        this.unresolvedReferences.push({
+          fromNodeId: callerId,
+          referenceName: reference.name,
+          referenceKind: 'calls',
+          line: reference.node.startPosition.row + 1,
+          column: reference.node.startPosition.column,
+        });
+        return true;
+      };
+
+      if (node.type === 'apply') {
+        // A named expression passed as an application argument is a function
+        // value candidate (`mapM_ handler xs`). The function-ref resolver is
+        // intentionally strict (callables only; import/same-file/unique), so
+        // ordinary value arguments do not turn into fuzzy call edges.
+        const argument = getChildByField(node, 'argument');
+        emitFunctionRef(argument);
+        const directFunction = getChildByField(node, 'function');
+        if (
+          directFunction
+          && (directFunction.type === 'variable' || directFunction.type === 'constructor')
+          && this.extractor?.higherOrderFunctionNames?.has(getNodeText(directFunction, this.source).trim())
+        ) {
+          emitCall(argument);
+        }
+
+        if (
+          node.parent?.type === 'apply' &&
+          sameSyntaxNode(getChildByField(node.parent, 'function'), node)
+        ) {
+          return;
+        }
+        let callee = getChildByField(node, 'function') ?? node.namedChild(0);
+        while (callee?.type === 'apply') {
+          callee = getChildByField(callee, 'function') ?? callee.namedChild(0);
+        }
+        while (callee?.type === 'parens' && callee.namedChildCount === 1) {
+          callee = callee.namedChild(0);
+        }
+        if (!callee || !['variable', 'constructor', 'qualified', 'prefix_id'].includes(callee.type)) {
+          return;
+        }
+        emitCall(callee);
+        return;
+      }
+
+      if (node.type === 'infix') {
+        const operator = getChildByField(node, 'operator');
+        if (!operator) return;
+        let operatorName = getNodeText(operator, this.source).trim();
+        if (operator.type === 'qualified') operatorName = normalizeQualified(operatorName);
+        if (!operatorName) return;
+
+        // `$`/`$!` and `&` are application syntax in practice. The function is
+        // an operand rather than an `apply` node, so surface the semantic callee
+        // (`handler $ value`, `value & handler`) and omit the Prelude operator.
+        if (operatorName === '$' || operatorName === '$!') {
+          emitCall(getChildByField(node, 'left_operand'));
+          return;
+        }
+        if (operatorName === '&') {
+          emitCall(getChildByField(node, 'right_operand'));
+          return;
+        }
+
+        if (HASKELL_FUNCTION_COMPOSITION_OPERATORS.has(operatorName)) {
+          emitFunctionRef(getChildByField(node, 'left_operand'));
+          emitFunctionRef(getChildByField(node, 'right_operand'));
+        } else if (operatorName === '<$>' || operatorName === '=<<') {
+          emitFunctionRef(getChildByField(node, 'left_operand'));
+        } else if (operatorName === '<&>' || operatorName === '>>=') {
+          emitFunctionRef(getChildByField(node, 'right_operand'));
+        }
+        this.unresolvedReferences.push({
+          fromNodeId: callerId,
+          referenceName: operatorName,
+          referenceKind: 'calls',
+          line: operator.startPosition.row + 1,
+          column: operator.startPosition.column,
+        });
+        return;
+      }
+    }
 
     // VB.NET: `foo(args)` is syntactically ambiguous between a call and an
     // index read, so the grammar parses non-empty parens as

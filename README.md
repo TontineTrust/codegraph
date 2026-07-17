@@ -823,6 +823,7 @@ is written):
 | Swift | `.swift` | Full support |
 | Kotlin | `.kt`, `.kts` | Full support |
 | Scala | `.scala`, `.sc` | Full support (classes, traits, methods, type aliases, Scala 3 enums) |
+| Haskell | `.hs` | Partial support (module export lists, qualified/unqualified imports, `Type(..)`/`hiding`, re-exports, grouped functions and signatures, data/newtype/GADT constructors, record fields, type families, typeclasses/instances, direct/infix/HOF calls; Cabal component boundaries, CPP/Template Haskell, semantic typeclass dispatch, and `.lhs`/`.hsc` are not yet modeled) |
 | Dart | `.dart` | Full support |
 | Svelte | `.svelte` | Full support (script extraction, Svelte 5 runes, SvelteKit routes) |
 | Vue | `.vue` | Full support (script + script-setup extraction, Nuxt page/API/middleware routes) |

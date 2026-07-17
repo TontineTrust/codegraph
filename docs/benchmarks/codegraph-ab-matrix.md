@@ -53,10 +53,10 @@ when the whole flow fits in one or two files) — but reads still drop.
 | Go | S | `gin-realworld` | 21 | 0R / 0G | 5 | 35s | 4R / 3G / 1Gl | 57s | 4 |
 | Go | M | `gin-vueadmin` | 625 | 1R / 1G | 4 | 47s | 3R / 3G / 1Gl | 44s | 2 |
 | Go | L | `gin-gitness` | 4438 | 4R / 3G | 4 | 64s | 8R / 7G / 2Gl | 57s | 4 |
-Haskell | S | `xmonad` | 39 | 0R / 0G | 2 | 29s | 14R / 1G / 7B / 1Ag | 84s | 14 |
-Haskell | S | `shellcheck` | 33 | 0R / 0G | 9 | 57s | 20R / 1G / 18B / 1Ag | 118s | 20 |
-Haskell | M | `purescript` | 270 | 0R / 0G | 9 | 69s | 18R / 15B / 1Ag | 110s | 18 |
-Haskell | M | `pandoc` | 557 | 0R / 0G | 5 | 50s | 16R / 2G / 15B / 1Ag | 103s | 16 |
+| Haskell | S | `xmonad` | 39 | 0R / 0G | 2 | 29s | 14R / 1G / 7B / 1Ag | 84s | 14 |
+| Haskell | S | `shellcheck` | 33 | 0R / 0G | 9 | 57s | 20R / 1G / 18B / 1Ag | 118s | 20 |
+| Haskell | M | `purescript` | 270 | 0R / 0G | 9 | 69s | 18R / 15B / 1Ag | 110s | 18 |
+| Haskell | M | `pandoc` | 557 | 0R / 0G | 5 | 50s | 16R / 2G / 15B / 1Ag | 103s | 16 |
 | Java | S | `spring-realworld` | 117 | 2R / 0G | 3 | 35s | 8R / 1G / 5B | 57s | 6 |
 | Java | M | `spring-mall` | 536 | 1R / 0G | 5 | 39s | 2R / 4G / 2Gl | 49s | 1 |
 | Java | L | `spring-halo` | 2444 | 1R / 2G | 8 | 60s | 4R / 1G / 6B | 52s | 3 |

@@ -828,7 +828,11 @@ export class ReferenceResolver {
       const viaImport = this.gateLanguage(resolveViaImport(ref, this.context), ref);
       if (viaImport) {
         const target = this.queries.getNodeById(viaImport.targetNodeId);
-        if (target && (target.kind === 'function' || target.kind === 'method')) {
+        if (target && (
+          target.kind === 'function'
+          || target.kind === 'method'
+          || (ref.language === 'haskell' && target.kind === 'enum_member')
+        )) {
           return viaImport;
         }
       }
@@ -902,6 +906,14 @@ export class ReferenceResolver {
     if (nameResult) {
       const target = this.queries.getNodeById(nameResult.targetNodeId);
       if (ref.language === 'nix') {
+        if (!target || target.filePath !== ref.filePath) {
+          nameResult = null;
+        }
+      } else if (ref.language === 'haskell') {
+        // Haskell has no ambient project-wide namespace: a bare name is local
+        // or brought into scope by an import. Cross-file import matches were
+        // already handled above; accepting a global name-only fallback here
+        // fabricates edges for Prelude names such as `pure` and `length`.
         if (!target || target.filePath !== ref.filePath) {
           nameResult = null;
         }

@@ -50,6 +50,7 @@ const WASM_GRAMMAR_FILES: Record<GrammarLanguage, string> = {
   terraform: 'tree-sitter-terraform.wasm',
   arkts: 'tree-sitter-arkts.wasm',
   nix: 'tree-sitter-nix.wasm',
+  haskell: 'tree-sitter-haskell.wasm',
 };
 
 /**
@@ -170,6 +171,8 @@ export const EXTENSION_MAP: Record<string, Language> = {
   '.tf': 'terraform',
   '.tfvars': 'terraform',
   '.tofu': 'terraform',
+  // Haskell — vendored tree-sitter/tree-sitter-haskell 0.23.1 (MIT, ABI 14).
+  '.hs': 'haskell',
 };
 
 /**
@@ -290,7 +293,7 @@ export async function initGrammars(): Promise<void> {
  */
 const VENDORED_WASM_LANGS: ReadonlySet<GrammarLanguage> = new Set([
   'pascal', 'scala', 'lua', 'luau', 'csharp', 'r', 'cfml', 'cfscript', 'cfquery',
-  'cobol', 'vbnet', 'erlang', 'terraform', 'arkts', 'nix',
+  'cobol', 'vbnet', 'erlang', 'terraform', 'arkts', 'nix', 'haskell',
   'typescript', 'tsx', 'javascript', 'jsx', 'java', 'python', 'go',
 ]);
 
@@ -609,6 +612,7 @@ export function getLanguageDisplayName(language: Language): string {
     erlang: 'Erlang',
     terraform: 'Terraform',
     arkts: 'ArkTS',
+    haskell: 'Haskell',
     unknown: 'Unknown',
   };
   return names[language] || language;

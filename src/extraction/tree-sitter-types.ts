@@ -293,6 +293,16 @@ export interface LanguageExtractor {
   extractBareCall?: (node: SyntaxNode, source: string) => string | undefined;
 
   /**
+   * Return true when a name at this syntax node is introduced by an enclosing
+   * lexical pattern rather than referring to a global/imported callable.
+   * Haskell uses this for function/lambda, case, let, and monadic `do` binds.
+   */
+  isLexicallyBound?: (name: string, node: SyntaxNode, source: string) => boolean;
+
+  /** Function-first combinators whose first argument is semantically called. */
+  higherOrderFunctionNames?: ReadonlySet<string>;
+
+  /**
    * Node types representing a file-level package/namespace declaration
    * (e.g. Kotlin `package_header`, Java `package_declaration`). When set,
    * the core wraps every top-level declaration in an implicit `namespace`

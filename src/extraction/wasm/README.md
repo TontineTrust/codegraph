@@ -24,9 +24,9 @@ vendored branch in `grammars.ts:174`, and a row to the table below.**
 | `tree-sitter-pascal.wasm` | `be3634fca99c19f5` | TBD | upstream Pascal grammar | TBD on next rebuild | `tree-sitter build --wasm` |
 | `tree-sitter-scala.wasm` | `7945b13e6f9b15b5` | TBD | upstream `tree-sitter-scala` | TBD on next rebuild | `tree-sitter build --wasm` |
 
-Full hashes are stored alongside the binaries — `sha256sum *.wasm` inside this
-directory reproduces them. Whenever you re-vendor a grammar, update the
-matching row.
+The table records compact hash prefixes; run `sha256sum *.wasm` inside this
+directory to verify the full hashes. Whenever you re-vendor a grammar, update
+the matching row.
 
 ## Rebuilding a grammar (the Haskell recipe)
 

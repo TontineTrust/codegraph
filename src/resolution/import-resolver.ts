@@ -46,6 +46,7 @@ const EXTENSION_RESOLUTION: Record<string, string[]> = {
   ruby: ['.rb'],
   objc: ['.h', '.m', '.mm'],
   nix: ['.nix', '/default.nix'],
+  haskell: ['.hs'],
 };
 
 export function isNixPathImportRef(ref: UnresolvedRef): boolean {
@@ -81,6 +82,13 @@ interface FileExportIndex {
 }
 const fileExportIndexes = new WeakMap<ResolutionContext, Map<string, FileExportIndex>>();
 
+/**
+ * Haskell imports name modules rather than filesystem paths. Cabal can map a
+ * module to any source directory, so derive the map from the namespace nodes
+ * emitted for `module Foo.Bar where` headers instead of guessing `Foo/Bar.hs`.
+ */
+const haskellModuleIndexes = new WeakMap<ResolutionContext, Map<string, string[]>>();
+
 function getFileExportIndex(filePath: string, context: ResolutionContext): FileExportIndex {
   let perFile = fileExportIndexes.get(context);
   if (!perFile) {
@@ -106,6 +114,7 @@ export function clearImportResolverMemos(context: ResolutionContext): void {
   importPathMemos.delete(context);
   exportedSymbolMemos.delete(context);
   fileExportIndexes.delete(context);
+  haskellModuleIndexes.delete(context);
 }
 
 export function resolveImportPath(
@@ -141,6 +150,13 @@ function resolveImportPathUncached(
     return resolveCobolCopybook(importPath, fromFile, context);
   }
 
+  // Haskell's `import Foo.Bar` is a compiler module name, not an npm-style
+  // bare package and not necessarily a path relative to the importing file.
+  // Resolve it from indexed module headers before the external-import gate.
+  if (language === 'haskell') {
+    return resolveHaskellModule(importPath, fromFile, context);
+  }
+
   // Skip external/npm packages — but pass the context so the
   // bare-specifier heuristic can consult the project's tsconfig
   // alias map first (custom prefixes like `@components/*` would
@@ -169,6 +185,50 @@ function resolveImportPathUncached(
   }
 
   return null;
+}
+
+function resolveHaskellModule(
+  moduleName: string,
+  fromFile: string,
+  context: ResolutionContext
+): string | null {
+  let index = haskellModuleIndexes.get(context);
+  if (!index) {
+    index = new Map();
+    for (const namespace of context.getNodesByKind('namespace')) {
+      if (namespace.language !== 'haskell') continue;
+      const paths = index.get(namespace.name);
+      if (paths) {
+        if (!paths.includes(namespace.filePath)) paths.push(namespace.filePath);
+      } else {
+        index.set(namespace.name, [namespace.filePath]);
+      }
+    }
+    haskellModuleIndexes.set(context, index);
+  }
+
+  const candidates = index.get(moduleName);
+  if (!candidates || candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0]!;
+
+  // Monorepos can contain the same module name in several Cabal components
+  // (especially Main/Spec). Prefer the source tree closest to the importer.
+  const fromParts = fromFile.replace(/\\/g, '/').split('/').slice(0, -1);
+  const sharedPrefix = (candidate: string): number => {
+    const parts = candidate.replace(/\\/g, '/').split('/').slice(0, -1);
+    let shared = 0;
+    while (
+      shared < fromParts.length &&
+      shared < parts.length &&
+      fromParts[shared] === parts[shared]
+    ) {
+      shared++;
+    }
+    return shared;
+  };
+  return candidates.reduce((best, candidate) =>
+    sharedPrefix(candidate) > sharedPrefix(best) ? candidate : best
+  );
 }
 
 /**
@@ -759,6 +819,8 @@ export function extractImportMappings(
     mappings.push(...extractPHPImports(content));
   } else if (language === 'c' || language === 'cpp') {
     mappings.push(...extractCppImports(content));
+  } else if (language === 'haskell') {
+    mappings.push(...extractHaskellImports(content));
   }
 
   return mappings;
@@ -1066,6 +1128,172 @@ function extractCppImports(content: string): ImportMapping[] {
   return mappings;
 }
 
+/**
+ * Extract Haskell module imports, including both GHC spellings of qualified
+ * imports (`import qualified M as X` and `import M qualified as X`). A module
+ * mapping is always emitted for qualified uses; unqualified imports also emit
+ * either their explicit import-list symbols or a wildcard binding.
+ */
+interface HaskellImportItem {
+  name: string;
+  children: '*' | string[] | null;
+}
+
+function splitHaskellList(value: string): string[] {
+  const items: string[] = [];
+  let item = '';
+  let depth = 0;
+  for (const char of value) {
+    if (char === '(') depth++;
+    else if (char === ')') depth--;
+    if (char === ',' && depth === 0) {
+      if (item.trim()) items.push(item.trim());
+      item = '';
+    } else {
+      item += char;
+    }
+  }
+  if (item.trim()) items.push(item.trim());
+  return items;
+}
+
+function haskellImportName(value: string): string {
+  const cleaned = value.trim().replace(/^(?:type|pattern)\s+/, '');
+  const operator = cleaned.match(/^\(([^()]+)\)$/)?.[1]?.trim();
+  return operator ?? cleaned.match(/^([A-Za-z_][A-Za-z0-9_']*)/)?.[1] ?? '';
+}
+
+function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
+  const cleaned = rawItem.trim().replace(/^(?:type|pattern)\s+/, '');
+  if (!cleaned) return null;
+  const operator = cleaned.match(/^\(([^()]+)\)$/)?.[1]?.trim();
+  if (operator) return { name: operator, children: null };
+  const name = cleaned.match(/^([A-Za-z_][A-Za-z0-9_']*)/)?.[1] ?? '';
+  if (!name) return null;
+  const open = cleaned.indexOf('(', name.length);
+  const close = cleaned.lastIndexOf(')');
+  if (open < 0 || close <= open) return { name, children: null };
+  const childList = cleaned.slice(open + 1, close).trim();
+  if (childList === '..') return { name, children: '*' };
+  return {
+    name,
+    children: splitHaskellList(childList).map(haskellImportName).filter(Boolean),
+  };
+}
+
+function extractHaskellImports(content: string): ImportMapping[] {
+  const mappings: ImportMapping[] = [];
+  const stripped = content
+    .replace(/\{-[\s\S]*?-\}/g, '')
+    .replace(/--[^\n]*/g, '');
+  const lines = stripped.split(/\r?\n/);
+
+  const declarations: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const first = lines[i]!;
+    if (!/^\s*import\b/.test(first)) continue;
+    let declaration = first.trim();
+    let depth = (declaration.match(/\(/g) ?? []).length - (declaration.match(/\)/g) ?? []).length;
+    while (depth > 0 && i + 1 < lines.length) {
+      const next = lines[++i]!;
+      declaration += ` ${next.trim()}`;
+      depth += (next.match(/\(/g) ?? []).length - (next.match(/\)/g) ?? []).length;
+    }
+    declarations.push(declaration.replace(/\s+/g, ' ').trim());
+  }
+
+  for (const declaration of declarations) {
+    const body = declaration.replace(/^import\s+/, '');
+    const match = body.match(
+      /^(?:(safe)\s+)?(?:(qualified)\s+)?(?:"[^"]+"\s+)?([A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*)([\s\S]*)$/
+    );
+    if (!match) continue;
+    const moduleName = match[3]!;
+    const tail = match[4] ?? '';
+    const listStart = tail.indexOf('(');
+    const modifiers = listStart >= 0 ? tail.slice(0, listStart) : tail;
+    const isQualified = !!match[2] || /\bqualified\b/.test(modifiers);
+    const isHiding = /\bhiding\b/.test(modifiers);
+    const alias = modifiers.match(/\bas\s+([A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*)\b/)?.[1];
+    const listEnd = listStart >= 0 ? tail.lastIndexOf(')') : -1;
+    const items = listStart >= 0 && listEnd > listStart
+      ? splitHaskellList(tail.slice(listStart + 1, listEnd))
+          .map(parseHaskellImportItem)
+          .filter((item): item is HaskellImportItem => item !== null)
+      : [];
+
+    const directNames = items.flatMap((item) => [
+      item.name,
+      ...(Array.isArray(item.children) ? item.children : []),
+    ]);
+    const parentExports = items.filter((item) => item.children === '*').map((item) => item.name);
+    const restrictions = listStart < 0 ? {} : isHiding ? {
+      excludedNames: directNames,
+      excludedParentExports: parentExports,
+    } : {
+      includedNames: directNames,
+      includedParentExports: parentExports,
+    };
+
+    // Even an unqualified Haskell import permits references through the full
+    // module name; a qualified import exposes only this namespace mapping.
+    mappings.push({
+      localName: alias ?? moduleName,
+      exportedName: '*',
+      source: moduleName,
+      isDefault: false,
+      isNamespace: true,
+      ...restrictions,
+    });
+
+    if (isQualified) continue;
+    if (listStart < 0 || isHiding) {
+      mappings.push({
+        localName: '*',
+        exportedName: '*',
+        source: moduleName,
+        isDefault: false,
+        isNamespace: false,
+        ...restrictions,
+      });
+      continue;
+    }
+
+    for (const item of items) {
+      mappings.push({
+        localName: item.name,
+        exportedName: item.name,
+        source: moduleName,
+        isDefault: false,
+        isNamespace: false,
+      });
+      if (item.children === '*') {
+        mappings.push({
+          localName: '*',
+          exportedName: '*',
+          source: moduleName,
+          isDefault: false,
+          isNamespace: false,
+          parentExport: item.name,
+        });
+      } else if (item.children) {
+        for (const child of item.children) {
+          mappings.push({
+            localName: child,
+            exportedName: child,
+            source: moduleName,
+            isDefault: false,
+            isNamespace: false,
+            parentExport: item.name,
+          });
+        }
+      }
+    }
+  }
+
+  return mappings;
+}
+
 // Cache import mappings per file to avoid re-reading and re-parsing
 const importMappingCache = new Map<string, ImportMapping[]>();
 
@@ -1144,6 +1372,7 @@ function stripJsComments(content: string): string {
  * fall through silently; resolution simply skips the broken file.
  */
 export function extractReExports(content: string, language: Language): ReExport[] {
+  if (language === 'haskell') return extractHaskellReExports(content);
   if (
     language !== 'typescript' &&
     language !== 'javascript' &&
@@ -1196,6 +1425,100 @@ export function extractReExports(content: string, language: Language): ReExport[
     }
   }
 
+  return out;
+}
+
+/**
+ * Extract Haskell module re-exports from a module header:
+ *
+ *   module Facade (module Lib.Api, helper) where
+ *
+ * `module Lib.Api` is an explicit wildcard re-export. A named header item can
+ * also forward a symbol that was explicitly imported into the facade.
+ */
+function extractHaskellReExports(content: string): ReExport[] {
+  const cleaned = content
+    .replace(/\{-[\s\S]*?-\}/g, '')
+    .replace(/--[^\n]*/g, '');
+  const header = cleaned.match(/\bmodule\s+[A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*\s*/);
+  if (!header) return [];
+  const open = cleaned.indexOf('(', header.index! + header[0].length);
+  if (open < 0) return [];
+
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < cleaned.length; i++) {
+    if (cleaned[i] === '(') depth++;
+    else if (cleaned[i] === ')') {
+      depth--;
+      if (depth === 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (close < 0 || !/^\s*where\b/.test(cleaned.slice(close + 1))) return [];
+
+  const items: string[] = [];
+  let item = '';
+  depth = 0;
+  for (const char of cleaned.slice(open + 1, close)) {
+    if (char === '(') depth++;
+    else if (char === ')') depth--;
+    if (char === ',' && depth === 0) {
+      if (item.trim()) items.push(item.trim());
+      item = '';
+    } else {
+      item += char;
+    }
+  }
+  if (item.trim()) items.push(item.trim());
+
+  const out: ReExport[] = [];
+  const imports = extractHaskellImports(content);
+  for (const rawItem of items) {
+    const moduleMatch = rawItem.match(/^module\s+([A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*)$/);
+    if (moduleMatch) {
+      out.push({ kind: 'wildcard', source: moduleMatch[1]! });
+      continue;
+    }
+
+    const normalized = rawItem.replace(/^(?:type|pattern)\s+/, '');
+    const operator = normalized.match(/^\(([^()]+)\)/)?.[1]?.trim();
+    const identifier = normalized.match(/^([A-Za-z_][A-Za-z0-9_']*)/)?.[1];
+    const exportedName = operator ?? identifier;
+    if (!exportedName) continue;
+    let matched = false;
+    for (const imp of imports) {
+      if (imp.isNamespace || imp.localName !== exportedName) continue;
+      out.push({
+        kind: 'named',
+        exportedName,
+        originalName: imp.exportedName,
+        source: imp.source,
+      });
+      matched = true;
+    }
+    // `module Facade (foo) where; import Lib` re-exports `foo` through an
+    // unqualified wildcard import. There is no explicit `localName=foo`
+    // mapping to follow, so retain every eligible wildcard source and let the
+    // normal ambiguity-safe re-export resolver determine the unique owner.
+    if (!matched) {
+      const seenSources = new Set<string>();
+      for (const imp of imports) {
+        if (imp.isNamespace || imp.localName !== '*') continue;
+        if (imp.excludedNames?.includes(exportedName)) continue;
+        if (seenSources.has(imp.source)) continue;
+        seenSources.add(imp.source);
+        out.push({
+          kind: 'named',
+          exportedName,
+          originalName: exportedName,
+          source: imp.source,
+        });
+      }
+    }
+  }
   return out;
 }
 
@@ -1404,6 +1727,11 @@ export function resolveViaImport(
     return null;
   }
 
+  if (ref.language === 'haskell') {
+    const haskellResult = resolveHaskellImportedReference(ref, imports, context);
+    if (haskellResult) return haskellResult;
+  }
+
   // Go cross-package calls: `pkga.FuncX(...)` extracts to referenceName
   // `pkga.FuncX` and the import `github.com/example/myproject/pkga`
   // maps to a *package directory* containing one or more .go files.
@@ -1543,6 +1871,120 @@ export function resolveViaImport(
   }
 
   return null;
+}
+
+/**
+ * Resolve Haskell references through the importing module's import table.
+ * Bare names search unqualified imports only; `Alias::member` searches the
+ * corresponding qualified module. Ambiguous matches are deliberately dropped.
+ */
+function resolveHaskellImportedReference(
+  ref: UnresolvedRef,
+  imports: ImportMapping[],
+  context: ResolutionContext
+): ResolvedRef | null {
+  const moduleFileNode = (moduleName: string): Node | undefined => {
+    const resolvedPath = resolveImportPath(moduleName, ref.filePath, 'haskell', context);
+    if (!resolvedPath) return undefined;
+    return context.getNodesInFile(resolvedPath).find((node) => node.kind === 'file');
+  };
+
+  if (ref.referenceKind === 'imports') {
+    const fileNode = moduleFileNode(ref.referenceName);
+    return fileNode
+      ? { original: ref, targetNodeId: fileNode.id, confidence: 0.95, resolvedBy: 'import' }
+      : null;
+  }
+
+  const isOwnedBy = (node: Node, parent: string): boolean => {
+    const parts = node.qualifiedName.split('::');
+    return parts.slice(0, -1).includes(parent);
+  };
+
+  const mappingAllows = (imp: ImportMapping, name: string, node: Node): boolean => {
+    if (imp.parentExport && !isOwnedBy(node, imp.parentExport)) return false;
+    if (imp.excludedNames?.includes(name)) return false;
+    if (imp.excludedParentExports?.some((parent) => isOwnedBy(node, parent))) return false;
+    const hasAllowList = imp.includedNames !== undefined || imp.includedParentExports !== undefined;
+    if (!hasAllowList) return true;
+    return imp.includedNames?.includes(name) === true
+      || imp.includedParentExports?.some((parent) => isOwnedBy(node, parent)) === true;
+  };
+
+  const findInModule = (
+    moduleName: string,
+    exportedName: string,
+    mapping?: ImportMapping,
+  ): Node | undefined => {
+    const resolvedPath = resolveImportPath(moduleName, ref.filePath, 'haskell', context);
+    if (!resolvedPath) return undefined;
+    const direct = context.getNodesInFile(resolvedPath).filter((node) =>
+      node.isExported
+      && node.name === exportedName
+      && (!mapping || mappingAllows(mapping, exportedName, node))
+    );
+    if (direct.length === 1) return direct[0];
+    if (direct.length > 1) return undefined;
+
+    const reexported = findExportedSymbol(
+      resolvedPath,
+      {
+        isDefault: false,
+        isNamespace: false,
+        exportedName,
+        memberName: null,
+      },
+      'haskell',
+      context,
+      new Set()
+    );
+    return reexported && (!mapping || mappingAllows(mapping, exportedName, reexported))
+      ? reexported
+      : undefined;
+  };
+
+  const uniqueResult = (nodes: Node[]): ResolvedRef | null => {
+    const unique = [...new Map(nodes.map((node) => [node.id, node])).values()];
+    if (unique.length !== 1) return null;
+    return {
+      original: ref,
+      targetNodeId: unique[0]!.id,
+      confidence: 0.95,
+      resolvedBy: 'import',
+    };
+  };
+
+  const separator = ref.referenceName.lastIndexOf('::');
+  if (separator > 0) {
+    const receiver = ref.referenceName.slice(0, separator);
+    const member = ref.referenceName.slice(separator + 2);
+    if (!member) return null;
+    const targets: Node[] = [];
+    for (const imp of imports) {
+      if (!imp.isNamespace || imp.localName !== receiver) continue;
+      const target = findInModule(imp.source, member, imp);
+      if (target) targets.push(target);
+    }
+    return uniqueResult(targets);
+  }
+
+  // Explicit import lists are stronger than wildcard imports. If present,
+  // resolve only through their declared source modules.
+  const explicitTargets: Node[] = [];
+  for (const imp of imports) {
+    if (imp.isNamespace || imp.localName !== ref.referenceName) continue;
+    const target = findInModule(imp.source, imp.exportedName, imp);
+    if (target) explicitTargets.push(target);
+  }
+  if (explicitTargets.length > 0) return uniqueResult(explicitTargets);
+
+  const wildcardTargets: Node[] = [];
+  for (const imp of imports) {
+    if (imp.isNamespace || imp.localName !== '*') continue;
+    const target = findInModule(imp.source, ref.referenceName, imp);
+    if (target) wildcardTargets.push(target);
+  }
+  return uniqueResult(wildcardTargets);
 }
 
 /**
