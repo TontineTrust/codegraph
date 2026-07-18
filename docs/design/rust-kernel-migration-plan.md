@@ -53,21 +53,70 @@ them are the ORIGINAL plan and carry expectations that measurement later correct
       multiline `^` anchors after `\r` — §0a traps) — fixed + CRLF fixtures pinned
       cross-platform in #1329. Every prebuild target platform is now validated.
 - [ ] **P1. Kernel-scale resolution speed** (§7a) — measurement round RUN 2026-07-17
-      and it RESHAPED the arc (full record §7a.1): the "sequential at 2 CPUs"
-      premise was FALSE (pool sizing is cpuset-blind; R6 already ran 6 workers),
-      and both 8-core re-runs failed STRUCTURALLY before yielding a clean number —
-      container OOM at 7GB (memory-blind pool sizing), WAL blowup to 22GB on a
-      4.6GB DB (pool reader snapshots starve checkpoint truncation at kernel
-      scale). Revised order: (1) WAL containment, (2) memory-aware pool sizing,
-      (3) then the speed re-measure. Target unchanged: <10min on 8 cores.
-- [ ] **R7a. C/C++ port** — biggest single-language effort; unlocks cg1212's parse
-      expectation (6.2m → ~1.5–2m, 23% of that wall) + CARLA/UE/llvm-class repos;
-      Metal + CUDA ride along (their blanking pre-passes stay TS-side — `preParse`
-      is offset-preserving and the route point can apply it before the kernel call;
-      see the T2 note in `src/extraction/kernel/index.ts`). Largest per-language
-      surface in tree-sitter.ts: namespace prefix stacks (#1291), local fn-pointer
-      tables (#932), operator calls (#1247), stack construction (#1035), macro
-      salvage + `.h` content detection (stays at detectLanguage, upstream — free).
+      and it RESHAPED the arc (full record §7a.1); items (1) WAL containment and
+      (2) memory-aware/cgroup-honest sizing **SHIPPED same day (#1332–#1335,
+      §7a.2)** after an implementation arc whose three failed/diagnostic
+      kernel-scale runs each corrected the design (WAL file ≠ WAL backlog;
+      cgroup cache credit; pool net-negative at 2 cores; parse floor). The
+      2c/6GB envelope already improved 26.4 → 21.6min with counts byte-exact.
+      Record runs DONE (§7a.2): 2c/6GB 20.4min, 8c/7GB 18.3min NO-OOM — byte-exact.
+      Batch-loop profile round DONE (§7a.3, #1339): countGuard quadratic killed,
+      19.3min. cFnPtr round DONE (§7a.4, #1341): 2.07× standalone, edge set
+      hash-identical, envelope **17.6min (R6 −33%)**. R7a landed 2026-07-17:
+      envelope now **19.1min on a substantially RICHER graph** (the new
+      preParse blanks recover previously-error-swallowed code; wasm-arm on
+      the same graph is 22.9min — the 17.6 record was the old smaller graph
+      and isn't directly comparable). 8c re-run DONE post-R7a (§7a.5):
+      **16.4min** (pre-R7a record 18.3min), EXIT 0, counts == both 2c arms,
+      WAL 1.34GB. The <10min-on-8c target remains open, and the re-run
+      re-ranked the levers honestly: at 8c the parse-loop (202.6s) is
+      already AT the single-writer floor, so **the target gap is ~entirely
+      the core-invariant resolution superphase (715s ≈ 12 of the 16.4min)
+      — the per-ref path is THE 8c lever**. C/C++ deferral round 2 DONE
+      2026-07-18 (full record: checklist doc): eight new C-only preParse
+      passes + word-list extensions took kernel/+mm/ deferral
+      **58.6% → 33.9%** (git 16.1 → 12.2%, redis 25.3 → 24.1%,
+      fmt/protobuf unchanged — cpp-dominant, correct no-op), five-repo
+      sweeps 0-diff, linux full-tree both arms **2,049,153 / 6,413,518**
+      with **byte-identical dumps** (10,446,478 lines, sha `6dd1185b…`);
+      kernel-arm parse-loop **356 → 306s** at 2c, envelope ~17.1min
+      (host-contaminated, indicative). Honesty note: full-graph node
+      deltas are small (+858) — wasm error recovery was already salvaging
+      most SYMBOLS on deferred files; the real win is EDGES (+6,585),
+      phantom cleanup, and native-path coverage. Remaining deferral is
+      policy-skips (CONFIG interleaves, TP_PROTO DSL, module_init-no-semi)
+      + small buckets — this lever is largely SPENT. Queue now: **per-ref
+      resolution path** (the core-invariant superphase) > backpressure
+      ~120s (checkpoint I/O floor) > E-scan/settle/read-mapping (~70–90s
+      each, approaching honest work).
+- [x] **R7a. C/C++ port** — DONE 2026-07-17, same-day walker+gates after the
+      survey (#1344) and grammar vendoring (#1345). One dual-language walker
+      (`codegraph-kernel/src/ccpp/`), preParse HOISTED to the route point
+      (both tryKernelExtract and the raw bulk path — no blanking ported to
+      Rust; Metal/CUDA ride the cpp route through the same hoist). Gates:
+      parity sweeps **0 diffs** on redis/git/fmt/protobuf/ALS (2,389 files
+      compared); full-init dump-diffs **byte-identical** on all five;
+      DEFAULT_ROUTED += c, cpp. Three measurement corrections recorded in
+      the checklist doc: (1) C/C++ parse-error incidence is 9–42% per repo
+      (vs 0–0.42% for prior languages), so erroring-file deferral is
+      routine, not a broken-kernel signal — the sweep gained
+      `--max-deferral` (0.5 for c/cpp) after confirming recovery-divergence
+      is real with the sweep-only no-defer hatch; (2) seven new/extended
+      TS-side preParse blanks (extern-C guard bodies, lone macro lines,
+      statement iterator macros, trailing `UNUSED` params, the curated
+      Linux/sparse `__init`-family annotations + `container_of` type args,
+      cpp leading-attr, directive-line restore) cut real incidence (linux
+      subtrees 79% → 58%) AND grew the wasm path's own graphs (git
+      7.1k → 13.3k nodes) — so cg1212's "counts must stay
+      2,048,664/6,405,964" expectation is superseded: the graph legitimately
+      changes with the blanks; the invariant is kernel-arm == wasm-arm at
+      every scale (held: five byte-identical dumps + the linux dump-hash
+      pair); (3) at high deferral the kernel arm initially LOST arm-vs-arm
+      on linux (deferred files ran the pipeline 3×) — fixed with the
+      one-slot defer memo + blanked-source reuse; final cg1212 envelope
+      **19.1 min kernel-arm** (parse-loop 560 → 356s; R6 26.4 → P1 17.6 on
+      the old smaller graph → 19.1 on the new richer one:
+      2,048,295 nodes / 6,406,933 edges, two runs byte-same).
 - [ ] **R7b. Remaining long tail** per the tracker (§4) — ruby/php/csharp/rust/… T1s
       are now ~1-day-each with the walker pattern; T3 may stay TS forever (fine).
 - [ ] **P2. Arc 3, graph richness** (§7b) — product-priority call, standard gates.
@@ -84,7 +133,8 @@ and has the current build deployed at `/app` (tree at `/work/linux`).
 
 **What exists:**
 - `codegraph-kernel/` — napi-rs crate. One WALKER MODULE per language
-  (`tsjs/`, `java.rs`, `python.rs`, `go.rs`) mirroring `TreeSitterExtractor`'s
+  (`tsjs/`, `java.rs`, `python.rs`, `go.rs`, `ccpp/` for c+cpp) mirroring
+  `TreeSitterExtractor`'s
   per-language paths bug-for-bug; shared `buffers.rs` (wire contract — twin of
   `src/extraction/kernel/layout.ts`, byte-matched, ABI-versioned), `ids.rs`
   (sha node ids, test-pinned to `generateNodeId`), `docstring.rs`, `textutil.rs`
@@ -92,10 +142,13 @@ and has the current build deployed at `/app` (tree at `/work/linux`).
   (grammar registry).
 - `src/extraction/kernel/` — loader (contract-verifies before routing; a stale
   .node silently degrades to wasm; `CODEGRAPH_KERNEL_DEBUG=1` explains), decode,
-  routing (`DEFAULT_ROUTED` = ts/tsx/js/jsx/java/python/go;
-  `CODEGRAPH_KERNEL_LANGS` REPLACES the set; `CODEGRAPH_KERNEL=0` kills), and the
+  routing (`DEFAULT_ROUTED` = ts/tsx/js/jsx/java/python/go/c/cpp;
+  `CODEGRAPH_KERNEL_LANGS` REPLACES the set; `CODEGRAPH_KERNEL=0` kills), the
   deferred-decode transport (`tryKernelExtractRaw` → buffers ride to the store
-  worker; files with applicable framework `extract()` hooks keep the decoded path).
+  worker; files with applicable framework `extract()` hooks keep the decoded
+  path), and the **preParse hoist** (`preParsedSource` — a language's
+  offset-preserving `preParse` hook runs before BOTH kernel entry points, so
+  c/cpp/metal/cuda blanking stays TS-side and both arms parse identical bytes).
 - Gates in-repo: `scripts/kernel-parity.mjs` (per-file kernel↔wasm diff,
   ORDER-sensitive, full-object; deferral-rate guard), `scripts/dump-graph.mjs`
   (natural-key full-DB dump for the byte-identical diff),
@@ -476,8 +529,8 @@ parity before porting the language.
 | rust, dart, scala, lua, luau, r | dedicated files | T1 | crates.io (luau/r/scala: verify crate freshness vs our wasm) | Long-tail T1; port opportunistically after the big five. | ☐ |
 | kotlin | `languages/kotlin.ts` | T1½ | crates.io | Expect/actual pairing is synthesis-side (fine); extraction is clean but validate against a KMP repo. | ☐ |
 | swift | shared + dedicated branch | T1½ | crates.io | **Trap:** in-class property extraction lives in `tree-sitter.ts`'s DEDICATED branch, not `swift.ts` (#1020 — Alamofire went 0→348 props). Gate on Alamofire. | ☐ |
-| c, cpp | `languages/c-cpp.ts` | **T2** | crates.io | Keep as TS pre-passes: `blankCppExportMacros`/`blankCppInlineMacros` (UE `class MACRO Name` phantom-function misparse, #1096–#1102, CARLA 440→6), in-body reflection collapse guard (#1206), content-based `.h` C-vs-C++ detection. | ☐ |
-| metal, cuda | dialects over the cpp grammar | **T2** (rides c/cpp) | crates.io (cpp) | README-listed as first-class languages. Both are dialect-gated cpp: Metal = specifier/`[[attribute]]` blanking (#1121, the preParse-takes-filePath pattern); CUDA = `<<<>>>` blanking + content-gated `.h` (#1172). Their pre-passes must run before the kernel parse or stay TS-side; gate them WITH the c/cpp port, not separately. | ☐ |
+| c, cpp | `languages/c-cpp.ts` | **T2** | crates.io | **DONE (R7a, 2026-07-17)** — `ccpp/` walker; ALL pre-passes stayed TS-side via the route-point preParse hoist (+6 new blanks added during gating — see the checklist doc); content-based `.h` C-vs-C++ detection stays upstream at detectLanguage. Parity 0-diff + dump byte-identical on redis/git/fmt/protobuf/ALS. | ☑ |
+| metal, cuda | dialects over the cpp grammar | **T2** (rides c/cpp) | crates.io (cpp) | **DONE (rides R7a)** — `.metal`/`.cu`/`.cuh` map to 'cpp' and their blanks run in the hoisted preParse (filePath rides along for the extension gates); hoist-parity pinned in kernel-ccpp-parity.test.ts + the metal/cuda suites. | ☑ |
 | objc | `languages/objc.ts` | T2 | crates.io | Rides the c-cpp trap family; RN bridge extraction feeds `rnCrossPlatformEdges` (synthesis-side, fine). | ☐ |
 | arkts | `languages/arkts.ts` | T2 | **vendored** (harmony-contrib) | Dot-prefixed refs + decorator-gated matching fixed 36,840 wrong edges — that logic must port exactly or stay TS-side. Compile our grammar fork natively. | ☐ |
 | pascal | `languages/pascal.ts` | T2 | **vendored** | Paired with dfm-extractor (T3); `extractPascalDefProc` indexed lookups. | ☐ |
@@ -596,6 +649,134 @@ the premise and surfaced two structural defects that now gate any speed work.
 **Revised P1 order: (1) WAL containment → (2) memory-aware, cgroup-honest pool
 sizing → (3) re-run the 8-core measurement (container at ≥12GB or the Mac with
 disk headroom) → then profile what remains.** The <10min-on-8-cores target stands.
+
+#### 7a.2 P1 items (1)+(2) SHIPPED 2026-07-17 — the implementation arc (#1332–#1335)
+
+Four PRs, each carrying its measurement; the arc took three failed/diagnostic
+kernel-scale runs to get right, and every failure taught a design fact:
+
+| Run (2c/6GB unless noted) | Build | Outcome |
+|---|---|---|
+| R6 baseline | pre-P1 | 26.4min, EXIT 0; WAL unbounded (mid-run peak unmeasured); pooled 6-on-2 (cpuset-blind) |
+| run 1 | #1332 hook | **EXIT 137 (OOM)** — WAL 22.2GB, 0 of 5.4M frames ever backfilled; futile 20-pass parks amplified memory churn |
+| diagnostic | +latch/debug | EXIT 0, ~24min; pool KILLED by mis-measured 57MB cgroup budget → exposed **sequential resolution 853s vs 1,150s pooled** and cFnPtrEdges = 306s of synthesis's 358s |
+| instrumented | +sizing fixes | EXIT 0, **21.6min (R6 −18%)**; parse floor restores 373.5s; passives complete but the FILE marched 361→721MB → named the wrap-never-happens gap; peak 17.2GB |
+| record (first attempt) | #1335 | **EXIT 1: "database is locked"** — the timer-path truncate won the lock race after the recreate's multi-GB burst and stalled the writer past its 5s busy_timeout → truncate is barrier-only now (#1336). Bonus data: recreate 7.9s (vs 68–95s) once the WAL stays folded |
+| **record** | **#1336** | **EXIT 0, 20.4min (R6 −23%); WAL peak 1.57GB (−14×); counts byte-exact 2,048,664/6,405,964.** parse 354.9s · resolution 812.5s · synthesis 329.0s · recreate 57.5s · maintenance 43.5s |
+| **8-core retry (8c/7GB)** | **#1336** | **EXIT 0, NO OOM — 18.3min; WAL peak 1.09GB; pool sized 4 by the memory term (ap=8, budget 5.1GB, db 4.1GB); counts byte-exact.** parse 208.7s · resolution 835.9s · synthesis 338.7s |
+
+**The 8-core verdict (the question P1 set out to ask): 18.3min vs the <10min
+target — infrastructure fixed, speed target NOT met, and the gap is now
+precisely characterized. Resolution is CORE-INVARIANT at kernel scale: 835.9s
+pooled-4-on-8 ≈ 812.5s sequential-on-2 — worker parallelism buys nothing, so
+the bottleneck is the per-ref main-thread path (admission + persist + per-ref
+resolver work), not topology. Of the 18.3min, ~14min is core-invariant
+resolution+synthesis. Next levers, in order: (a) profile the per-ref path
+inside resolution (the 812–836s floor), (b) `cFnPtrEdges` (306s, 86% of
+synthesis — parallelize/window WITHIN the pass), (c) the R7a C/C++ port
+(parse 209s → kernel-native). 4× cores currently buys only 2min end-to-end
+(20.4 → 18.3) because parse is the only core-scaling phase left.**
+
+**Design facts these runs established (each now enforced in code + tests):**
+
+1. **WAL backlog and WAL file are different resources.** Passive backfills bound
+   the backlog; the FILE only stops growing when a commit finds zero reader
+   marks — observed never in practice. Containment = backfill + **TRUNCATE at a
+   parked barrier** (the one guaranteed no-reader window) + a raw file-size
+   trigger at 4× the soft cap (#1334/#1335). Dubbo: 251MB → 69MB peak, dumps
+   byte-identical under aggressive fold cycling.
+2. **cgroup v2 `memory.current` counts reclaimable page cache** — post-parse it
+   read 57MB free on a 6GB box and silently disabled the pool. `inactive_file`
+   is credited back (#1335); the same box reads 4.4GB.
+3. **The pool loses to sequential at 2 real cores** (853s vs 1,150s resolution;
+   cold worker caches + serialization + time-slicing exceed the parallelism),
+   and pooled synthesis is Amdahl-bound by `cFnPtrEdges` (306s of 358s) at
+   kernel scale. Sizing: `min(availableParallelism − 1, 6)` + memory term +
+   `CODEGRAPH_RESOLVE_WORKERS` knob (#1333/#1335); ap=2 → sequential by choice.
+4. **Parse needs ≥2 workers even on 2 cores** (1 worker = +34%; main + store
+   worker don't fill the second core). Floored (#1335): 373.5s ≈ the 369s
+   oversubscribed baseline, at a fraction of the memory.
+5. **Silent failure modes burned three 25-minute cycles**: give-ups were
+   verbose-gated, sizing's null path logged nothing, the timer path logged
+   nothing. All valve/sizing decisions now print under `CODEGRAPH_SYNTH_TIMINGS`
+   / `CODEGRAPH_WAL_VALVE_DEBUG` — the armed line answers "is it even alive"
+   in one glance.
+
+**New synthesis lever surfaced:** `cFnPtrEdges` is 86% of kernel-scale synthesis
+wall — parallelizing WITHIN that one pass (or windowing its scan) is worth more
+than pooling all 36 passes. Filed under the next P1 profiling round.
+
+#### 7a.3 Batch-loop profile + de-quadratic round (2026-07-17, #1339)
+
+`CODEGRAPH_RESOLVE_PROFILE` (shipped in #1339: per-outcome resolveOne histogram
++ loop-stage attribution) overturned the arc's founding assumption — resolveOne
+owns only **~93s** of the ~433s kernel-scale batch loop. Stage attribution and
+what happened to each:
+
+| Stage | Before | After #1339 | Note |
+|---|---|---|---|
+| countGuard | 93.9s | **0.0s** | per-batch COUNT(*) was O(remaining) — replaced by summed SQLite `changes` (zero-removals IS the runaway signal; real COUNT only arbitrates the suspicious path) |
+| read | 54.6s | 57.2s | keyset replaced OFFSET, but the cost is row MAPPING (5000-row materialization + candidates JSON), not prefix-walking — theory falsified, keyset kept as hygiene; lever = leaner row mapping |
+| backpressure | 111.2s | 121.2s | DB-scaled caps didn't help: the fold tax is TOTAL checkpoint I/O (write set is cold pages, not re-dirtied hot ones) — a disk-I/O floor ≈ WAL bytes written |
+| settle (resolveOne) | 85.7s | 88.0s | the real work; exact-match 3.17M×13µs=41s is the biggest legit class |
+| inserts/deletes/marks | ~84s | ~84s | B-tree floor (#1320 post-mortem) |
+
+**2c/6GB envelope: 26.4min (R6) → 20.4 (#1336) → 19.3min (#1339), counts
+byte-exact every run; dubbo dump byte-identical.** The 8-core re-run post-#1339
+is pending (est. ~17.5min from the stage arithmetic). Remaining levers by size:
+parse 351s→R7a C/C++ port; cFnPtrEdges 306s; backpressure 121s (I/O floor —
+shrinks only by writing fewer bytes); settle 88s; read-mapping 57s.
+
+#### 7a.4 cFnPtrEdges round (2026-07-17, #1341) — 2.07× standalone, probe-driven
+
+Iterated with a STANDALONE in-container probe against the live kernel DB
+(readonly; ~4min/cycle instead of 25-min inits) with per-sweep sub-timings
+(`CODEGRAPH_SYNTH_TIMINGS` prints the `cFnPtr sub:` line):
+
+| Iteration | Standalone total | What moved |
+|---|---|---|
+| baseline | 278.8s | attribution: E 112s, D 92s, strip 71.8s (4.4×/file), C 41s |
+| regex hoists + D field-name pre-gate + incremental line count | 249.3s | D −24s |
+| budget-aware strip cache (first cut) | — | **thrash lesson: a partial LRU on cyclic sweeps ≈ 0% cross-sweep hits** — cap ~61k AND cap == files.length both lost (includes push the working set over) |
+| all-or-nothing cache + 5% slack | 187.8s | strips exactly 1.0/file; `getNodesInFile` theory killed (10s, not 127s) |
+| `sliceLines` → split-once-per-file | **134.8s** | ~1.6M full-file splits eliminated (D 46→20.5s, E 94.5→69.1s) |
+
+**Identity proof at full scale:** optimized edge set (merge-dedup + canonical
+sort, 274,762 edges) SHA256 `21c2a971…` == the pre-optimization edges
+extracted from the live kernel DB — this pass never runs on the dubbo gate
+repo (C-gated), so the DB comparison is the right gate. Suite 2,491.
+
+**In-run validation (2c/6GB): total 17.6min (from 19.3; −33% cumulative vs
+R6), synthesis 336→251s, counts byte-exact, WAL 1.09GB.** Honest caveat: the
+full strip cache did NOT engage in-run at 6GB (mid-run memory budget below
+the 2×-cache safety threshold → deliberate fallback to the 128 floor; strips
+283k, costing ~60s vs the probe) — the memory-safe degradation working as
+designed. Boxes with headroom get the full 2.07×; the 6GB envelope gets the
+algorithmic wins only.
+
+**Levers remaining, re-ranked:** parse 338s (R7a C/C++ port — the last big
+rock) > backpressure ~120s (checkpoint I/O floor) > E-scan 69–93s (approaching
+honest regex work over 1.5GB) > settle 88s > read-mapping 57s.
+
+#### 7a.5 8-core re-run, post-R7a (2026-07-17) — 16.4min; the 8c gap is now all resolution
+
+Same provisioning as the §7a.2 retry (cg1212 at cpuset 0-7 / 7GB), the deployed
+R7a build, fresh init of the v7.2-rc2 tree: **EXIT 0, envelope 981s = 16.4min**
+(pre-R7a 8c record: 18.3min — and that was the smaller pre-blank graph).
+Counts **2,048,295 / 6,406,933 == both 2c arms**; WAL peak 1.34GB (same
+contained regime as 1.09–1.57GB records). Phases: parse-loop **202.6s**
+(pre-R7a all-wasm 8c: 208.7s — both sit ON the single-writer store floor, so
+8c parse is writer-bound, not extraction-bound) · resolution superphase
+**715.0s** (was 835.9s) containing callback-synthesis **257.4s** (was 338.7s)
+and edge-index-recreate 52.0s · maintenance 47.6s. The −1.9min vs the record
+is the post-#1336 rounds (#1339 countGuard, #1341 cFnPtr, R7a native parse +
+defer-reuse) landing at 8c for the first time.
+
+**Consequence for the <10min target:** ~12 of the 16.4 minutes are the
+core-invariant resolution superphase. Deferral cuts can't materially move the
+8c envelope (parse is already at the writer lane); they remain queued for
+graph richness + the 2c/low-core envelope. The 8c target now lives or dies on
+the per-ref resolution path (§7a.2's lever (a)).
 
 ### 7b. Arc 3 — graph richness (forensics-backed; adopt cbm's real extras, skip inflation)
 Priority order, each gated by the standard A/B + node-explosion probes:
