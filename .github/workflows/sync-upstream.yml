@@ -81,26 +81,26 @@ jobs:
           echo 'changed=true' >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
-        if: steps.feature.outputs.changed == 'true'
+        if: steps.pr.outputs.state == 'open'
         uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
-        if: steps.feature.outputs.changed == 'true'
+        if: steps.pr.outputs.state == 'open'
         run: npm ci
 
       - name: Build
-        if: steps.feature.outputs.changed == 'true'
+        if: steps.pr.outputs.state == 'open'
         run: npm run build
 
       - name: Run the full test suite
-        if: steps.feature.outputs.changed == 'true'
+        if: steps.pr.outputs.state == 'open'
         run: npm test -- --maxWorkers=2 --minWorkers=1
 
       - name: Verify the npm package
-        if: steps.feature.outputs.changed == 'true'
+        if: steps.pr.outputs.state == 'open'
         run: |
           npm pack --dry-run
           git diff --exit-code
