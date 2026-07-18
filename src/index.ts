@@ -791,6 +791,12 @@ export class CodeGraph {
           // itself, so the changed-files branch is already covered.)
           this.resolver.clearCaches();
         }
+        if (result.haskellImportInvalidationRecovered) {
+          // The recovered sync may have no filesystem delta, so neither branch
+          // above clears resolver/import caches. Its replayed pending refs must
+          // see the already-committed post-crash module topology.
+          this.resolver.clearCaches();
+        }
 
         // Resolve references if files were updated
         const filesChanged = result.filesAdded > 0 || result.filesModified > 0;

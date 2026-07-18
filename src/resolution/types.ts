@@ -260,10 +260,14 @@ export interface ImportMapping {
   includedNames?: string[];
   /** Namespace/wildcard allow-list of all children owned by these exports. */
   includedParentExports?: string[];
+  /** Haskell: specifically allowed children keyed by their owning type/class. */
+  includedParentChildren?: Array<{ parent: string; child: string }>;
   /** Namespace/wildcard deny-list of directly named exports. */
   excludedNames?: string[];
   /** Namespace/wildcard deny-list of all children owned by these exports. */
   excludedParentExports?: string[];
+  /** Haskell: specifically hidden children keyed by their owning type/class. */
+  excludedParentChildren?: Array<{ parent: string; child: string }>;
   /** Resolved file path (if local) */
   resolvedPath?: string;
 }
@@ -282,6 +286,8 @@ export type ReExport =
       originalName: string;
       /** Module specifier of the upstream module. */
       source: string;
+      /** Haskell grouped export owner (`T(C)`) when the child is ambiguous. */
+      parentExport?: string;
     }
   | {
       kind: 'wildcard';
@@ -290,6 +296,8 @@ export type ReExport =
       /** Optional Haskell re-export allow/deny lists inherited from its import. */
       includedNames?: string[];
       includedParentExports?: string[];
+      includedParentChildren?: Array<{ parent: string; child: string }>;
       excludedNames?: string[];
       excludedParentExports?: string[];
+      excludedParentChildren?: Array<{ parent: string; child: string }>;
     };

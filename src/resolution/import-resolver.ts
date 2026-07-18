@@ -1210,7 +1210,19 @@ function stripHaskellComments(content: string): string {
     if (ch === '"') {
       inString = true;
       out += ch;
-    } else if (ch === '-' && next === '-') {
+    } else if (
+      ch === '-'
+      && next === '-'
+      // A comment may start with any run of at least two dashes. Its
+      // disambiguating character is the one *after the complete run*, not
+      // necessarily the third character (`--- Haddock` is still a comment).
+      // Conversely `-->` and `---+` are symbolic operators and must survive.
+      && (() => {
+        let afterDashes = i + 2;
+        while (content[afterDashes] === '-') afterDashes++;
+        return !/[!#$%&*+.\/<=>?@\\^|~:-]/.test(content[afterDashes] ?? '');
+      })()
+    ) {
       lineComment = true;
       out += '  ';
       i++;
@@ -1223,6 +1235,60 @@ function stripHaskellComments(content: string): string {
     }
   }
   return out;
+}
+
+/**
+ * Canonical spelling used by the Haskell resolver. Tree-sitter can surface a
+ * prefix-qualified operator with its source parentheses (`(Ops.<+>)`), while
+ * infix and ordinary qualified references use `Ops::<+>` / `Ops::map`.
+ * Removing only balanced whole-expression parentheses keeps operator payloads
+ * intact and makes every spelling share one import lookup path.
+ */
+export function normalizeHaskellReferenceName(referenceName: string): string {
+  let value = referenceName.trim();
+  const hasWholeOuterParens = (candidate: string): boolean => {
+    if (!candidate.startsWith('(') || !candidate.endsWith(')')) return false;
+    let depth = 0;
+    for (let i = 0; i < candidate.length; i++) {
+      if (candidate[i] === '(') depth++;
+      else if (candidate[i] === ')') depth--;
+      if (depth === 0 && i < candidate.length - 1) return false;
+      if (depth < 0) return false;
+    }
+    return depth === 0;
+  };
+  while (hasWholeOuterParens(value)) value = value.slice(1, -1).trim();
+
+  if (!value.includes('::')) {
+    const qualified = value.match(
+      /^([A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*)\.([^\s.]+)$/
+    );
+    if (qualified) value = `${qualified[1]}::${qualified[2]}`;
+  }
+  return value;
+}
+
+/** Node-name spellings used for a canonical Haskell value/operator name. */
+function haskellNodeNameVariants(name: string): string[] {
+  const normalized = normalizeHaskellReferenceName(name);
+  return /^[A-Za-z_][A-Za-z0-9_']*$/.test(normalized)
+    ? [normalized]
+    : [normalized, `(${normalized})`];
+}
+
+function haskellNodeOwnedBy(node: Node, parent: string): boolean {
+  const canonical = (value: string): string => value.startsWith('(') && value.endsWith(')')
+    ? value.slice(1, -1)
+    : value;
+  const canonicalParent = canonical(parent);
+  const owners = node.qualifiedName.split('::').slice(0, -1);
+  return owners.some((owner) => {
+    const canonicalOwner = canonical(owner);
+    return canonicalOwner === canonicalParent || canonicalOwner.startsWith(`${canonicalParent} `);
+  }) || node.decorators?.some((decorator) =>
+    decorator.startsWith('haskell-export-parent:')
+    && canonical(decorator.slice('haskell-export-parent:'.length)) === canonicalParent
+  ) === true;
 }
 
 function splitHaskellList(value: string): string[] {
@@ -1252,8 +1318,20 @@ function haskellImportName(value: string): string {
 function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
   const cleaned = rawItem.trim().replace(/^(?:type|pattern)\s+/, '');
   if (!cleaned) return null;
-  const operator = cleaned.match(/^\(([^()]+)\)$/)?.[1]?.trim();
-  if (operator) return { name: operator, children: null };
+  const operatorHead = cleaned.match(/^\(([^()]+)\)([\s\S]*)$/);
+  if (operatorHead) {
+    const name = operatorHead[1]!.trim();
+    const suffix = operatorHead[2]!.trim();
+    if (!suffix) return { name, children: null };
+    if (!suffix.startsWith('(') || !suffix.endsWith(')')) return null;
+    const childList = suffix.slice(1, -1).trim();
+    return {
+      name,
+      children: childList === '..'
+        ? '*'
+        : splitHaskellList(childList).map(haskellImportName).filter(Boolean),
+    };
+  }
   const name = cleaned.match(/^([A-Za-z_][A-Za-z0-9_']*)/)?.[1] ?? '';
   if (!name) return null;
   const open = cleaned.indexOf('(', name.length);
@@ -1306,17 +1384,19 @@ function extractHaskellImports(content: string): ImportMapping[] {
           .filter((item): item is HaskellImportItem => item !== null)
       : [];
 
-    const directNames = items.flatMap((item) => [
-      item.name,
-      ...(Array.isArray(item.children) ? item.children : []),
-    ]);
+    const directNames = items.map((item) => item.name);
     const parentExports = items.filter((item) => item.children === '*').map((item) => item.name);
+    const parentChildren = items.flatMap((item) => Array.isArray(item.children)
+      ? item.children.map((child) => ({ parent: item.name, child }))
+      : []);
     const restrictions = listStart < 0 ? {} : isHiding ? {
       excludedNames: directNames,
       excludedParentExports: parentExports,
+      excludedParentChildren: parentChildren,
     } : {
       includedNames: directNames,
       includedParentExports: parentExports,
+      includedParentChildren: parentChildren,
     };
 
     // Even an unqualified Haskell import permits references through the full
@@ -1566,8 +1646,10 @@ function extractHaskellReExports(content: string): ReExport[] {
   const restrictionsFrom = (imp: ImportMapping) => ({
     ...(imp.includedNames ? { includedNames: imp.includedNames } : {}),
     ...(imp.includedParentExports ? { includedParentExports: imp.includedParentExports } : {}),
+    ...(imp.includedParentChildren ? { includedParentChildren: imp.includedParentChildren } : {}),
     ...(imp.excludedNames ? { excludedNames: imp.excludedNames } : {}),
     ...(imp.excludedParentExports ? { excludedParentExports: imp.excludedParentExports } : {}),
+    ...(imp.excludedParentChildren ? { excludedParentChildren: imp.excludedParentChildren } : {}),
   });
   const mappingExposes = (imp: ImportMapping, name: string, parent?: string): boolean => {
     if (imp.isNamespace) return false;
@@ -1575,10 +1657,18 @@ function extractHaskellReExports(content: string): ReExport[] {
     if (imp.parentExport && imp.parentExport !== parent) return false;
     if (imp.excludedNames?.includes(name)) return false;
     if (parent && imp.excludedParentExports?.includes(parent)) return false;
-    const hasAllowList = imp.includedNames !== undefined || imp.includedParentExports !== undefined;
+    if (parent && imp.excludedParentChildren?.some((item) =>
+      item.parent === parent && item.child === name
+    )) return false;
+    const hasAllowList = imp.includedNames !== undefined
+      || imp.includedParentExports !== undefined
+      || imp.includedParentChildren !== undefined;
     if (!hasAllowList) return true;
     return imp.includedNames?.includes(name) === true
-      || (!!parent && imp.includedParentExports?.includes(parent) === true);
+      || (!!parent && imp.includedParentExports?.includes(parent) === true)
+      || (!!parent && imp.includedParentChildren?.some((item) =>
+        item.parent === parent && item.child === name
+      ) === true);
   };
   const sourcesFor = (name: string, parent?: string): ImportMapping[] => {
     const seen = new Set<string>();
@@ -1623,6 +1713,7 @@ function extractHaskellReExports(content: string): ReExport[] {
             exportedName: child,
             originalName: child,
             source: imp.source,
+            parentExport: item.name,
           });
         }
       }
@@ -1644,7 +1735,8 @@ function extractHaskellReExports(content: string): ReExport[] {
         }
         const unrestrictedWildcard = imp.localName === '*'
           && !imp.includedNames
-          && !imp.includedParentExports;
+          && !imp.includedParentExports
+          && !imp.includedParentChildren;
         const parentWildcard = imp.localName === '*'
           && (imp.parentExport === item.name
             || imp.includedParentExports?.includes(item.name)
@@ -1656,6 +1748,7 @@ function extractHaskellReExports(content: string): ReExport[] {
           includedParentExports: [item.name],
           ...(imp.excludedNames ? { excludedNames: imp.excludedNames } : {}),
           ...(imp.excludedParentExports ? { excludedParentExports: imp.excludedParentExports } : {}),
+          ...(imp.excludedParentChildren ? { excludedParentChildren: imp.excludedParentChildren } : {}),
         });
       }
     }
@@ -2024,6 +2117,7 @@ function resolveHaskellImportedReference(
   imports: ImportMapping[],
   context: ResolutionContext
 ): ResolvedRef | null {
+  const referenceName = normalizeHaskellReferenceName(ref.referenceName);
   const moduleFileNode = (moduleName: string): Node | undefined => {
     const resolvedPath = resolveImportPath(moduleName, ref.filePath, 'haskell', context);
     if (!resolvedPath) return undefined;
@@ -2038,18 +2132,25 @@ function resolveHaskellImportedReference(
   }
 
   const isOwnedBy = (node: Node, parent: string): boolean => {
-    const parts = node.qualifiedName.split('::');
-    return parts.slice(0, -1).includes(parent);
+    return haskellNodeOwnedBy(node, parent);
   };
 
   const mappingAllows = (imp: ImportMapping, name: string, node: Node): boolean => {
     if (imp.parentExport && !isOwnedBy(node, imp.parentExport)) return false;
     if (imp.excludedNames?.includes(name)) return false;
     if (imp.excludedParentExports?.some((parent) => isOwnedBy(node, parent))) return false;
-    const hasAllowList = imp.includedNames !== undefined || imp.includedParentExports !== undefined;
+    if (imp.excludedParentChildren?.some((item) =>
+      item.child === name && isOwnedBy(node, item.parent)
+    )) return false;
+    const hasAllowList = imp.includedNames !== undefined
+      || imp.includedParentExports !== undefined
+      || imp.includedParentChildren !== undefined;
     if (!hasAllowList) return true;
     return imp.includedNames?.includes(name) === true
-      || imp.includedParentExports?.some((parent) => isOwnedBy(node, parent)) === true;
+      || imp.includedParentExports?.some((parent) => isOwnedBy(node, parent)) === true
+      || imp.includedParentChildren?.some((item) =>
+        item.child === name && isOwnedBy(node, item.parent)
+      ) === true;
   };
 
   const findInModule = (
@@ -2059,30 +2160,34 @@ function resolveHaskellImportedReference(
   ): Node | undefined => {
     const resolvedPath = resolveImportPath(moduleName, ref.filePath, 'haskell', context);
     if (!resolvedPath) return undefined;
-    const names = /^[A-Za-z_][A-Za-z0-9_']*$/.test(exportedName)
-      ? [exportedName]
-      : [exportedName, `(${exportedName})`];
-    const exportIndex = getFileExportIndex(resolvedPath, context);
-    const direct = names.flatMap((name) => exportIndex.allByName.get(name) ?? [])
-      .filter((node) => !mapping || mappingAllows(mapping, exportedName, node));
-    if (direct.length === 1) return direct[0];
-    if (direct.length > 1) return undefined;
-
-    const reexported = findExportedSymbol(
+    const mappingNeedsPredicate = !!mapping && (
+      mapping.includedNames !== undefined
+      || mapping.includedParentExports !== undefined
+      || mapping.includedParentChildren !== undefined
+      || mapping.excludedNames !== undefined
+      || mapping.excludedParentExports !== undefined
+      || mapping.excludedParentChildren !== undefined
+    );
+    // Direct declarations and re-exports form one Haskell export namespace.
+    // Apply this import's restrictions during (not after) that global
+    // ambiguity check so `B(field)` can select B, while bare `field` cannot
+    // silently prefer a facade-local field over a re-exported one.
+    return findExportedSymbol(
       resolvedPath,
       {
         isDefault: false,
         isNamespace: false,
         exportedName,
         memberName: null,
+        ...(mapping?.parentExport ? { haskellParent: mapping.parentExport } : {}),
+        ...(mappingNeedsPredicate ? {
+          haskellAllows: (node: Node) => mappingAllows(mapping, exportedName, node),
+        } : {}),
       },
       'haskell',
       context,
       new Set()
     );
-    return reexported && (!mapping || mappingAllows(mapping, exportedName, reexported))
-      ? reexported
-      : undefined;
   };
 
   const uniqueResult = (nodes: Node[]): ResolvedRef | null => {
@@ -2096,10 +2201,10 @@ function resolveHaskellImportedReference(
     };
   };
 
-  const separator = ref.referenceName.lastIndexOf('::');
+  const separator = referenceName.lastIndexOf('::');
   if (separator > 0) {
-    const receiver = ref.referenceName.slice(0, separator);
-    const member = ref.referenceName.slice(separator + 2);
+    const receiver = referenceName.slice(0, separator);
+    const member = referenceName.slice(separator + 2);
     if (!member) return null;
     const targets: Node[] = [];
     for (const imp of imports) {
@@ -2114,7 +2219,7 @@ function resolveHaskellImportedReference(
   // resolve only through their declared source modules.
   const explicitTargets: Node[] = [];
   for (const imp of imports) {
-    if (imp.isNamespace || imp.localName !== ref.referenceName) continue;
+    if (imp.isNamespace || imp.localName !== referenceName) continue;
     const target = findInModule(imp.source, imp.exportedName, imp);
     if (target) explicitTargets.push(target);
   }
@@ -2123,7 +2228,7 @@ function resolveHaskellImportedReference(
   const wildcardTargets: Node[] = [];
   for (const imp of imports) {
     if (imp.isNamespace || imp.localName !== '*') continue;
-    const target = findInModule(imp.source, ref.referenceName, imp);
+    const target = findInModule(imp.source, referenceName, imp);
     if (target) wildcardTargets.push(target);
   }
   return uniqueResult(wildcardTargets);
@@ -2613,10 +2718,10 @@ function resolveGoCrossPackageReference(
   return null;
 }
 
-/** Recursive depth cap for re-export chain following. Real codebases
- *  rarely chain barrels more than 2–3 deep; 8 is a generous safety
- *  net that still bounds worst-case work. */
-const REEXPORT_MAX_DEPTH = 8;
+/** Recursive depth cap for re-export chain following. It is deliberately
+ *  high enough for generated/deep facade chains while still bounding
+ *  malformed acyclic graphs; cycles are stopped separately by `visited`. */
+const REEXPORT_MAX_DEPTH = 64;
 
 /**
  * Find an exported symbol in `filePath`, following `export { x } from
@@ -2628,14 +2733,23 @@ const REEXPORT_MAX_DEPTH = 8;
  * nothing — the existing code only looked for declarations IN the
  * resolved file, not declarations the file forwarded.
  */
+type ExportedSymbolWant = {
+  isDefault: boolean;
+  isNamespace: boolean;
+  exportedName: string;
+  memberName: string | null;
+  haskellParent?: string;
+  /** Path-local Haskell export-list restrictions accumulated by wildcard re-exports. */
+  haskellAllows?: (node: Node) => boolean;
+};
+
+/** Internal-only result: unlike `undefined` (not found), ambiguity must survive recursion. */
+const HASKELL_EXPORT_AMBIGUOUS = Symbol('haskell-export-ambiguous');
+type ExportedSymbolWalkResult = Node | typeof HASKELL_EXPORT_AMBIGUOUS | undefined;
+
 function findExportedSymbol(
   filePath: string,
-  want: {
-    isDefault: boolean;
-    isNamespace: boolean;
-    exportedName: string;
-    memberName: string | null;
-  },
+  want: ExportedSymbolWant,
   language: Language,
   context: ResolutionContext,
   visited: Set<string>,
@@ -2646,43 +2760,50 @@ function findExportedSymbol(
   // Every ref to the same imported symbol repeats this exact walk, so the
   // top-level memo removes the re-export chase + per-file linear scans from
   // all but the first occurrence.
-  if (depth === 0 && visited.size === 0) {
+  if (depth === 0 && visited.size === 0 && !want.haskellAllows) {
     let memo = exportedSymbolMemos.get(context);
     if (!memo) {
       memo = new Map();
       exportedSymbolMemos.set(context, memo);
     }
-    const key = `${filePath}\0${want.isDefault ? 1 : 0}${want.isNamespace ? 1 : 0}\0${want.exportedName}\0${want.memberName ?? ''}\0${language}`;
+    const key = `${filePath}\0${want.isDefault ? 1 : 0}${want.isNamespace ? 1 : 0}\0${want.exportedName}\0${want.memberName ?? ''}\0${want.haskellParent ?? ''}\0${language}`;
     if (memo.has(key)) return memo.get(key);
-    const result = findExportedSymbolWalk(filePath, want, language, context, visited, depth);
+    const walked = findExportedSymbolWalk(filePath, want, language, context, visited, depth);
+    const result = walked === HASKELL_EXPORT_AMBIGUOUS ? undefined : walked;
     memo.set(key, result);
     return result;
   }
-  return findExportedSymbolWalk(filePath, want, language, context, visited, depth);
+  const walked = findExportedSymbolWalk(filePath, want, language, context, visited, depth);
+  return walked === HASKELL_EXPORT_AMBIGUOUS ? undefined : walked;
 }
 
 function findExportedSymbolWalk(
   filePath: string,
-  want: {
-    isDefault: boolean;
-    isNamespace: boolean;
-    exportedName: string;
-    memberName: string | null;
-  },
+  want: ExportedSymbolWant,
   language: Language,
   context: ResolutionContext,
   visited: Set<string>,
   depth: number
-): Node | undefined {
+): ExportedSymbolWalkResult {
   if (depth > REEXPORT_MAX_DEPTH) return undefined;
   if (visited.has(filePath)) return undefined;
   visited.add(filePath);
 
   const exportIndex = getFileExportIndex(filePath, context);
   const exportedNames = language === 'haskell'
-    && !/^[A-Za-z_][A-Za-z0-9_']*$/.test(want.exportedName)
-    ? [want.exportedName, `(${want.exportedName})`]
+    ? haskellNodeNameVariants(want.exportedName)
     : [want.exportedName];
+  // Haskell can expose the same value name from a local declaration and one
+  // or more `module X` re-exports. All authorized candidates participate in
+  // the ambiguity check; a direct declaration must not win merely because it
+  // is visited first.
+  const haskellCandidates: Node[] = [];
+  let haskellAmbiguous = false;
+  const uniqueHaskellCandidate = (): ExportedSymbolWalkResult => {
+    const unique = [...new Map(haskellCandidates.map((node) => [node.id, node])).values()];
+    if (haskellAmbiguous || unique.length > 1) return HASKELL_EXPORT_AMBIGUOUS;
+    return unique.length === 1 ? unique[0] : undefined;
+  };
 
   // 1. Direct hit: the symbol is declared in this file.
   if (want.isDefault) {
@@ -2699,14 +2820,23 @@ function findExportedSymbolWalk(
     if (direct) return direct;
   } else {
     for (const name of exportedNames) {
-      const direct = exportIndex.byName.get(name);
-      if (direct) return direct;
+      if (language === 'haskell') {
+        const candidates = (exportIndex.allByName.get(name) ?? [])
+          .filter((node) => !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
+          .filter((node) => !want.haskellAllows || want.haskellAllows(node));
+        haskellCandidates.push(...candidates);
+      } else {
+        const direct = exportIndex.byName.get(name);
+        if (direct) return direct;
+      }
     }
   }
 
   // 2. Re-export hit: the file forwards the symbol to another module.
   const reExports = context.getReExports?.(filePath, language) ?? [];
-  if (reExports.length === 0) return undefined;
+  if (reExports.length === 0) {
+    return language === 'haskell' ? uniqueHaskellCandidate() : undefined;
+  }
 
   // Look for explicit `export { want } from './other'` (with optional rename).
   const targetName = want.isDefault ? 'default' : want.exportedName;
@@ -2716,20 +2846,30 @@ function findExportedSymbolWalk(
       if (!next) continue;
       // After rename: `export { foo as bar } from './x'` — to chase
       // `bar`, we look for `foo` in `./x`.
-      const chained = findExportedSymbol(
+      const chained = findExportedSymbolWalk(
         next,
         {
           isDefault: rex.originalName === 'default',
           isNamespace: false,
           exportedName: rex.originalName,
           memberName: null,
+          ...(rex.parentExport ? { haskellParent: rex.parentExport } : {}),
+          ...(want.haskellAllows ? { haskellAllows: want.haskellAllows } : {}),
         },
         language,
         context,
-        visited,
+        // Cycle detection is path-local. Sharing the mutable set between
+        // sibling alternatives lets a restricted/denied first branch poison a
+        // later valid route that converges on the same origin module.
+        new Set(visited),
         depth + 1
       );
-      if (chained) return chained;
+      if (chained === HASKELL_EXPORT_AMBIGUOUS) {
+        haskellAmbiguous = true;
+      } else if (chained) {
+        if (language === 'haskell') haskellCandidates.push(chained);
+        else return chained;
+      }
     }
   }
 
@@ -2739,15 +2879,53 @@ function findExportedSymbolWalk(
     if (rex.kind === 'wildcard') {
       const next = resolveImportPath(rex.source, filePath, language, context);
       if (!next) continue;
-      const chained = findExportedSymbol(next, want, language, context, visited, depth + 1);
+      const restrictedParents = language === 'haskell'
+        ? [...new Set([
+            ...(rex.includedParentExports ?? []),
+            ...(rex.includedParentChildren ?? [])
+              .filter((item) => item.child === want.exportedName)
+              .map((item) => item.parent),
+          ])]
+        : [];
+      const parentVariants = restrictedParents.length > 0 ? restrictedParents : [want.haskellParent];
+      const haskellAllows = language === 'haskell'
+        ? (node: Node): boolean => (
+            (!want.haskellAllows || want.haskellAllows(node))
+            && haskellReExportAllows(rex, want.exportedName, node)
+          )
+        : want.haskellAllows;
+      const candidates = parentVariants.flatMap((parent) => {
+        const chained = findExportedSymbolWalk(
+          next,
+          {
+            ...want,
+            ...(parent ? { haskellParent: parent } : {}),
+            ...(haskellAllows ? { haskellAllows } : {}),
+          },
+          language,
+          context,
+          new Set(visited),
+          depth + 1
+        );
+        if (chained === HASKELL_EXPORT_AMBIGUOUS) {
+          haskellAmbiguous = true;
+          return [];
+        }
+        return chained ? [chained] : [];
+      });
+      const unique = [...new Map(candidates.map((node) => [node.id, node])).values()];
+      const chained = unique.length === 1 ? unique[0] : undefined;
       if (chained && (
         language !== 'haskell'
         || haskellReExportAllows(rex, want.exportedName, chained)
-      )) return chained;
+      )) {
+        if (language === 'haskell') haskellCandidates.push(chained);
+        else return chained;
+      }
     }
   }
 
-  return undefined;
+  return language === 'haskell' ? uniqueHaskellCandidate() : undefined;
 }
 
 function haskellReExportAllows(
@@ -2756,13 +2934,23 @@ function haskellReExportAllows(
   node: Node,
 ): boolean {
   const owners = node.qualifiedName.split('::').slice(0, -1);
+  const ownedBy = (parent: string): boolean => owners.some((owner) =>
+    owner === parent || owner.startsWith(`${parent} `)
+  ) || node.decorators?.includes(`haskell-export-parent:${parent}`) === true;
   if (reExport.excludedNames?.includes(name)) return false;
-  if (reExport.excludedParentExports?.some((parent) => owners.includes(parent))) return false;
+  if (reExport.excludedParentExports?.some(ownedBy)) return false;
+  if (reExport.excludedParentChildren?.some((item) =>
+    item.child === name && ownedBy(item.parent)
+  )) return false;
   const hasAllowList = reExport.includedNames !== undefined
-    || reExport.includedParentExports !== undefined;
+    || reExport.includedParentExports !== undefined
+    || reExport.includedParentChildren !== undefined;
   if (!hasAllowList) return true;
   return reExport.includedNames?.includes(name) === true
-    || reExport.includedParentExports?.some((parent) => owners.includes(parent)) === true;
+    || reExport.includedParentExports?.some(ownedBy) === true
+    || reExport.includedParentChildren?.some((item) =>
+      item.child === name && ownedBy(item.parent)
+    ) === true;
 }
 
 /** Node kinds that own static members reachable as `Container.member`. */

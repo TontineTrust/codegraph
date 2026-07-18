@@ -10,6 +10,7 @@ import { Node as SyntaxNode } from 'web-tree-sitter';
 import {
   Node,
   NodeKind,
+  ReferenceKind,
   UnresolvedReference,
 } from '../types';
 
@@ -291,6 +292,19 @@ export interface LanguageExtractor {
    * Returns the callee name if this node is a bare call, or undefined if not.
    */
   extractBareCall?: (node: SyntaxNode, source: string, stateOwner?: object) => string | undefined;
+
+  /**
+   * Extract a statically named reference that is not represented by one of the
+   * language's normal call nodes. Haskell uses this for nullary constructors in
+   * patterns (`Nothing`) and operator sections (`(+ 1)`).
+   */
+  extractBareReference?: (
+    node: SyntaxNode,
+    source: string,
+    stateOwner?: object,
+  ) => { name: string; referenceKind: ReferenceKind; node?: SyntaxNode }
+    | Array<{ name: string; referenceKind: ReferenceKind; node?: SyntaxNode }>
+    | undefined;
 
   /**
    * Return true when a name at this syntax node is introduced by an enclosing

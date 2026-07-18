@@ -251,6 +251,9 @@ export interface FileRecord {
   /** Number of nodes extracted */
   nodeCount: number;
 
+  /** Haskell module/import/export topology fingerprint for incremental sync */
+  haskellTopologyHash?: string;
+
   /** Any extraction errors */
   errors?: ExtractionError[];
 }

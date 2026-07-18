@@ -396,6 +396,12 @@ export class TreeSitterExtractor {
   private source: string;
   private tree: Tree | null = null;
   private nodes: Node[] = [];
+  // Keep the long-standing line-based IDs stable for the overwhelmingly common
+  // case, while disambiguating declarations such as two same-named `let`
+  // helpers written on one physical line. Re-visiting the exact same syntax
+  // position retains the legacy ID; only a distinct-column collision gets the
+  // deterministic column-qualified fallback.
+  private nodeIdColumns = new Map<string, number>();
   private edges: Edge[] = [];
   private unresolvedReferences: UnresolvedReference[] = [];
   // Value-reference edges (default ON; set CODEGRAPH_VALUE_REFS=0 to disable; see flushValueRefs).
@@ -570,10 +576,22 @@ export class TreeSitterExtractor {
       this.source = '';
     }
 
+    let unresolvedReferences = this.unresolvedReferences;
+    if (this.language === 'haskell') {
+      const seen = new Set<string>();
+      unresolvedReferences = this.unresolvedReferences.filter((reference) => {
+        const key = `${reference.fromNodeId}\0${reference.referenceName}\0${reference.referenceKind}`
+          + `\0${reference.line}\0${reference.column}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
     return {
       nodes: this.nodes,
       edges: this.edges,
-      unresolvedReferences: this.unresolvedReferences,
+      unresolvedReferences,
       errors: this.errors,
       durationMs: Date.now() - startTime,
     };
@@ -1255,18 +1273,11 @@ export class TreeSitterExtractor {
     // visitor so nested declarations are still extracted (Haskell `where` /
     // `let` blocks). Honour bare semantic calls on that path too; the regular
     // function-body walker has the equivalent branch below.
-    else if (this.language === 'haskell' && this.extractor.extractBareCall) {
-      const calleeName = this.extractor.extractBareCall(node, this.source, this.nodes);
-      const callerId = this.nodeStack[this.nodeStack.length - 1];
-      if (calleeName && callerId) {
-        this.unresolvedReferences.push({
-          fromNodeId: callerId,
-          referenceName: calleeName,
-          referenceKind: 'calls',
-          line: node.startPosition.row + 1,
-          column: node.startPosition.column,
-        });
-      }
+    else if (
+      this.language === 'haskell'
+      && (this.extractor.extractBareReference || this.extractor.extractBareCall)
+    ) {
+      this.extractBareSemanticReference(node);
     }
     // `new Foo(...)` / `Foo::new(...)` / object_creation_expression —
     // produce an `instantiates` reference. Children still walked so
@@ -1337,7 +1348,14 @@ export class TreeSitterExtractor {
       return null;
     }
 
-    const id = generateNodeId(this.filePath, kind, name, node.startPosition.row + 1);
+    const line = node.startPosition.row + 1;
+    const column = node.startPosition.column;
+    const legacyId = generateNodeId(this.filePath, kind, name, line);
+    const previousColumn = this.nodeIdColumns.get(legacyId);
+    const id = previousColumn === undefined || previousColumn === column
+      ? legacyId
+      : generateNodeId(this.filePath, kind, `${name}\0column:${column}`, line);
+    this.nodeIdColumns.set(legacyId, previousColumn ?? column);
 
     // Some grammars (e.g. Dart) model a function/method body as a *sibling* of
     // the signature node, so the declaration node's own range is just the
@@ -3713,6 +3731,38 @@ export class TreeSitterExtractor {
     return this.erlangAtomMacros.get(macroName) ?? null;
   }
 
+  /** Emit language-specific references represented by otherwise bare syntax. */
+  private extractBareSemanticReference(node: SyntaxNode): void {
+    if (!this.extractor || this.nodeStack.length === 0) return;
+    const callerId = this.nodeStack[this.nodeStack.length - 1];
+    if (!callerId) return;
+
+    const bareReference = this.extractor.extractBareReference?.(node, this.source, this.nodes);
+    if (bareReference) {
+      for (const reference of Array.isArray(bareReference) ? bareReference : [bareReference]) {
+        const positionNode = reference.node ?? node;
+        this.unresolvedReferences.push({
+          fromNodeId: callerId,
+          referenceName: reference.name,
+          referenceKind: reference.referenceKind,
+          line: positionNode.startPosition.row + 1,
+          column: positionNode.startPosition.column,
+        });
+      }
+      return;
+    }
+
+    const calleeName = this.extractor.extractBareCall?.(node, this.source, this.nodes);
+    if (!calleeName) return;
+    this.unresolvedReferences.push({
+      fromNodeId: callerId,
+      referenceName: calleeName,
+      referenceKind: 'calls',
+      line: node.startPosition.row + 1,
+      column: node.startPosition.column,
+    });
+  }
+
   private extractCall(node: SyntaxNode): void {
     if (this.nodeStack.length === 0) return;
 
@@ -3730,15 +3780,21 @@ export class TreeSitterExtractor {
       const sameSyntaxNode = (a: SyntaxNode | null, b: SyntaxNode): boolean =>
         !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex;
       const normalizeQualified = (text: string): string => {
-        const compact = text.replace(/\s+/g, '').replace(/^`|`$/g, '');
-        const lastDot = compact.lastIndexOf('.');
-        return lastDot > 0
-          ? `${compact.slice(0, lastDot)}::${compact.slice(lastDot + 1)}`
+        let compact = text.replace(/\s+/g, '').replace(/^`|`$/g, '');
+        if (compact.startsWith('(') && compact.endsWith(')')) {
+          const inner = compact.slice(1, -1);
+          if (/^(?:[A-Z][A-Za-z0-9_']*\.)+/.test(inner)) compact = inner;
+        }
+        const qualified = compact.match(/^((?:[A-Z][A-Za-z0-9_']*\.)+)(.+)$/);
+        return qualified
+          ? `${qualified[1]!.slice(0, -1)}::${qualified[2]}`
           : compact;
       };
       const patternBinds = (name: string): boolean => {
         if (name.includes('::')) return false;
-        if (this.extractor?.isLexicallyBound?.(name, node, this.source, this.nodes)) return true;
+        if (this.extractor?.isLexicallyBound) {
+          return this.extractor.isLexicallyBound(name, node, this.source, this.nodes);
+        }
         let ancestor: SyntaxNode | null = node.parent;
         while (ancestor) {
           if (ancestor.type === 'function' || ancestor.type === 'lambda') {
@@ -3780,6 +3836,15 @@ export class TreeSitterExtractor {
       const emitFunctionRef = (candidate: SyntaxNode | null): void => {
         const reference = simpleReference(candidate);
         if (!reference) return;
+        const separator = reference.name.lastIndexOf('::');
+        const leaf = reference.name
+          .slice(separator < 0 ? 0 : separator + 2)
+          .replace(/^\(|\)$/g, '');
+        // Constructor arguments are values unless a known combinator below
+        // explicitly executes them. The Haskell bare-reference walker records
+        // the value dependency, so a speculative function_ref here would be a
+        // duplicate (and can resolve to the wrong semantic kind).
+        if (/^[A-Z]/.test(leaf) || leaf.startsWith(':')) return;
         this.unresolvedReferences.push({
           fromNodeId: callerId,
           referenceName: reference.name,
@@ -3836,20 +3901,25 @@ export class TreeSitterExtractor {
         // intentionally strict (callables only; import/same-file/unique), so
         // ordinary value arguments do not turn into fuzzy call edges.
         const argument = getChildByField(node, 'argument');
-        emitFunctionRef(argument);
-        const directFunction = getChildByField(node, 'function');
-        const directName = directFunction
-          && ['variable', 'constructor', 'qualified', 'prefix_id'].includes(directFunction.type)
-          ? normalizeQualified(getNodeText(directFunction, this.source).trim())
-          : '';
-        const directSeparator = directName.lastIndexOf('::');
-        const directBase = directName.slice(directSeparator < 0 ? 0 : directSeparator + 2);
-        if (
-          directBase
-          && this.extractor?.higherOrderFunctionNames?.has(directBase)
-        ) {
-          emitCall(argument);
+        let appliedArgumentCount = 0;
+        let prefixCallee = getChildByField(node, 'function');
+        while (prefixCallee?.type === 'apply') {
+          appliedArgumentCount++;
+          prefixCallee = getChildByField(prefixCallee, 'function');
         }
+        const prefixReference = simpleReference(prefixCallee);
+        const prefixSeparator = prefixReference?.name.lastIndexOf('::') ?? -1;
+        const prefixBaseRaw = prefixReference
+          ? prefixReference.name.slice(prefixSeparator < 0 ? 0 : prefixSeparator + 2)
+          : '';
+        const prefixBase = prefixBaseRaw.replace(/^\((.*)\)$/, '$1');
+        const actionArgument = ['>>', '*>', '<*', '<*>', '<**>', '<|>'].includes(prefixBase)
+          || (['<$>', '<$', '=<<'].includes(prefixBase) && appliedArgumentCount === 1)
+          || (['<&>', '$>', '>>='].includes(prefixBase) && appliedArgumentCount === 0);
+        if (!actionArgument) emitFunctionRef(argument);
+        // Known Haskell HOF arguments are emitted by the language-specific
+        // bare-call hook during the child walk. Keeping that semantic decision
+        // in one place avoids duplicate calls for `map Just xs` and friends.
 
         if (
           node.parent?.type === 'apply' &&
@@ -5377,20 +5447,8 @@ export class TreeSitterExtractor {
           this.extractAnonymousClass(node, anonBody);
           return;
         }
-      } else if (this.extractor!.extractBareCall) {
-        const calleeName = this.extractor!.extractBareCall(node, this.source, this.nodes);
-        if (calleeName && this.nodeStack.length > 0) {
-          const callerId = this.nodeStack[this.nodeStack.length - 1];
-          if (callerId) {
-            this.unresolvedReferences.push({
-              fromNodeId: callerId,
-              referenceName: calleeName,
-              referenceKind: 'calls',
-              line: node.startPosition.row + 1,
-              column: node.startPosition.column,
-            });
-          }
-        }
+      } else if (this.extractor!.extractBareReference || this.extractor!.extractBareCall) {
+        this.extractBareSemanticReference(node);
       }
 
       // C++ stack / direct-initialization construction — `Calculator calc(0)`

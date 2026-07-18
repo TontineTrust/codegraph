@@ -96,6 +96,7 @@ interface FileRow {
   modified_at: number;
   indexed_at: number;
   node_count: number;
+  haskell_topology_hash: string | null;
   errors: string | null;
 }
 
@@ -181,6 +182,7 @@ function rowToFileRecord(row: FileRow): FileRecord {
     modifiedAt: row.modified_at,
     indexedAt: row.indexed_at,
     nodeCount: row.node_count,
+    haskellTopologyHash: row.haskell_topology_hash ?? undefined,
     errors: row.errors ? safeJsonParse(row.errors, undefined) : undefined,
   };
 }
@@ -289,6 +291,11 @@ export class QueryBuilder {
 
   constructor(db: SqliteDatabase) {
     this.db = db;
+  }
+
+  /** Run a compound graph mutation atomically. Nested query transactions flatten. */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   /** Set the normalized project-name tokens used to down-weight non-discriminative
@@ -1847,8 +1854,8 @@ export class QueryBuilder {
   upsertFile(file: FileRecord): void {
     if (!this.stmts.upsertFile) {
       this.stmts.upsertFile = this.db.prepare(`
-        INSERT INTO files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
-        VALUES (@path, @contentHash, @language, @size, @modifiedAt, @indexedAt, @nodeCount, @errors)
+        INSERT INTO files (path, content_hash, language, size, modified_at, indexed_at, node_count, haskell_topology_hash, errors)
+        VALUES (@path, @contentHash, @language, @size, @modifiedAt, @indexedAt, @nodeCount, @haskellTopologyHash, @errors)
         ON CONFLICT(path) DO UPDATE SET
           content_hash = @contentHash,
           language = @language,
@@ -1856,6 +1863,7 @@ export class QueryBuilder {
           modified_at = @modifiedAt,
           indexed_at = @indexedAt,
           node_count = @nodeCount,
+          haskell_topology_hash = @haskellTopologyHash,
           errors = @errors
       `);
     }
@@ -1868,6 +1876,7 @@ export class QueryBuilder {
       modifiedAt: file.modifiedAt,
       indexedAt: file.indexedAt,
       nodeCount: file.nodeCount,
+      haskellTopologyHash: file.haskellTopologyHash ?? null,
       errors: file.errors ? JSON.stringify(file.errors) : null,
     });
   }
