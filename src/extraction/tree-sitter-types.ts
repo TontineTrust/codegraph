@@ -290,14 +290,17 @@ export interface LanguageExtractor {
    * tree-sitter parses it as a plain `identifier` node instead of `call`/`method_call`.
    * Returns the callee name if this node is a bare call, or undefined if not.
    */
-  extractBareCall?: (node: SyntaxNode, source: string) => string | undefined;
+  extractBareCall?: (node: SyntaxNode, source: string, stateOwner?: object) => string | undefined;
 
   /**
    * Return true when a name at this syntax node is introduced by an enclosing
    * lexical pattern rather than referring to a global/imported callable.
    * Haskell uses this for function/lambda, case, let, and monadic `do` binds.
    */
-  isLexicallyBound?: (name: string, node: SyntaxNode, source: string) => boolean;
+  isLexicallyBound?: (name: string, node: SyntaxNode, source: string, stateOwner?: object) => boolean;
+
+  /** Return true when an application-shaped AST node is a pattern, not an expression call. */
+  isPatternPosition?: (node: SyntaxNode) => boolean;
 
   /** Function-first combinators whose first argument is semantically called. */
   higherOrderFunctionNames?: ReadonlySet<string>;

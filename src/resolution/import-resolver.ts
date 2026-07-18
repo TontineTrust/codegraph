@@ -77,6 +77,7 @@ const exportedSymbolMemos = new WeakMap<ResolutionContext, Map<string, Node | un
  */
 interface FileExportIndex {
   byName: Map<string, Node>;
+  allByName: Map<string, Node[]>;
   defaultComponent: Node | undefined;
   defaultFnClass: Node | undefined;
 }
@@ -97,10 +98,13 @@ function getFileExportIndex(filePath: string, context: ResolutionContext): FileE
   }
   let idx = perFile.get(filePath);
   if (!idx) {
-    idx = { byName: new Map(), defaultComponent: undefined, defaultFnClass: undefined };
+    idx = { byName: new Map(), allByName: new Map(), defaultComponent: undefined, defaultFnClass: undefined };
     for (const n of context.getNodesInFile(filePath)) {
       if (!n.isExported) continue;
       if (!idx.byName.has(n.name)) idx.byName.set(n.name, n);
+      const named = idx.allByName.get(n.name) ?? [];
+      named.push(n);
+      idx.allByName.set(n.name, named);
       if (idx.defaultComponent === undefined && n.kind === 'component') idx.defaultComponent = n;
       if (idx.defaultFnClass === undefined && (n.kind === 'function' || n.kind === 'class')) idx.defaultFnClass = n;
     }
@@ -211,6 +215,17 @@ function resolveHaskellModule(
   if (!candidates || candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0]!;
 
+  // A module header can be duplicated accidentally or across Cabal components.
+  // Prefer the conventional exact `Foo/Bar.hs` suffix before proximity: this
+  // disambiguates a real-world `CompositeAsset.hs` typo from the exposed
+  // `CompositeAssets.hs` module. Never let SQLite insertion order break a tie.
+  const expectedSuffix = `${moduleName.replace(/\./g, '/')}.hs`;
+  const suffixMatches = candidates.filter((candidate) => {
+    const normalized = candidate.replace(/\\/g, '/');
+    return normalized === expectedSuffix || normalized.endsWith(`/${expectedSuffix}`);
+  });
+  const pool = suffixMatches.length > 0 ? suffixMatches : candidates;
+
   // Monorepos can contain the same module name in several Cabal components
   // (especially Main/Spec). Prefer the source tree closest to the importer.
   const fromParts = fromFile.replace(/\\/g, '/').split('/').slice(0, -1);
@@ -226,9 +241,20 @@ function resolveHaskellModule(
     }
     return shared;
   };
-  return candidates.reduce((best, candidate) =>
-    sharedPrefix(candidate) > sharedPrefix(best) ? candidate : best
-  );
+  let best: string | null = null;
+  let bestScore = -1;
+  let tied = false;
+  for (const candidate of pool) {
+    const score = sharedPrefix(candidate);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+      tied = false;
+    } else if (score === bestScore) {
+      tied = true;
+    }
+  }
+  return tied ? null : best;
 }
 
 /**
@@ -1139,6 +1165,66 @@ interface HaskellImportItem {
   children: '*' | string[] | null;
 }
 
+/** Strip nested Haskell comments while preserving offsets/newlines and strings. */
+function stripHaskellComments(content: string): string {
+  let out = '';
+  let depth = 0;
+  let lineComment = false;
+  let inString = false;
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+    if (lineComment) {
+      if (ch === '\n') {
+        lineComment = false;
+        out += '\n';
+      } else {
+        out += ' ';
+      }
+      continue;
+    }
+    if (depth > 0) {
+      if (ch === '{' && next === '-') {
+        depth++;
+        out += '  ';
+        i++;
+      } else if (ch === '-' && next === '}') {
+        depth--;
+        out += '  ';
+        i++;
+      } else {
+        out += ch === '\n' ? '\n' : ' ';
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (ch === '\\' && next !== undefined) {
+        out += next;
+        i++;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+    } else if (ch === '-' && next === '-') {
+      lineComment = true;
+      out += '  ';
+      i++;
+    } else if (ch === '{' && next === '-') {
+      depth = 1;
+      out += '  ';
+      i++;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 function splitHaskellList(value: string): string[] {
   const items: string[] = [];
   let item = '';
@@ -1183,9 +1269,7 @@ function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
 
 function extractHaskellImports(content: string): ImportMapping[] {
   const mappings: ImportMapping[] = [];
-  const stripped = content
-    .replace(/\{-[\s\S]*?-\}/g, '')
-    .replace(/--[^\n]*/g, '');
+  const stripped = stripHaskellComments(content);
   const lines = stripped.split(/\r?\n/);
 
   const declarations: string[] = [];
@@ -1243,6 +1327,7 @@ function extractHaskellImports(content: string): ImportMapping[] {
       source: moduleName,
       isDefault: false,
       isNamespace: true,
+      isQualifiedOnly: isQualified,
       ...restrictions,
     });
 
@@ -1437,9 +1522,7 @@ export function extractReExports(content: string, language: Language): ReExport[
  * also forward a symbol that was explicitly imported into the facade.
  */
 function extractHaskellReExports(content: string): ReExport[] {
-  const cleaned = content
-    .replace(/\{-[\s\S]*?-\}/g, '')
-    .replace(/--[^\n]*/g, '');
+  const cleaned = stripHaskellComments(content);
   const header = cleaned.match(/\bmodule\s+[A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*\s*/);
   if (!header) return [];
   const open = cleaned.indexOf('(', header.index! + header[0].length);
@@ -1476,45 +1559,103 @@ function extractHaskellReExports(content: string): ReExport[] {
 
   const out: ReExport[] = [];
   const imports = extractHaskellImports(content);
+  const pushUnique = (reExport: ReExport): void => {
+    const key = JSON.stringify(reExport);
+    if (!out.some((existing) => JSON.stringify(existing) === key)) out.push(reExport);
+  };
+  const restrictionsFrom = (imp: ImportMapping) => ({
+    ...(imp.includedNames ? { includedNames: imp.includedNames } : {}),
+    ...(imp.includedParentExports ? { includedParentExports: imp.includedParentExports } : {}),
+    ...(imp.excludedNames ? { excludedNames: imp.excludedNames } : {}),
+    ...(imp.excludedParentExports ? { excludedParentExports: imp.excludedParentExports } : {}),
+  });
+  const mappingExposes = (imp: ImportMapping, name: string, parent?: string): boolean => {
+    if (imp.isNamespace) return false;
+    if (imp.localName !== '*' && imp.localName !== name) return false;
+    if (imp.parentExport && imp.parentExport !== parent) return false;
+    if (imp.excludedNames?.includes(name)) return false;
+    if (parent && imp.excludedParentExports?.includes(parent)) return false;
+    const hasAllowList = imp.includedNames !== undefined || imp.includedParentExports !== undefined;
+    if (!hasAllowList) return true;
+    return imp.includedNames?.includes(name) === true
+      || (!!parent && imp.includedParentExports?.includes(parent) === true);
+  };
+  const sourcesFor = (name: string, parent?: string): ImportMapping[] => {
+    const seen = new Set<string>();
+    return imports.filter((imp) => {
+      if (!mappingExposes(imp, name, parent)) return false;
+      const key = `${imp.source}\0${imp.parentExport ?? ''}\0${imp.localName}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   for (const rawItem of items) {
     const moduleMatch = rawItem.match(/^module\s+([A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*)$/);
     if (moduleMatch) {
-      out.push({ kind: 'wildcard', source: moduleMatch[1]! });
+      // `module X` means the unqualified names brought into scope through the
+      // local module binding X. It may be an alias (`import Origin as X`) and a
+      // qualified-only import contributes no unqualified exports.
+      for (const imp of imports) {
+        if (!imp.isNamespace || imp.isQualifiedOnly || imp.localName !== moduleMatch[1]) continue;
+        pushUnique({ kind: 'wildcard', source: imp.source, ...restrictionsFrom(imp) });
+      }
       continue;
     }
 
-    const normalized = rawItem.replace(/^(?:type|pattern)\s+/, '');
-    const operator = normalized.match(/^\(([^()]+)\)/)?.[1]?.trim();
-    const identifier = normalized.match(/^([A-Za-z_][A-Za-z0-9_']*)/)?.[1];
-    const exportedName = operator ?? identifier;
-    if (!exportedName) continue;
-    let matched = false;
-    for (const imp of imports) {
-      if (imp.isNamespace || imp.localName !== exportedName) continue;
-      out.push({
+    const item = parseHaskellImportItem(rawItem);
+    if (!item) continue;
+    for (const imp of sourcesFor(item.name)) {
+      pushUnique({
         kind: 'named',
-        exportedName,
-        originalName: imp.exportedName,
+        exportedName: item.name,
+        originalName: item.name,
         source: imp.source,
       });
-      matched = true;
     }
-    // `module Facade (foo) where; import Lib` re-exports `foo` through an
-    // unqualified wildcard import. There is no explicit `localName=foo`
-    // mapping to follow, so retain every eligible wildcard source and let the
-    // normal ambiguity-safe re-export resolver determine the unique owner.
-    if (!matched) {
-      const seenSources = new Set<string>();
+
+    if (Array.isArray(item.children)) {
+      for (const child of item.children) {
+        for (const imp of sourcesFor(child, item.name)) {
+          pushUnique({
+            kind: 'named',
+            exportedName: child,
+            originalName: child,
+            source: imp.source,
+          });
+        }
+      }
+    } else if (item.children === '*') {
+      // Preserve the intersection between `T(..)` in the facade header and
+      // the constructors/methods that its own imports actually brought into
+      // scope. Explicit `T(A)` imports become named A re-exports; unrestricted
+      // or `T(..)` imports retain a parent-scoped wildcard.
       for (const imp of imports) {
-        if (imp.isNamespace || imp.localName !== '*') continue;
-        if (imp.excludedNames?.includes(exportedName)) continue;
-        if (seenSources.has(imp.source)) continue;
-        seenSources.add(imp.source);
-        out.push({
-          kind: 'named',
-          exportedName,
-          originalName: exportedName,
+        if (imp.isNamespace) continue;
+        if (imp.parentExport === item.name && imp.localName !== '*') {
+          pushUnique({
+            kind: 'named',
+            exportedName: imp.localName,
+            originalName: imp.exportedName,
+            source: imp.source,
+          });
+          continue;
+        }
+        const unrestrictedWildcard = imp.localName === '*'
+          && !imp.includedNames
+          && !imp.includedParentExports;
+        const parentWildcard = imp.localName === '*'
+          && (imp.parentExport === item.name
+            || imp.includedParentExports?.includes(item.name)
+            || unrestrictedWildcard);
+        if (!parentWildcard || imp.excludedParentExports?.includes(item.name)) continue;
+        pushUnique({
+          kind: 'wildcard',
           source: imp.source,
+          includedParentExports: [item.name],
+          ...(imp.excludedNames ? { excludedNames: imp.excludedNames } : {}),
+          ...(imp.excludedParentExports ? { excludedParentExports: imp.excludedParentExports } : {}),
         });
       }
     }
@@ -1918,11 +2059,12 @@ function resolveHaskellImportedReference(
   ): Node | undefined => {
     const resolvedPath = resolveImportPath(moduleName, ref.filePath, 'haskell', context);
     if (!resolvedPath) return undefined;
-    const direct = context.getNodesInFile(resolvedPath).filter((node) =>
-      node.isExported
-      && node.name === exportedName
-      && (!mapping || mappingAllows(mapping, exportedName, node))
-    );
+    const names = /^[A-Za-z_][A-Za-z0-9_']*$/.test(exportedName)
+      ? [exportedName]
+      : [exportedName, `(${exportedName})`];
+    const exportIndex = getFileExportIndex(resolvedPath, context);
+    const direct = names.flatMap((name) => exportIndex.allByName.get(name) ?? [])
+      .filter((node) => !mapping || mappingAllows(mapping, exportedName, node));
     if (direct.length === 1) return direct[0];
     if (direct.length > 1) return undefined;
 
@@ -2537,6 +2679,10 @@ function findExportedSymbolWalk(
   visited.add(filePath);
 
   const exportIndex = getFileExportIndex(filePath, context);
+  const exportedNames = language === 'haskell'
+    && !/^[A-Za-z_][A-Za-z0-9_']*$/.test(want.exportedName)
+    ? [want.exportedName, `(${want.exportedName})`]
+    : [want.exportedName];
 
   // 1. Direct hit: the symbol is declared in this file.
   if (want.isDefault) {
@@ -2552,8 +2698,10 @@ function findExportedSymbolWalk(
     const direct = exportIndex.byName.get(want.memberName);
     if (direct) return direct;
   } else {
-    const direct = exportIndex.byName.get(want.exportedName);
-    if (direct) return direct;
+    for (const name of exportedNames) {
+      const direct = exportIndex.byName.get(name);
+      if (direct) return direct;
+    }
   }
 
   // 2. Re-export hit: the file forwards the symbol to another module.
@@ -2592,11 +2740,29 @@ function findExportedSymbolWalk(
       const next = resolveImportPath(rex.source, filePath, language, context);
       if (!next) continue;
       const chained = findExportedSymbol(next, want, language, context, visited, depth + 1);
-      if (chained) return chained;
+      if (chained && (
+        language !== 'haskell'
+        || haskellReExportAllows(rex, want.exportedName, chained)
+      )) return chained;
     }
   }
 
   return undefined;
+}
+
+function haskellReExportAllows(
+  reExport: Extract<ReExport, { kind: 'wildcard' }>,
+  name: string,
+  node: Node,
+): boolean {
+  const owners = node.qualifiedName.split('::').slice(0, -1);
+  if (reExport.excludedNames?.includes(name)) return false;
+  if (reExport.excludedParentExports?.some((parent) => owners.includes(parent))) return false;
+  const hasAllowList = reExport.includedNames !== undefined
+    || reExport.includedParentExports !== undefined;
+  if (!hasAllowList) return true;
+  return reExport.includedNames?.includes(name) === true
+    || reExport.includedParentExports?.some((parent) => owners.includes(parent)) === true;
 }
 
 /** Node kinds that own static members reachable as `Container.member`. */

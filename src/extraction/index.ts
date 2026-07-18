@@ -2447,10 +2447,11 @@ export class ExtractionOrchestrator {
 
   /**
    * Re-attach cross-file incoming edges snapshotted before a re-index delete
-   * (#899): re-resolve each edge's target to the re-indexed node's new id by
-   * (kind, name); targets that vanished are resurrected as their original
-   * unresolved ref (#1240's removal-side counterpart) when the edge carries
-   * its refName stamp.
+   * (#899). Resolution-created edges are always resurrected from their stamped
+   * original reference, even when a same-named target still exists: edits can
+   * change export lists, module names, visibility, or re-export restrictions
+   * without renaming the declaration. Blind reattachment would preserve a now
+   * illegal edge. Older/synthesized unstamped edges keep the stable id remap.
    */
   private reattachCrossFileEdges(
     crossFileIncomingEdges: Array<Edge & { targetKind: string; targetName: string; sourceFilePath: string; sourceLanguage: Language }>,
@@ -2463,12 +2464,14 @@ export class ExtractionOrchestrator {
     const reinserted: Edge[] = [];
     const resurrected: UnresolvedReference[] = [];
     for (const e of crossFileIncomingEdges) {
+      const ref = resurrectRefFromDroppedEdge(e);
+      if (ref) {
+        resurrected.push(ref);
+        continue;
+      }
       const newTargetId = newNodesByKindName.get(`${e.targetKind}\0${e.targetName}`);
       if (newTargetId) {
         reinserted.push({ source: e.source, target: newTargetId, kind: e.kind, metadata: e.metadata, line: e.line, column: e.column, provenance: e.provenance });
-      } else {
-        const ref = resurrectRefFromDroppedEdge(e);
-        if (ref) resurrected.push(ref);
       }
     }
     if (reinserted.length > 0) {

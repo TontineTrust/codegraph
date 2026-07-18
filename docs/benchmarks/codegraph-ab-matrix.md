@@ -10,22 +10,22 @@ current `main` HEAD), so the "with" arm reflects the shipped 0.9.4 resolvers.
 
 ## Headline
 
-**Across 37 cells, codegraph cut total file reads from 159 → 38 — 76% fewer.** It never
+**Across 41 cells, codegraph cut total file reads from 227 → 38 — 83% fewer.** It never
 *increased* reads in any cell (0 regressions). The mechanism: a few sub-millisecond codegraph
 calls replace a read-and-grep exploration.
 
-**Cost stays roughly flat — marginally higher on the with-arm here** (summed across the 37
-cells: with `$15.4` vs without `$13.8`). On these short single-flow questions the without-arm
+**Cost stays roughly flat.** Across all 82 agent runs, both arms cost `$31.63` combined. On
+these short single-flow questions the without-arm
 resolves in <10 calls and never balloons, so it doesn't reach the regime where codegraph's cost
 savings compound, while the with-arm pays fixed MCP overhead (tool definitions in context +
-tool-loading) that short tasks don't amortize. The win is **fewer tool calls (189 vs 321, −41%)
-+ lower wall-clock** (mean **38s vs 48s**), which is the design target. On harder multi-turn
+tool-loading) that short tasks don't amortize. The win is **fewer file reads and shell searches
+and lower wall-clock** (mean **39s vs 53s**), which is the design target. On harder multi-turn
 investigations cost flips to a net saving as the without-arm's accumulated context balloons —
 see `docs/benchmarks/call-sequence-analysis.md`.
 
 The gap widens with repo size and flow complexity: on medium/large repos the without-codegraph
 arm often **thrashes** — many greps/globs, shell `find`/`grep` (Bash), and occasionally spawning
-a **sub-agent** — while the with-codegraph arm answers in 2–8 calls. On tiny repos (a handful of
+a **sub-agent** — while the with-codegraph arm answers in 2–9 calls. On tiny repos (a handful of
 files) the two arms tie or codegraph is marginally slower (MCP/index overhead doesn't pay off
 when the whole flow fits in one or two files) — but reads still drop.
 
@@ -98,15 +98,15 @@ with-arm (**0 Bash, 0 sub-agents**) never needed. (82 agent runs, $31.63 total.)
   django-wagtail (2R vs 8R), excalidraw (1R / 55s vs 7R / 87s), Luau Knit (0R vs 5R), aspnet-realworld
   (0R vs 5R), c-redis (0R vs 5R).
 - **Without codegraph, large repos make the agent thrash:** it falls back to shell `find`/`grep`
-  (37 Bash calls across the matrix) and on jellyfin even spawned a sub-agent — exactly the behavior
-  codegraph is meant to prevent. The with-arm answers those in 2–8 codegraph calls and used **0 Bash
+  (92 Bash calls across the matrix) and in five cells spawned a sub-agent — exactly the behavior
+  codegraph is meant to prevent. The with-arm answers those in 2–9 codegraph calls and used **0 Bash
   and 0 sub-agents** anywhere.
 - **Tie zone = tiny repos** (Kotlin Jetcaster 1R/1R, Rust cratesio 1R/1R, express 1R/2R, Swift template
   0R/2R): the whole flow fits in 1–2 files, so reading is already cheap; codegraph ties on reads and is
   sometimes a few seconds slower (MCP + index overhead — Kotlin petclinic 37s vs 23s, cratesio 22s vs
   18s). This matches the design note that codegraph's value scales with repo size.
 - **Duration tracks reads on the big repos** (jellyfin 51s vs 212s, excalidraw 55s vs 87s, aspnet-eshop
-  39s vs 58s, django-wagtail 45s vs 66s) and is noise on small ones; mean wall-clock is 38s with vs 48s
+  39s vs 58s, django-wagtail 45s vs 66s) and is noise on small ones; mean wall-clock is 39s with vs 53s
   without.
 - Some "with" cells still read 2–4 files (jellyfin, gitness, forem, saleor, django) — the residual is
   the documented frontier (anonymous handlers, deep service chains, dynamic finders); codegraph gets the

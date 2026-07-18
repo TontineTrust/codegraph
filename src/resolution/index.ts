@@ -765,6 +765,81 @@ export class ReferenceResolver {
   }
 
   /**
+   * Resolve Haskell's lexical/module scope before imports. Local declarations
+   * shadow imports, and nested helpers are visible only from their owner,
+   * siblings, and descendants — a same-file global name match is not enough.
+   */
+  private resolveHaskellLexical(ref: UnresolvedRef): {
+    claimed: boolean;
+    result: ResolvedRef | null;
+  } {
+    if (
+      ref.language !== 'haskell'
+      || (ref.referenceKind !== 'calls'
+        && ref.referenceKind !== 'function_ref'
+        && ref.referenceKind !== 'references')
+      || ref.referenceName.includes('::')
+    ) return { claimed: false, result: null };
+
+    const from = this.queries.getNodeById(ref.fromNodeId);
+    if (!from) return { claimed: false, result: null };
+    const moduleNode = this.context.getNodesInFile(ref.filePath)
+      .find((node) => node.kind === 'namespace' && node.language === 'haskell');
+    const moduleScope = moduleNode?.qualifiedName ?? moduleNode?.name;
+
+    const names = [ref.referenceName];
+    if (!/^[A-Za-z_][A-Za-z0-9_']*$/.test(ref.referenceName)) {
+      names.push(`(${ref.referenceName})`);
+    }
+    const candidates = [...new Map(names.flatMap((name) => this.context.getNodesByName(name))
+      .filter((node) => node.filePath === ref.filePath && node.language === 'haskell')
+      .map((node) => [node.id, node])).values()];
+    if (candidates.length === 0) return { claimed: false, result: null };
+
+    const visibleFunctionParents = new Map<string, number>();
+    let scope = from.qualifiedName;
+    let rank = 100;
+    while (scope) {
+      visibleFunctionParents.set(scope, rank--);
+      if (scope === moduleScope) break;
+      const separator = scope.lastIndexOf('::');
+      if (separator < 0) break;
+      scope = scope.slice(0, separator);
+    }
+    if (moduleScope && !visibleFunctionParents.has(moduleScope)) {
+      visibleFunctionParents.set(moduleScope, 1);
+    }
+
+    const ranked = candidates.flatMap((node): Array<{ node: Node; rank: number }> => {
+      if (node.kind === 'function' || node.kind === 'constant') {
+        const separator = node.qualifiedName.lastIndexOf('::');
+        const parent = separator > 0 ? node.qualifiedName.slice(0, separator) : '';
+        const lexicalRank = visibleFunctionParents.get(parent);
+        return lexicalRank === undefined ? [] : [{ node, rank: 200 + lexicalRank }];
+      }
+      // Constructors and typeclass methods occupy the module namespace even
+      // though their graph qualifiedName includes their owning type/class.
+      if (node.kind === 'enum_member') return [{ node, rank: 100 }];
+      if (node.kind === 'method') return [{ node, rank: node.isExported ? 90 : 80 }];
+      return [];
+    });
+    if (ranked.length === 0) return { claimed: false, result: null };
+
+    const bestRank = Math.max(...ranked.map((entry) => entry.rank));
+    const best = ranked.filter((entry) => entry.rank === bestRank);
+    if (best.length !== 1) return { claimed: true, result: null };
+    return {
+      claimed: true,
+      result: {
+        original: ref,
+        targetNodeId: best[0]!.node.id,
+        confidence: 0.99,
+        resolvedBy: 'qualified-name',
+      },
+    };
+  }
+
+  /**
    * Resolve a single reference
    */
   resolveOne(ref: UnresolvedRef): ResolvedRef | null {
@@ -772,6 +847,9 @@ export class ReferenceResolver {
     if (this.isBuiltInOrExternal(ref)) {
       return null;
     }
+
+    const haskellLexical = this.resolveHaskellLexical(ref);
+    if (haskellLexical.claimed) return haskellLexical.result;
 
     // CFML component paths in inheritance (#1152): `extends="coldbox.system.web.
     // Controller"` names the supertype by its dot-separated path (or `extends=
@@ -836,6 +914,11 @@ export class ReferenceResolver {
           return viaImport;
         }
       }
+      // Haskell has no ambient cross-file namespace. If an import did not
+      // authorize this function value, a unique project-wide match is still
+      // out of scope (notably after `hiding`). Lexical same-file matches were
+      // already handled above.
+      if (ref.language === 'haskell') return null;
       return this.gateLanguage(matchFunctionRef(ref, this.context), ref);
     }
 
@@ -914,7 +997,7 @@ export class ReferenceResolver {
         // or brought into scope by an import. Cross-file import matches were
         // already handled above; accepting a global name-only fallback here
         // fabricates edges for Prelude names such as `pure` and `length`.
-        if (!target || target.filePath !== ref.filePath) {
+        if (!target || target.filePath !== ref.filePath || ref.referenceKind === 'calls') {
           nameResult = null;
         }
       } else if (target && target.language === 'nix') {

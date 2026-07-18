@@ -1256,7 +1256,7 @@ export class TreeSitterExtractor {
     // `let` blocks). Honour bare semantic calls on that path too; the regular
     // function-body walker has the equivalent branch below.
     else if (this.language === 'haskell' && this.extractor.extractBareCall) {
-      const calleeName = this.extractor.extractBareCall(node, this.source);
+      const calleeName = this.extractor.extractBareCall(node, this.source, this.nodes);
       const callerId = this.nodeStack[this.nodeStack.length - 1];
       if (calleeName && callerId) {
         this.unresolvedReferences.push({
@@ -3730,7 +3730,7 @@ export class TreeSitterExtractor {
       const sameSyntaxNode = (a: SyntaxNode | null, b: SyntaxNode): boolean =>
         !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex;
       const normalizeQualified = (text: string): string => {
-        const compact = text.replace(/\s+/g, '');
+        const compact = text.replace(/\s+/g, '').replace(/^`|`$/g, '');
         const lastDot = compact.lastIndexOf('.');
         return lastDot > 0
           ? `${compact.slice(0, lastDot)}::${compact.slice(lastDot + 1)}`
@@ -3738,7 +3738,7 @@ export class TreeSitterExtractor {
       };
       const patternBinds = (name: string): boolean => {
         if (name.includes('::')) return false;
-        if (this.extractor?.isLexicallyBound?.(name, node, this.source)) return true;
+        if (this.extractor?.isLexicallyBound?.(name, node, this.source, this.nodes)) return true;
         let ancestor: SyntaxNode | null = node.parent;
         while (ancestor) {
           if (ancestor.type === 'function' || ancestor.type === 'lambda') {
@@ -3771,7 +3771,9 @@ export class TreeSitterExtractor {
           return null;
         }
         let name = getNodeText(current, this.source).trim();
-        if (current.type === 'qualified') name = normalizeQualified(name);
+        if (current.type === 'qualified' || name.includes('.') || name.startsWith('`')) {
+          name = normalizeQualified(name);
+        }
         if (!name || patternBinds(name)) return null;
         return { name, node: current };
       };
@@ -3799,6 +3801,35 @@ export class TreeSitterExtractor {
         return true;
       };
 
+      // Haskell reuses `apply`/`infix` syntax nodes for constructor patterns.
+      // They are dependencies on the constructor, but never runtime calls.
+      if (this.extractor?.isPatternPosition?.(node)) {
+        let candidate: SyntaxNode | null = null;
+        if (node.type === 'apply') {
+          if (
+            node.parent?.type === 'apply'
+            && sameSyntaxNode(getChildByField(node.parent, 'function'), node)
+          ) return;
+          candidate = getChildByField(node, 'function') ?? node.namedChild(0);
+          while (candidate?.type === 'apply') {
+            candidate = getChildByField(candidate, 'function') ?? candidate.namedChild(0);
+          }
+        } else if (node.type === 'infix') {
+          candidate = getChildByField(node, 'operator');
+        }
+        const reference = candidate ? simpleReference(candidate) : null;
+        if (reference) {
+          this.unresolvedReferences.push({
+            fromNodeId: callerId,
+            referenceName: reference.name,
+            referenceKind: 'references',
+            line: reference.node.startPosition.row + 1,
+            column: reference.node.startPosition.column,
+          });
+        }
+        return;
+      }
+
       if (node.type === 'apply') {
         // A named expression passed as an application argument is a function
         // value candidate (`mapM_ handler xs`). The function-ref resolver is
@@ -3807,10 +3838,15 @@ export class TreeSitterExtractor {
         const argument = getChildByField(node, 'argument');
         emitFunctionRef(argument);
         const directFunction = getChildByField(node, 'function');
+        const directName = directFunction
+          && ['variable', 'constructor', 'qualified', 'prefix_id'].includes(directFunction.type)
+          ? normalizeQualified(getNodeText(directFunction, this.source).trim())
+          : '';
+        const directSeparator = directName.lastIndexOf('::');
+        const directBase = directName.slice(directSeparator < 0 ? 0 : directSeparator + 2);
         if (
-          directFunction
-          && (directFunction.type === 'variable' || directFunction.type === 'constructor')
-          && this.extractor?.higherOrderFunctionNames?.has(getNodeText(directFunction, this.source).trim())
+          directBase
+          && this.extractor?.higherOrderFunctionNames?.has(directBase)
         ) {
           emitCall(argument);
         }
@@ -3838,9 +3874,8 @@ export class TreeSitterExtractor {
       if (node.type === 'infix') {
         const operator = getChildByField(node, 'operator');
         if (!operator) return;
-        let operatorName = getNodeText(operator, this.source).trim();
-        if (operator.type === 'qualified') operatorName = normalizeQualified(operatorName);
-        if (!operatorName) return;
+        const operatorName = normalizeQualified(getNodeText(operator, this.source).trim());
+        if (!operatorName || patternBinds(operatorName)) return;
 
         // `$`/`$!` and `&` are application syntax in practice. The function is
         // an operand rather than an `apply` node, so surface the semantic callee
@@ -5343,7 +5378,7 @@ export class TreeSitterExtractor {
           return;
         }
       } else if (this.extractor!.extractBareCall) {
-        const calleeName = this.extractor!.extractBareCall(node, this.source);
+        const calleeName = this.extractor!.extractBareCall(node, this.source, this.nodes);
         if (calleeName && this.nodeStack.length > 0) {
           const callerId = this.nodeStack[this.nodeStack.length - 1];
           if (callerId) {

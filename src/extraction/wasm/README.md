@@ -35,8 +35,8 @@ recipe works for any tree-sitter grammar that ships its `grammar.js` /
 `parser.c` (almost all do).
 
 ```bash
-# 1. Tooling (one-time)
-npm i -g tree-sitter-cli   # provides the `tree-sitter` binary
+# 1. Tooling (pinned to the version used for the vendored artifact)
+npm i -g tree-sitter-cli@0.24.4   # provides the `tree-sitter` binary
 
 # 2. Clone the grammar at a specific commit (pin it!)
 git clone https://github.com/tree-sitter/tree-sitter-haskell /tmp/ts-haskell

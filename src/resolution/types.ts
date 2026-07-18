@@ -249,6 +249,8 @@ export interface ImportMapping {
   isDefault: boolean;
   /** Whether it's a namespace import (import * as X) */
   isNamespace: boolean;
+  /** Haskell: the binding is available only through its qualifier. */
+  isQualifiedOnly?: boolean;
   /**
    * Optional parent export for languages with grouped exports, such as
    * Haskell's `Type(Constructor)` and `Type(..)` import items.
@@ -285,4 +287,9 @@ export type ReExport =
       kind: 'wildcard';
       /** Module specifier of the upstream module. */
       source: string;
+      /** Optional Haskell re-export allow/deny lists inherited from its import. */
+      includedNames?: string[];
+      includedParentExports?: string[];
+      excludedNames?: string[];
+      excludedParentExports?: string[];
     };
