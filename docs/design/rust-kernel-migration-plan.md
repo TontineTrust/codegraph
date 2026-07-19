@@ -90,10 +90,15 @@ them are the ORIGINAL plan and carry expectations that measurement later correct
       double-buffer WORKS (8c settle 3.6s — "core-invariant" superseded);
       2c record now 16.5min, 8c range 15.0–16.4 (n=2). Two cache
       experiments killed by measurement same-day (nameCache scaling, lazy
-      candidates — §7a.6 has the numbers; code reverted). Queue now:
-      **writes-under-readers probe** (8c deletes+inserts +102s under the
-      pool — the biggest attributed delta) > **cFnPtr native site
-      extraction** (synthesis ~230s) > backpressure byte volume > recreate.
+      candidates — §7a.6 has the numbers; code reverted).
+      Writes-under-readers PROBED + FIXED 2026-07-18 (§7a.7): mechanism =
+      WAL read-through depth under reader pins (proven by pool-off/dose/
+      valve discrimination); fix = worker connection recycling at the
+      pool-idle boundary (cadence 8); superphase **715 → 633.6s (−11.4%)**,
+      8c envelope best **14.8min**, byte-neutral at every gate. Queue now:
+      **cFnPtr native site extraction** (synthesis ~230s) >
+      continuous-shallow WAL (the remaining ~45s to the valve floor) >
+      backpressure byte volume > recreate.
 - [x] **R7a. C/C++ port** — DONE 2026-07-17, same-day walker+gates after the
       survey (#1344) and grammar vendoring (#1345). One dual-language walker
       (`codegraph-kernel/src/ccpp/`), preParse HOISTED to the route point
@@ -849,6 +854,93 @@ morning's run; report ranges, never single runs on this box.** 8c parse
 - Box note: cg1212's 6–7GB deliberately degrades the cFnPtr strip cache
   (~80s paid in-container that a 24GB target-class box gets back free) —
   container numbers UNDERSTATE the true 8-core-class target.
+
+#### 7a.7 Writes-under-readers probe + fix (2026-07-18) — WAL depth named, worker connection recycling shipped
+
+Five discriminating runs (all 8c pool-4 unless noted, same tree/build family;
+each ~16min), then the fix in two cadence iterations:
+
+| run | deletes | insertEdges | read | backpressure | settle | superphase |
+|---|---|---|---|---|---|---|
+| pool-4 baseline | 118.8 | 55.3 | 33.9 | 121.9 | 3.6 | 715.0 |
+| pool-OFF | 42.6 | 38.3 | 32.6 | 120.1 | 108.5 (main) | 685.9 |
+| workers=2 (dose) | 58.9 | 54.0 | 23.9 | 174.7 | 10.3 | 670.0 |
+| v2 caches @8c | 108.0 | 50.3 | 31.4 | 168.0 | 3.9 | 687.3 |
+| valve 64MB | **56.5** | **27.8** | **16.8** | 297.2 | 3.8 | 739.2 |
+| **recycle c25** | 99.8 | 42.9 | 32.7 | 148.8 | 3.7 | 663.3 |
+| **recycle c8 (SHIPPED)** | 104.3 | 47.8 | 32.5 | 127.6 | 4.0 | **633.6** |
+
+- **Mechanism proven: WAL read-through depth under reader pins.** Pool-off
+  restores writes on identical hardware (deletes 118.8 → 42.6); the dose
+  scales with reader count (knee between 2 and 4); the aggressive valve —
+  which forces a shallow WAL — recovers deletes/inserts/read to their floors
+  (56.5/27.8/16.8) but overpays +129s in full-park folds. Reconciliation:
+  checkpoints run in every topology, but READERS PIN their progress — the
+  WAL runs deep exactly when workers are attached, and deep-WAL page
+  operations tax the writer everywhere (including the unattributed
+  between-stage spans, recreate, and synthesis reads).
+- **v2-at-8c falsified the cache resurrection** (deletes 108.0 ≈ baseline):
+  name-lookup traffic is long-tail-dominated — uncacheable at any capacity —
+  so reader traffic can't be reduced by caching. The caching family is
+  triple-dead (2c settle, 8c writes).
+- **The fix: worker connection recycling at the pool-idle boundary**
+  (`ResolverPool.recycleWorkers` + `QueryBuilder.rebind` + a cadence call at
+  the double-buffer's worker-idle point). Workers close/reopen their
+  read-only connections every 8 batches (~40k refs) — reopens are
+  sub-millisecond, resolver caches survive (only prepared statements
+  re-prepare), and the existing checkpoints advance instead of parking.
+  Cadence 25 → 8 iterated by measurement; 8 wins via diffuse gains
+  (backpressure −21, recreate 59.7 → 45.3). Attributed deletes stay ~100
+  (the WAL still re-deepens between recycles — the valve's 56.5 floor
+  needs continuous shallowness), but the SUPERPHASE captures the true win:
+  **715.0 → 633.6s (−11.4%)**; envelope best-of **14.8min at 8c**
+  (890s; band across the day's runs 14.8–16.4). Byte-neutral: git dumps
+  byte-identical old-vs-new, linux dump sha `6dd1185b…` reproduced, counts
+  2,049,153/6,413,518 every run, suite 2517 green. 2c unaffected by
+  construction (no pool → no recycling).
+- Levers after this round: cFnPtr native site extraction (~230s synthesis,
+  §7a.6 ranking stands) > continuous-shallow WAL (close the remaining
+  ~45s gap between recycling's ~100s deletes and the valve's 56.5 floor
+  without full-park folds — e.g. passive-checkpoint nudges at the recycle
+  boundary) > backpressure byte volume > recreate.
+
+#### 7a.8 cFnPtr calibration round (2026-07-18) — the 230s decomposed; fuse-then-link is step 1
+
+Three quick measurements before any port, two of them killing assumptions:
+
+- **JS strip rewrite: killed by measurement.** stripCStyle's `split('')`
+  looked like allocator pathology; a segment-builder rewrite (byte-identical,
+  pinned by `__tests__/strip-cstyle-differential.test.ts` — kept as the
+  oracle for any future rewrite) measured **1.0×** on 15.1M chars of linux
+  C. V8's scan rate is the honest cost: **~73MB/s**, and 283k strips ≈ 4
+  strips/file × ~20KB × that rate ≈ the observed 78s. The strip lever is
+  the **4× redundancy** (all-or-nothing cache declined at 6–7GB → every
+  sweep re-strips), not the scanner.
+- **E-stage regexes alone: ~46MB/s → ~30s of E's 95s.** DISPATCH_RE +
+  ARRAY_DISPATCH_RE over stripped kernel/ text yield 1,112 matches / 15.1M
+  chars. The other ~65s is per-match logic, body slicing, lineAt, and
+  getNodesInFile. A native regex scan alone caps at −30s.
+- **Calibrated attack for the ~230s, re-ordered:**
+  1. **Fuse-then-link refactor (TS, step 1):** one per-file extraction pass
+     computes strip ONCE and collects {function macros, object macros,
+     defined sets, struct fields, raw registration matches, raw dispatch
+     matches, per-function declared-receiver types}; a text-free global
+     linking pass then builds registries and edges. Kills the 4× strip
+     (−~58s) + repeated reads (−~8s) + part of E's slicing overhead.
+     Parity discipline: collectors insert in the same file order the
+     global passes iterate today (Map insertion order = current registry
+     order), FANOUT_CAP and match-evaluation order preserved per function;
+     gate = edge-set hash vs the live kernel DB (§7a.4 probe) + linux dump
+     sha. The chain/receiver resolution must be pre-collected as per-file
+     declared-type tables so linking never touches text.
+  2. **Native per-file extractor (step 2):** the same boundary then accepts
+     a Rust implementation of the per-file pass (raw text in, collected
+     records out — no preParse interaction; the synthesizer reads raw disk
+     text). Bug-for-bug regex semantics required; worth it only for the
+     remaining ~100s of per-file scan+logic after step 1 lands.
+- Note for step 2 sizing: strip at native memchr rates (~500MB/s+) would
+  be ~6-10s for the full corpus even before redundancy cuts — but marshal
+  (UTF-16↔UTF-8 across napi) eats seconds at GB scale; batch the calls.
 
 ### 7b. Arc 3 — graph richness (forensics-backed; adopt cbm's real extras, skip inflation)
 Priority order, each gated by the standard A/B + node-explosion probes:
