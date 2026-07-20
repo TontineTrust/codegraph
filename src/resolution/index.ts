@@ -1790,6 +1790,10 @@ export class ReferenceResolver {
     parallel?: {
       dbPath: string;
       bulkEdgeLoad?: { begin: () => void; end: () => void | Promise<void> };
+      /** unresolved_refs index window for the batched loop — the loop only
+       *  reads the status index + PK; dropping the sync-path ref indexes cuts
+       *  each per-batch DELETE's B-tree work (DatabaseConnection.beginBulkRefLoad). */
+      refIndexLoad?: { begin: () => void; end: () => void | Promise<void> };
       backpressure?: () => Promise<void> | null;
     }
   ): Promise<ResolutionResult> {
@@ -1810,7 +1814,7 @@ export class ReferenceResolver {
     // these counters name where the other ~340s goes (reads, edge build+insert,
     // deletes/marks, the per-batch count guard).
     const loopProf: Record<string, number> | null = process.env.CODEGRAPH_RESOLVE_PROFILE
-      ? { read: 0, settle: 0, backpressure: 0, createEdges: 0, insertEdges: 0, deletes: 0, marks: 0, countGuard: 0 }
+      ? { read: 0, settle: 0, backpressure: 0, recycle: 0, createEdges: 0, insertEdges: 0, deletes: 0, marks: 0, countGuard: 0 }
       : null;
     const lp = (k: string, t0: number): void => { if (loopProf) loopProf[k] = (loopProf[k] ?? 0) + (Date.now() - t0); };
     let tLp = 0;
@@ -1851,6 +1855,14 @@ export class ReferenceResolver {
     // unresolvable ones flip to status='failed'), shifting the remaining
     // pending rows forward.
     let prevRemaining = Number.POSITIVE_INFINITY;
+
+    // Cadence for the worker connection recycling below — ~8 batches
+    // ≈ 40k refs between recycles keeps the WAL shallow at kernel scale
+    // while a small sync never recycles at all. (25 recovered only half
+    // the write tax — the WAL re-deepened between recycles; reopens are
+    // sub-millisecond so the shorter cadence is ~free.)
+    const RECYCLE_EVERY_BATCHES = 8;
+    let batchesSinceRecycle = 0;
 
     // Fan-out result of ResolverPool.resolveBatch, settled (never rejecting)
     // so a fan-out begun before the previous batch's persist can't produce an
@@ -1926,6 +1938,16 @@ export class ReferenceResolver {
         bulkEdgesActive = true;
       } catch { /* keep the indexes; inserts just pay the per-row maintenance */ }
     }
+    // Same gate for the ref-index window: the loop's deletes stop maintaining
+    // the five sync-path unresolved_refs indexes, and the end-of-loop rebuild
+    // is near-free (only failed refs survive the loop).
+    let bulkRefsActive = false;
+    if (parallel?.refIndexLoad && total >= minRefsForPool()) {
+      try {
+        parallel.refIndexLoad.begin();
+        bulkRefsActive = true;
+      } catch { /* keep the indexes; deletes just pay the per-row maintenance */ }
+    }
 
     try {
     try {
@@ -1958,6 +1980,31 @@ export class ReferenceResolver {
       const bp = parallel?.backpressure?.();
       if (bp) await bp;
       lp('backpressure', tLp);
+
+      // Recycle the workers' read connections periodically at this same
+      // worker-idle boundary (batch k settled, batch k+1 not yet fanned
+      // out): a long-lived reader pins WAL checkpoint progress, and the
+      // deep WAL that accumulates behind it taxes the writer's OWN page
+      // operations — the §7a.6 writes-under-readers finding (deletes
+      // 42.6s → 118.8s from 0 to 4 attached readers; an aggressive valve
+      // recovered the writes but paid +129s in full-park folds). Releasing
+      // the read marks every ~25 batches lets the existing checkpoints
+      // advance instead, at ~milliseconds of reopen cost. A failed recycle
+      // downgrades to sequential permanently, same as a failed fan-out.
+      if (pool && poolReady && ++batchesSinceRecycle >= RECYCLE_EVERY_BATCHES) {
+        batchesSinceRecycle = 0;
+        tLp = Date.now();
+        try {
+          await pool.recycleWorkers();
+        } catch (err) {
+          logDebug('Worker connection recycle failed; falling back to sequential', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          await pool.destroy().catch(() => undefined);
+          pool = null;
+        }
+        lp('recycle', tLp);
+      }
 
       // Persist in bounded sub-transactions with yields between: a whole
       // batch's edge insert / keyed deletes are otherwise one solid
@@ -2086,6 +2133,11 @@ export class ReferenceResolver {
       // Recreate the edge indexes BEFORE synthesis (kind-keyed reads) and on
       // any error path. A crash before this line is healed by the next
       // DatabaseConnection open (schema.sql re-applies IF NOT EXISTS).
+      if (bulkRefsActive) {
+        const tRef = Date.now();
+        await parallel!.refIndexLoad!.end();
+        if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] ref-index-recreate: ${Date.now() - tRef}ms`);
+      }
       if (bulkEdgesActive) {
         const tIdx = Date.now();
         await parallel!.bulkEdgeLoad!.end();
