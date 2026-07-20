@@ -127,8 +127,24 @@ them are the ORIGINAL plan and carry expectations that measurement later correct
       **19.1 min kernel-arm** (parse-loop 560 → 356s; R6 26.4 → P1 17.6 on
       the old smaller graph → 19.1 on the new richer one:
       2,048,295 nodes / 6,406,933 edges, two runs byte-same).
-- [ ] **R7b. Remaining long tail** per the tracker (§4) — ruby/php/csharp/rust/… T1s
+- [~] **R7b. Remaining long tail** per the tracker (§4) — ruby/php/csharp/… T1s
       are now ~1-day-each with the walker pattern; T3 may stay TS forever (fine).
+      **rust DONE 2026-07-20** (first R7b port): grammar bumped to
+      tree-sitter-rust v0.24.2 (crate `=0.24.2` + vendored wasm from tag
+      `77a3747`, parser.c/scanner.c sha-matched; replaces the 2023 ABI-14
+      tree-sitter-wasms build — wasm-path bump validated standalone: ripgrep/
+      tokio node sections IDENTICAL, small precision-positive edge churn only,
+      full suite green), walker `codegraph-kernel/src/rustlang.rs` (survey
+      artifact: rust-lang-kernel-port-checklist.md — isAsync dead-code,
+      impl-pushes-no-scope, trait-receiver bug on `impl Trait for Generic<T>`,
+      phantom const identifiers, use-binding triple emission, all preserved
+      bug-for-bug). Gates: parity sweeps **0 diffs** on ripgrep (101/101,
+      0 deferred) / tokio (790/790, 0 deferred) / rust-analyzer (1217/1488,
+      0 diffs; 271 deferrals are token-macro-table sources — `T![~]`, `[$]` —
+      that error on BOTH arms, grammar-inherent like fmt's C++ 42%); full-init
+      dump-diffs **byte-identical** ×3 (3,857 / 13,440 / 39,030 nodes);
+      DEFAULT_ROUTED += rust; kernel-rustlang-parity suite (torture + CRLF +
+      defer) in `npm test`.
 - [ ] **P2. Arc 3, graph richness** (§7b) — product-priority call, standard gates.
 - [ ] **P3. Parked items** (§7c) — only with explicit maintainer approval.
 
@@ -513,6 +529,60 @@ during the parse phase, multi-file write transactions, buffer→bind without obj
 materialization. Note the #1320-arc post-mortem already measured statement batching
 and sorted inserts as ~zero on this path — B-tree maintenance is the floor.
 
+**Store-arc round 1 SHIPPED (2026-07-19): parse-lane index deferral.** The
+first named lever landed as `beginBulkParseLoad`/`endBulkParseLoad`
+(fresh-init only — incremental runs delete per-file rows through the
+file_path indexes): the parse window drops all 15 nodes/unresolved_refs/files
+secondary indexes plus the 4 non-unique edge indexes (identity stays for
+OR-IGNORE dedup), and rebuilds each in one scan before resolution — the edge
+window's measured trade applied to the whole parse lane. Results:
+
+- **dubbo (the cbm bar repo): parse-loop 4,306 → 1,787ms (−58%), rebuild
+  665ms, warm wall 10.5-11.3 → 8.46-9.39s** — the bar gap shrank from ~3s to
+  ~1.1s vs cbm's ~7.5s.
+- **Linux kernel 8c: envelope ≈ 14.2min — best ever** (prior best 14.8). The
+  parse-loop itself stayed ~189s (linux parse is EXTRACTION-bound — the
+  wasm-deferred C tail — unlike writer-bound dubbo) and the rebuild costs
+  21.6s, but every downstream phase dropped: resolution 517-589 → 423.4s,
+  edge-recreate → 36.5s, synthesis → 157.1s, maintenance → 16.3s. Mechanism:
+  bulk-rebuilt B-trees are densely packed where incrementally-grown ones are
+  fragmented, so every index-mediated read for the rest of the run pays fewer
+  pages. The rebuild is the gift that keeps giving downstream.
+- Gates: dubbo/gson/express/excalidraw dumps byte-identical (441,270-line
+  dubbo dump reproduced), linux counts exact + dump sha `6dd1185b…`
+  reproduced, suite green ×2.
+
+Remaining store levers, re-ranked: dubbo's residual vs cbm is now resolution
+(~5.3s of the 8.5s wall) + boot (~1s) — the parse lane is no longer the
+gap. Multi-file write transactions are likely ~zero on the fastInit path
+(memory journal, synchronous OFF — same class as the killed statement
+batching); buffer→bind remains a CPU-side option if the writer re-emerges as
+the wall.
+
+**Store-arc round 2 SHIPPED (2026-07-19): resolution ref-index window.** The
+batched resolution loop reads unresolved_refs ONLY through the status index
++ PK keyset pager; the other five ref indexes (from_node, name, file_path,
+from_name, failed_tail) serve sync-time paths — yet every per-batch DELETE
+maintained all of them. `beginBulkRefLoad`/`endBulkRefLoad` (same
+`minRefsForPool` gate as the edge window) drop the five for the loop and
+rebuild at the end, where the table holds only the surviving failed refs
+(resolved rows are deleted by then), making the recreate near-free.
+
+- **dubbo**: deletes 1.2 → 0.2s, marks 0.6 → 0.3s (recreate 219ms) — but the
+  wall stayed ~8.5s: the freed main-lane time moved into `settle` (the
+  worker lane now binds the double-buffer). The honest read: at medium
+  scale, resolution's floor is now the WORKER lane + pool spin-up, not the
+  writer.
+- **Linux kernel 8c: resolution 423.4 → 275.9s** — deletes 50-81 → **3.2s**,
+  backpressure 16.8 → 7.4s (fewer index writes → less WAL → cheaper folds,
+  compounding), ref recreate 10.3s, edge recreate 26.8s. Synthesis 149.0s.
+  **Envelope ≈ 11.0min** (phase sum 659.7s) — from 14.8min best-ever before
+  this arc's rounds. **The <10min-on-8c target needs ~1 more minute**; the
+  remaining mass is parse-loop 190s (extraction-bound on linux — R7b's
+  wasm-deferred C tail + the store lane) and synthesis 149s.
+- Gates: dubbo/gson dumps byte-identical, linux counts exact + dump sha
+  `6dd1185b…` reproduced, suite green ×2.
+
 ## 4. Per-language tracker
 
 Tiers: **T1** = mostly `.scm` + mapping config. **T2** = needs bespoke pre/post passes kept
@@ -536,7 +606,8 @@ parity before porting the language.
 | go | `languages/go.ts` | T1 | crates.io | Third (tie). Value-reference edges ship here too (#897). **PORTED + DEFAULT-ON (§4e).** | ✅ |
 | ruby, php | dedicated files | T1 | crates.io | Straightforward; PHP property-receiver shapes (#1220/#1251) are RESOLUTION-side, unaffected. | ☐ |
 | csharp | `languages/csharp.ts` | T1 | crates.io | Plain. | ☐ |
-| rust, dart, scala, lua, luau, r | dedicated files | T1 | crates.io (luau/r/scala: verify crate freshness vs our wasm) | Long-tail T1; port opportunistically after the big five. | ☐ |
+| rust | `languages/rust.ts` | T1 | crates.io | **DONE (R7b #1, 2026-07-20)** — `rustlang.rs` walker; grammar bumped to v0.24.2 (crate + vendored wasm together). Parity 0-diff on ripgrep/tokio/rust-analyzer + dump byte-identical ×3; rust-analyzer's parser crates defer 18% (token-macro tables, both-arm parse errors — grammar-inherent). Quirk list: docs/design/rust-lang-kernel-port-checklist.md. | ☑ |
+| dart, scala, lua, luau, r | dedicated files | T1 | crates.io (luau/r/scala: verify crate freshness vs our wasm) | Long-tail T1; port opportunistically after the big five. | ☐ |
 | kotlin | `languages/kotlin.ts` | T1½ | crates.io | Expect/actual pairing is synthesis-side (fine); extraction is clean but validate against a KMP repo. | ☐ |
 | swift | shared + dedicated branch | T1½ | crates.io | **Trap:** in-class property extraction lives in `tree-sitter.ts`'s DEDICATED branch, not `swift.ts` (#1020 — Alamofire went 0→348 props). Gate on Alamofire. | ☐ |
 | c, cpp | `languages/c-cpp.ts` | **T2** | crates.io | **DONE (R7a, 2026-07-17)** — `ccpp/` walker; ALL pre-passes stayed TS-side via the route-point preParse hoist (+6 new blanks added during gating — see the checklist doc); content-based `.h` C-vs-C++ detection stays upstream at detectLanguage. Parity 0-diff + dump byte-identical on redis/git/fmt/protobuf/ALS. | ☑ |
@@ -941,6 +1012,153 @@ Three quick measurements before any port, two of them killing assumptions:
 - Note for step 2 sizing: strip at native memchr rates (~500MB/s+) would
   be ~6-10s for the full corpus even before redundancy cuts — but marshal
   (UTF-16↔UTF-8 across napi) eats seconds at GB scale; batch the calls.
+
+#### 7a.9 cFnPtr fuse-then-link step 1 landed (2026-07-19) — pass −22%, strips halved
+
+Step 1 shipped, with one deliberate deviation from the §7a.8 sketch. The
+"text-free global linking" ideal is unreachable at byte-parity without
+retaining per-file text or macro tables, and a sizing probe on the linux tree
+killed retention: **6.1M `#define` lines** (the amdgpu register headers alone
+are most of them — 565MB of define text), and unrestricted initializer-body
+capture is a #1212-class hazard. What ships instead:
+
+- **One extraction sweep** (read+strip per file exactly once): typedef names,
+  per-struct-node field declarations parsed structurally with fn-pointer
+  classification DEFERRED (typedef sets aren't complete mid-sweep), resolved
+  local includes, an alias-shaped-object-macro name set, and per-file
+  SURVIVAL FILTERS — distinct init type tokens, array element types,
+  inline-struct summaries, field-assign pairs, dispatch fields/array names.
+  All interned; a few MB at kernel scale (measured distinct: 110k assign
+  pairs, 87.6k init tokens, 38.7k dispatch fields; only 16% of files have any
+  dispatch-shaped match at all).
+- **Linking replays the ORIGINAL pass bodies verbatim**, gated by the
+  filters: struct layouts register by replaying the struct kind-scan (rowid
+  order — same-name precedence is order-sensitive), and the
+  registration/propagation/dispatch loops run only for surviving files, whose
+  text is lazily re-stripped (LRU-served). Filters only ever over-approximate
+  (full-file no-skip scans ⊇ the jump-cursor/per-body scans the real passes
+  run), and a filtered-out file is one where every match fails the pass's own
+  gates before any side effect — so parity is by construction, not by hope.
+  Macro tables stay lazy (LRU + strip-on-miss) per the 6.1M-defines probe.
+- **Why not pure one-sweep C:** the inline-struct scan's cursor jump is gated
+  on the fn-ptr-field test, which needs the complete typedef sets — a
+  collect-time emulation diverges on the gate-fail rescan path. Keeping
+  today's scan code and paying a filtered second strip is the parity-safe
+  trade.
+
+Measured (8c cg1212, quiet host, fresh kernel init): cFnPtr sub
+**A=94.5s B=1.5s C=39.7s D=24.8s E=18.5s = 179s vs the §7a.8 ~230s (−22%)**;
+strips **283.5k → 132.4k** (4.44 → 2.08/file; 78s → 46.6s); stage E collapsed
+95 → 18.5s (survivor-only slicing/getNodesInFile), C+D 89 → 64.5s;
+callback-synthesis phase 250 → **199.9s**. Standalone probe-to-probe on the
+same live DB (warm cache): 139 → 122s. Resolution superphase unaffected
+(622.7s ≈ #1362's 633.6). Under the −70-90s hope — the honest ledger is that
+~0.6 sweeps of survivor re-strips + the unchanged include-unit machinery stay,
+and A now carries all regex scans.
+
+Gates, all green: probe-hash identical on the live kernel DB (279,335 edge
+rows, `f6e1713d…` both builds); git/redis/vim/SameBoy full dumps
+byte-identical old-vs-new (705/852/433/180 fn-ptr edges — macro tables,
+`commands.def`, `#ifdef` include-units, inline structs, bare arrays all
+exercised); kernel-parity 0-diffs on git/redis/fmt/protobuf with deferral
+unchanged (12.2/24.1/42.5/25.7%); linux counts exact 2,049,153/6,413,518;
+linux dump sha reproduced (`6dd1185b…`); full suite green.
+
+Step 2's boundary is now stage A verbatim: raw text in → records out, no
+graph access inside the sweep except `getNodesInFile` for struct extents. Its
+94.5s (46.6s strip + scans) is the native-extractor prize; C's 39.7s
+(macro-env + include units) and D's 24.8s stay TS.
+
+#### 7a.10 cFnPtr native sweep landed (2026-07-19) — step 2 done, pass 230→151s across the arc
+
+Step 2 shipped: `cfnptr_scan_files` in the kernel (codegraph-kernel/src/
+cfnptr.rs) runs the entire extraction sweep natively — strip + all ten
+scanners — batched 16 files per NAPI call; the TS sweep remains as the
+fallback (no binary, feature detection against older binaries,
+`CODEGRAPH_KERNEL=0`, or the scanner's own `CODEGRAPH_KERNEL_CFNPTR=0`).
+What made it land at byte-parity:
+
+- **Hand-rolled byte machines, not the regex crate.** The JS engine's
+  semantics are the spec: `\w`/`\b` are ASCII while `\s` is the Unicode
+  class (NBSP/U+2000-200A/FEFF — decoded explicitly from UTF-8), alternation
+  order, `lastIndex` resume, and the observable backtracking dimensions
+  (INIT/ARRAY modifier-count and `struct`/star/bracket optionals, DISPATCH's
+  greedy segment loop) are reproduced structurally; greedy-only shortcuts are
+  taken solely where analysis shows backtracking can never rescue a match
+  (documented per scanner).
+- **The native stripper blanks per UTF-16 code unit** (two spaces for an
+  astral char), so its output is string-identical to the TS stripper — the
+  scanners run over the very character stream the JS regexes see, and the
+  strip differential oracle gained a kernel arm pinning that equality on the
+  same fixtures + 500 seeded random cases.
+- **Gates, all green:** record/edge differential suite (adversarial fixture
+  project indexed native-vs-JS: identical edge streams; CRLF, NBSP,
+  continuations, decoy strings, unterminated comments, backtracking shapes);
+  repo differential on git/redis/vim/SameBoy (edge streams IDENTICAL,
+  705/852/433/180); probe-hash on the live kernel DB reproduced
+  `f6e1713d…` (279,335 rows) exactly; linux init counts exact
+  2,049,153/6,413,518 and dump sha `6dd1185b…` reproduced; full suite green
+  ×2 (153 files / 2588).
+
+Measured (8c cg1212, quiet host — one contaminated run discarded: the Mac
+slept mid-init on battery and froze the VM, inflating resolution 4×; pmset
+log confirmed, re-run caffeinated): cFnPtr sub **A=47.9s B=1.1 C=40.9 D=24.1
+E=36.8 = 150.9s** vs step 1's 179s (−28s) and the pre-arc 230s (**−79s
+cumulative, −34%**). The sweep itself halved (94.5 → 47.9s; JS strips
+132.4k → 68.9k — exactly the sweep's share moved native). E's attributed
+wall grew (18.5 → 36.8s): parallel synthesis overlap shifted as A finishes
+earlier — stage walls absorb concurrent passes' contention; the phase total
+is the honest number and **callback-synthesis fell 199.9 → 171.1s**.
+Remaining cFnPtr ledger: C 40.9s (macro envs + include units, TS),
+E's replay + overlap, D 24.1s, A's remaining 47.9s (reads, batching,
+interning, DB struct extents — diminishing). The pass is no longer the
+dominant synthesis lever; next per §7a.7 ranking: continuous-shallow WAL,
+backpressure bytes.
+
+Deploy note: this change ships RUST code — dist-only deploys are no longer
+sufficient for it; rebuild the `.node` per platform (cg1212: cargo build in
+`rust:1-bookworm` with `CARGO_TARGET_DIR=target-linux`, stage the `.so` as
+`prebuilds/linux-arm64/codegraph-kernel.node`).
+
+#### 7a.11 Continuous-shallow WAL probe (2026-07-19) — KILLED BY MEASUREMENT; fold I/O is a fixed budget
+
+The §7a.7 queue's next lever — close the gap between recycling's attributed
+write-stage costs and the valve-64 shallow floors via passive-checkpoint
+nudges at the recycle boundary — was probed in two shapes at 8c
+(`CODEGRAPH_RESOLVE_PROFILE` stage tables, caffeinated, same day/build,
+counts exact 2,049,153/6,413,518 in every arm):
+
+| arm | read | backpressure | insertEdges | deletes | recycle | resolution |
+|---|---|---|---|---|---|---|
+| baseline (main, post-#1365) | 37.2 | 148.8 (27 parks) | 59.3 | 81.1 | 0.2 | **575.1** |
+| nudge fire-and-forget | 36.4 | 97.7 (22 parks) | 37.7 | **170.6** | 0.2 | 588.9 |
+| nudge AWAITED | **16.6** | **16.8** (6 parks) | **31.4** | **50.0** | **207.4** | 587.3 |
+
+- **Fire-and-forget regressed**: the concurrent fold stole the keyed
+  deletes' I/O (81→171s), and — because a pass that ends while the writer
+  appends reports `log>checkpointed` and never advances the growth
+  baseline — the hard-cap parks kept firing anyway (143 nudges and STILL 22
+  parks: double folding).
+- **Awaited reached every §7a.7 floor** (read 16.6 vs valve-64's 16.8,
+  inserts 31.4 vs 27.8, deletes 50.0 vs 56.5 — even beat it) — and paid
+  exactly what it saved: 207.4s of attributed fold time at the boundary.
+  36 nudges instead of ~143: after a full fold the WAL WRAPS, the file stops
+  growing, and the size-based growth gate goes blind until the high-water
+  mark moves — each nudge therefore carried several recycles' backlog.
+- **The triangulated conclusion:** the phase's fold I/O is a fixed budget.
+  The baseline already hides most of it in overlapped off-thread timer
+  passes during pool-busy windows, paying attributed time only at hard-cap
+  parks; forcing MORE folding just relocates the cost (concurrent → delete
+  contention, awaited → boundary parks). All three arms land within ~2.5%
+  of each other; the "~45s gap to the shallow floor" (§7a.7) is illusory —
+  the floor costs its savings. Code reverted; the valve + recycling as
+  shipped in #1362 remain the optimum of this family.
+
+P1 queue after this kill: backpressure byte volume (value-neutral schema
+interning — migration-wide, parked, needs explicit approval) > recreate
+(~50-68s). The <10min-on-8c target's remaining mass sits in resolution's
+~575s superphase and parse's ~190s writer floor — both store-architecture
+arcs (§4d), which is also where the cbm dubbo bar lives.
 
 ### 7b. Arc 3 — graph richness (forensics-backed; adopt cbm's real extras, skip inflation)
 Priority order, each gated by the standard A/B + node-explosion probes:
