@@ -1128,7 +1128,64 @@ export function normalizeInferredTypeName(raw: string): string | null {
  * PascalCase is required in the capture where the language convention allows,
  * as a cheap false-positive guard on top of resolveMethodOnType's validation.
  */
+/**
+ * Compiled-pattern memo for the receiver-type pattern builders below. They
+ * run for EVERY `receiver.method()` ref the matcher attempts, compiling 2–4
+ * fresh RegExp objects per call — and receivers repeat massively (`self`
+ * alone accounts for tens of thousands of refs on a Lua repo, measured 41µs
+ * per methodCall miss on kong with compilation a large slice). The patterns
+ * are a pure function of (language, receiver) and non-global (`.match()`
+ * never touches lastIndex), so shared instances are behavior-identical.
+ * FIFO-capped with no per-get mutation (the §7a.6 LRU-churn lesson): a hit
+ * costs one Map lookup, overflow evicts oldest, and an evicted entry simply
+ * recompiles exactly as every call did before this memo.
+ */
+const PATTERN_MEMO = new Map<string, RegExp[]>();
+const PATTERN_MEMO_CAP = 8192;
+
+/**
+ * Per-context incremental receiver-scan states for inferLocalReceiverType
+ * (see the memo comment there). Keyed (file, scopeStart, language, receiver);
+ * entries are a few dozen bytes, count is bounded by distinct receiver uses
+ * (same order as the context's other per-file caches). MUST drop whenever the
+ * context's file caches drop — the states are derived from file lines — so
+ * ReferenceResolver.clearCaches calls clearNameMatcherMemos alongside
+ * clearImportResolverMemos.
+ */
+type InferScanState = { hi: number; ansIdx: number; ansType: string | null };
+const INFER_SCAN_STATES = new WeakMap<ResolutionContext, Map<string, InferScanState>>();
+
+function getInferScanStates(context: ResolutionContext): Map<string, InferScanState> {
+  let m = INFER_SCAN_STATES.get(context);
+  if (!m) {
+    m = new Map();
+    INFER_SCAN_STATES.set(context, m);
+  }
+  return m;
+}
+
+/** Drop the per-context scan states (see ReferenceResolver.clearCaches). */
+export function clearNameMatcherMemos(context: ResolutionContext): void {
+  INFER_SCAN_STATES.delete(context);
+}
+
+function memoPatterns(key: string, build: () => RegExp[]): RegExp[] {
+  const hit = PATTERN_MEMO.get(key);
+  if (hit) return hit;
+  const patterns = build();
+  if (PATTERN_MEMO.size >= PATTERN_MEMO_CAP) {
+    const oldest = PATTERN_MEMO.keys().next().value;
+    if (oldest !== undefined) PATTERN_MEMO.delete(oldest);
+  }
+  PATTERN_MEMO.set(key, patterns);
+  return patterns;
+}
+
 export function localReceiverTypePatterns(language: Language, r: string): RegExp[] {
+  return memoPatterns(`${language}|${r}`, () => buildLocalReceiverTypePatterns(language, r));
+}
+
+function buildLocalReceiverTypePatterns(language: Language, r: string): RegExp[] {
   switch (language) {
     case 'typescript':
     case 'javascript':
@@ -1375,6 +1432,53 @@ function inferLocalReceiverType(
     return null;
   };
 
+  // Incremental-scan memo (INFER_SCAN_STATES): this scan runs for EVERY
+  // `receiver.method()` ref and was measured at 61µs/ref on kong (2.4s of
+  // worker time, 99% misses — `self:` calls hunting a declaration Lua never
+  // writes). Refs for the same (file, scope, receiver) arrive in ~ascending
+  // line order, and the scan is a pure function of the file's immutable
+  // lines, so each line pays its regex matches ONCE per key instead of once
+  // per ref: query(c) = highest matching line in [startIdx..c]; a monotonic
+  // call extends the stored watermark by scanning only (hi..c] (the region
+  // at-or-below the previous answer is already proven empty above it); a
+  // non-monotonic call (rare — refs are rowid-ordered) falls back to the
+  // plain bounded scan and leaves the state alone. componentScoped is keyed
+  // out — its position-independent whole-file sweep below has different
+  // semantics.
+  if (!componentScoped) {
+    const states = getInferScanStates(context);
+    const key = `${ref.filePath}|${startIdx}|${ref.language}|${scanReceiver}`;
+    const state = states.get(key);
+    if (!state) {
+      for (let i = callIdx; i >= startIdx; i--) {
+        const type = matchLine(i);
+        if (type) {
+          states.set(key, { hi: callIdx, ansIdx: i, ansType: type });
+          return type;
+        }
+      }
+      states.set(key, { hi: callIdx, ansIdx: -1, ansType: null });
+      return null;
+    }
+    if (callIdx >= state.hi) {
+      for (let i = callIdx; i > state.hi; i--) {
+        const type = matchLine(i);
+        if (type) {
+          state.ansIdx = i;
+          state.ansType = type;
+          break;
+        }
+      }
+      state.hi = callIdx;
+      return state.ansIdx >= startIdx ? state.ansType : null;
+    }
+    for (let i = callIdx; i >= startIdx; i--) {
+      const type = matchLine(i);
+      if (type) return type;
+    }
+    return null;
+  }
+
   // Nearest declaration wins: scan backward from the call to the scope start.
   for (let i = callIdx; i >= startIdx; i--) {
     const type = matchLine(i);
@@ -1416,6 +1520,10 @@ function inferLocalReceiverType(
  * shape is handled by inferPhpAssignedPropertyType instead.
  */
 function phpPropertyTypePatterns(r: string): RegExp[] {
+  return memoPatterns(`php-prop|${r}`, () => buildPhpPropertyTypePatterns(r));
+}
+
+function buildPhpPropertyTypePatterns(r: string): RegExp[] {
   return [
     new RegExp(
       `\\b(?:(?:private|protected|public|readonly|static|final)(?:\\(set\\))?\\s+)+\\??([A-Za-z_\\\\][\\w\\\\]*)\\s+&?\\$${r}\\b`,
@@ -1564,10 +1672,10 @@ export function matchMethodCall(
   // shared source-based inferrer. resolveMethodOnType validates the method
   // exists on the inferred type, so a mis-inference produces no edge.
   if (inferableReceiver) {
-    const inferredType =
+    const inferredType = nmTimedT('mc-infer', ref, () =>
       ref.language === 'cpp'
         ? inferCppReceiverType(objectOrClass!, ref, context)
-        : inferLocalReceiverType(objectOrClass!, ref, context);
+        : inferLocalReceiverType(objectOrClass!, ref, context));
     if (inferredType) {
       // Java/Kotlin: when two classes share the simple name, the file's import
       // pins WHICH one (#314). Other languages disambiguate by call-site file.
@@ -1640,44 +1748,13 @@ export function matchMethodCall(
   // with a `Logger` in both `a/` and `b/`), try the class in the call site's
   // own file first — otherwise the first-indexed class wins and a call in `b/`
   // resolves to `a/`'s method (#1079).
-  const classCandidates = preferCallSiteFile(
-    context.getNodesByName(objectOrClass!),
-    ref.filePath,
-  );
-
-  for (const classNode of classCandidates) {
-    if (classNode.kind === 'class' || classNode.kind === 'struct' || classNode.kind === 'interface') {
-      // Skip cross-language class matches
-      if (classNode.language !== ref.language) continue;
-
-      const nodesInFile = context.getNodesInFile(classNode.filePath);
-      const methodNode = nodesInFile.find(
-        (n) =>
-          n.kind === 'method' &&
-          n.name === methodName &&
-          n.qualifiedName.includes(classNode.name)
-      );
-
-      if (methodNode) {
-        return {
-          original: ref,
-          targetNodeId: methodNode.id,
-          confidence: 0.85,
-          resolvedBy: 'qualified-name',
-        };
-      }
-    }
-  }
-
-  // Strategy 2: Instance variable receiver - try capitalized form to find class
-  // e.g., "permissionEngine" → look for classes containing "PermissionEngine"
-  const capitalizedReceiver = objectOrClass!.charAt(0).toUpperCase() + objectOrClass!.slice(1);
-  if (capitalizedReceiver !== objectOrClass) {
-    const fuzzyClassCandidates = preferCallSiteFile(
-      context.getNodesByName(capitalizedReceiver),
+  const strat1 = nmTimedT('mc-class', ref, (): ResolvedRef | null => {
+    const classCandidates = preferCallSiteFile(
+      context.getNodesByName(objectOrClass!),
       ref.filePath,
     );
-    for (const classNode of fuzzyClassCandidates) {
+
+    for (const classNode of classCandidates) {
       if (classNode.kind === 'class' || classNode.kind === 'struct' || classNode.kind === 'interface') {
         // Skip cross-language class matches
         if (classNode.language !== ref.language) continue;
@@ -1694,18 +1771,58 @@ export function matchMethodCall(
           return {
             original: ref,
             targetNodeId: methodNode.id,
-            confidence: 0.8,
-            resolvedBy: 'instance-method',
+            confidence: 0.85,
+            resolvedBy: 'qualified-name',
           };
         }
       }
     }
+    return null;
+  });
+  if (strat1) return strat1;
+
+  // Strategy 2: Instance variable receiver - try capitalized form to find class
+  // e.g., "permissionEngine" → look for classes containing "PermissionEngine"
+  const capitalizedReceiver = objectOrClass!.charAt(0).toUpperCase() + objectOrClass!.slice(1);
+  if (capitalizedReceiver !== objectOrClass) {
+    const strat2 = nmTimedT('mc-capital', ref, (): ResolvedRef | null => {
+      const fuzzyClassCandidates = preferCallSiteFile(
+        context.getNodesByName(capitalizedReceiver),
+        ref.filePath,
+      );
+      for (const classNode of fuzzyClassCandidates) {
+        if (classNode.kind === 'class' || classNode.kind === 'struct' || classNode.kind === 'interface') {
+          // Skip cross-language class matches
+          if (classNode.language !== ref.language) continue;
+
+          const nodesInFile = context.getNodesInFile(classNode.filePath);
+          const methodNode = nodesInFile.find(
+            (n) =>
+              n.kind === 'method' &&
+              n.name === methodName &&
+              n.qualifiedName.includes(classNode.name)
+          );
+
+          if (methodNode) {
+            return {
+              original: ref,
+              targetNodeId: methodNode.id,
+              confidence: 0.8,
+              resolvedBy: 'instance-method',
+            };
+          }
+        }
+      }
+      return null;
+    });
+    if (strat2) return strat2;
   }
 
   // Strategy 3: Find methods by name across the codebase, match by receiver
   // name similarity with the containing class. Handles abbreviated variable
   // names like permissionEngine → PermissionRuleEngine.
   if (methodName) {
+    const strat3 = nmTimedT('mc-byname', ref, (): ResolvedRef | null => {
     const methodCandidates = context.getNodesByName(methodName!);
     // Ubiquitous-method ceiling (#999): a method name re-declared across a
     // vendored theme/SDK (Metronic's `init`/`update`/… on every widget) yields
@@ -1765,6 +1882,9 @@ export function matchMethodCall(
         };
       }
     }
+    return null;
+    });
+    if (strat3) return strat3;
   }
 
   return null;
@@ -2047,6 +2167,49 @@ export function matchFuzzy(
 /** ArkUI attribute-helper decorators a `.attr(...)` chain may resolve to. */
 const ARKUI_ATTRIBUTE_DECORATORS = new Set(['Extend', 'Styles', 'AnimatableExtend', 'Builder']);
 
+/**
+ * CODEGRAPH_RESOLVE_PROFILE=2 sub-stage attribution for matchReference's
+ * strategy pipeline (`nm:<stage>|<refKind>|hit/miss`). Module-global because
+ * the matcher is a free function; each thread (main + every pool worker) has
+ * its own module instance, and dumpNameMatcherProfile is invoked from
+ * ReferenceResolver.dumpResolveProfile so worker tables surface too.
+ */
+const NM_PROFILE: Map<string, { n: number; ns: bigint }> | null =
+  process.env.CODEGRAPH_RESOLVE_PROFILE === '2' ? new Map() : null;
+
+function nmTimedT<T>(stage: string, ref: UnresolvedRef, fn: () => T): T {
+  if (!NM_PROFILE) return fn();
+  const t0 = process.hrtime.bigint();
+  const r = fn();
+  const dt = process.hrtime.bigint() - t0;
+  const key = `nm:${stage}|${ref.referenceKind}|${r ? 'hit' : 'miss'}`;
+  const slot = NM_PROFILE.get(key);
+  if (slot) {
+    slot.n++;
+    slot.ns += dt;
+  } else {
+    NM_PROFILE.set(key, { n: 1, ns: dt });
+  }
+  return r;
+}
+
+function nmTimed(stage: string, ref: UnresolvedRef, fn: () => ResolvedRef | null): ResolvedRef | null {
+  return nmTimedT(stage, ref, fn);
+}
+
+/** Dump this thread's matchReference sub-stage table to stderr (no-op unless =2). */
+export function dumpNameMatcherProfile(label: string): void {
+  if (!NM_PROFILE || NM_PROFILE.size === 0) return;
+  const rows = [...NM_PROFILE.entries()]
+    .map(([k, v]) => ({ k, n: v.n, ms: Number(v.ns / 1_000_000n) }))
+    .sort((a, b) => b.ms - a.ms);
+  for (const r of rows) {
+    console.error(
+      `[resolve-profile] ${label} ${r.k}: n=${r.n} total=${(r.ms / 1000).toFixed(1)}s avg=${((r.ms * 1000) / Math.max(1, r.n)).toFixed(0)}µs`
+    );
+  }
+}
+
 export function matchReference(
   ref: UnresolvedRef,
   context: ResolutionContext
@@ -2119,18 +2282,18 @@ export function matchReference(
   let result: ResolvedRef | null;
 
   // 0. File path match (e.g., "snippets/drawer-menu.liquid" → file node)
-  result = matchByFilePath(ref, context);
+  result = nmTimed('filePath', ref, () => matchByFilePath(ref, context));
   if (result) return result;
 
   // 1. Qualified name match (highest confidence)
-  result = matchByQualifiedName(ref, context);
+  result = nmTimed('qualifiedName', ref, () => matchByQualifiedName(ref, context));
   if (result) return result;
 
   // 1b. C++ chained call whose receiver is another call — `Foo::instance().bar()`
   // encoded as `Foo::instance().bar` by the extractor (#645). Resolve the
   // receiver's type from what the inner call returns, then the method on it.
   if (ref.language === 'cpp' || ref.language === 'c') {
-    result = matchCppCallChain(ref, context);
+    result = nmTimed('cppChain', ref, () => matchCppCallChain(ref, context));
     if (result) return result;
   }
 
@@ -2139,7 +2302,7 @@ export function matchReference(
   // type is the factory's `self` (PHP `: self`/`: static`, Rust `-> Self`) or
   // concrete return type.
   if (ref.language === 'php' || ref.language === 'rust') {
-    result = matchScopedCallChain(ref, context);
+    result = nmTimed('scopedChain', ref, () => matchScopedCallChain(ref, context));
     if (result) return result;
   }
 
@@ -2161,20 +2324,20 @@ export function matchReference(
     ref.language === 'objc' ||
     ref.language === 'pascal'
   ) {
-    result = matchDottedCallChain(ref, context);
+    result = nmTimed('dottedChain', ref, () => matchDottedCallChain(ref, context));
     if (result) return result;
   }
 
   // 2. Method call pattern
-  result = matchMethodCall(ref, context);
+  result = nmTimed('methodCall', ref, () => matchMethodCall(ref, context));
   if (result) return result;
 
   // 3. Exact name match
-  result = matchByExactName(ref, context);
+  result = nmTimed('exactName', ref, () => matchByExactName(ref, context));
   if (result) return result;
 
   // 4. Fuzzy match (lowest confidence)
-  result = matchFuzzy(ref, context);
+  result = nmTimed('fuzzy', ref, () => matchFuzzy(ref, context));
   if (result) return result;
 
   return null;

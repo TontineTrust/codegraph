@@ -16,7 +16,7 @@ import {
   FrameworkResolver,
   ImportMapping,
 } from './types';
-import { matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesKnownFamily } from './name-matcher';
+import { matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesKnownFamily, dumpNameMatcherProfile, clearNameMatcherMemos } from './name-matcher';
 import { resolveViaImport, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, clearImportResolverMemos } from './import-resolver';
 import { ResolverPool, minRefsForPool } from './resolver-pool';
 import { detectFrameworks } from './frameworks';
@@ -373,9 +373,12 @@ export class ReferenceResolver {
     this.knownNames = null;
     this.knownFiles = null;
     this.cachesWarmed = false;
-    // The import-resolver's per-context memos assume the same stable window
-    // as the caches above — drop them together.
-    if (this.context) clearImportResolverMemos(this.context);
+    // The import-resolver's and name-matcher's per-context memos assume the
+    // same stable window as the caches above — drop them together.
+    if (this.context) {
+      clearImportResolverMemos(this.context);
+      clearNameMatcherMemos(this.context);
+    }
   }
 
   /** `readFile` through the LRU content cache (null = read failed, also cached). */
@@ -805,12 +808,14 @@ export class ReferenceResolver {
       ref.language === 'arkts' && ref.referenceName.startsWith('.')
         ? ref.referenceName.slice(1)
         : ref.referenceName;
-    if (
-      !isNixPathImportRef(ref) &&
-      !this.hasAnyPossibleMatch(existenceName) &&
-      !this.matchesAnyImport(ref) &&
-      !this.frameworks.some((f) => f.claimsReference?.(ref.referenceName))
-    ) {
+    const tPre = this.profileStages ? process.hrtime.bigint() : 0n;
+    const preFilterPass =
+      isNixPathImportRef(ref) ||
+      this.hasAnyPossibleMatch(existenceName) ||
+      this.matchesAnyImport(ref) ||
+      this.frameworks.some((f) => f.claimsReference?.(ref.referenceName));
+    if (this.profileStages) this.stageAdd('preFilter', ref, preFilterPass, tPre);
+    if (!preFilterPass) {
       return null;
     }
 
@@ -838,7 +843,9 @@ export class ReferenceResolver {
     // JVM FQN imports skip framework/name-matcher: `import com.example.Bar`
     // resolves directly through the qualifiedName index, which is unambiguous
     // even when several `Bar` classes exist in different packages.
+    const tJvm = this.profileStages ? process.hrtime.bigint() : 0n;
     const jvmImport = resolveJvmImport(ref, this.context);
+    if (this.profileStages) this.stageAdd('jvmImport', ref, !!jvmImport, tJvm);
     if (jvmImport) return jvmImport;
 
     // Razor/Blazor: a markup or `@code` type ref resolves through the file's
@@ -858,16 +865,25 @@ export class ReferenceResolver {
     // JS → native `calls`) — `gateFrameworkLanguage` only drops a type/import
     // edge between two KNOWN families (see its doc), never a `calls` bridge or
     // a config↔code edge.
+    const tFw = this.profileStages ? process.hrtime.bigint() : 0n;
+    let fwEarly: ResolvedRef | null = null;
     for (const framework of this.frameworks) {
       const result = this.gateFrameworkLanguage(framework.resolve(ref, this.context), ref);
       if (result) {
-        if (result.confidence >= 0.9) return result; // High confidence, return immediately
+        if (result.confidence >= 0.9) {
+          fwEarly = result; // High confidence, return immediately (below)
+          break;
+        }
         candidates.push(result);
       }
     }
+    if (this.profileStages) this.stageAdd('frameworks', ref, fwEarly !== null, tFw);
+    if (fwEarly) return fwEarly;
 
     // Strategy 2: Try import-based resolution
+    const tImp = this.profileStages ? process.hrtime.bigint() : 0n;
     const importResult = this.gateLanguage(resolveViaImport(ref, this.context), ref);
+    if (this.profileStages) this.stageAdd('viaImport', ref, !!importResult, tImp);
     if (importResult) {
       if (importResult.confidence >= 0.9) return importResult;
       candidates.push(importResult);
@@ -892,7 +908,9 @@ export class ReferenceResolver {
     }
 
     // Strategy 3: Try name matching
+    const tName = this.profileStages ? process.hrtime.bigint() : 0n;
     let nameResult = this.gateLanguage(matchReference(ref, this.context), ref);
+    if (this.profileStages) this.stageAdd('nameMatch', ref, !!nameResult, tName);
     // Nix has no ambient cross-file namespace — a callee binds lexically
     // (same file) or through explicit import/callPackage wiring (the import
     // path above). A cross-file name match is wrong by construction: every
@@ -1278,6 +1296,27 @@ export class ReferenceResolver {
   private resolveProfile: Map<string, { n: number; ns: bigint }> | null =
     process.env.CODEGRAPH_RESOLVE_PROFILE ? new Map() : null;
 
+  /**
+   * CODEGRAPH_RESOLVE_PROFILE=2 additionally attributes time to the
+   * STRATEGIES inside resolveOne (`stage:<name>|<refKind>|hit/miss` rows in
+   * the same histogram) — i.e. WHICH machinery a failing class of refs pays
+   * for, not just that it fails. =1 keeps the per-outcome rows only.
+   */
+  private profileStages: boolean = process.env.CODEGRAPH_RESOLVE_PROFILE === '2';
+
+  private stageAdd(stage: string, ref: UnresolvedRef, hit: boolean, t0: bigint): void {
+    if (!this.resolveProfile) return;
+    const dt = process.hrtime.bigint() - t0;
+    const key = `stage:${stage}|${ref.referenceKind}|${hit ? 'hit' : 'miss'}`;
+    const slot = this.resolveProfile.get(key);
+    if (slot) {
+      slot.n++;
+      slot.ns += dt;
+    } else {
+      this.resolveProfile.set(key, { n: 1, ns: dt });
+    }
+  }
+
   private resolveOneTimed(ref: UnresolvedRef): ResolvedRef | null {
     if (!this.resolveProfile) return this.resolveOne(ref);
     const t0 = process.hrtime.bigint();
@@ -1305,6 +1344,8 @@ export class ReferenceResolver {
         `[resolve-profile] ${label} ${r.k}: n=${r.n} total=${(r.ms / 1000).toFixed(1)}s avg=${((r.ms * 1000) / Math.max(1, r.n)).toFixed(0)}µs`
       );
     }
+    // =2 only: this thread's matchReference sub-stage table rides along.
+    dumpNameMatcherProfile(label);
   }
 
   resolveListForAdmission(refs: UnresolvedReference[]): {
@@ -1435,17 +1476,38 @@ export class ReferenceResolver {
     // costs zero wall-clock. Any failure downgrades to sequential permanently.
     let pool: ResolverPool | null = null;
     let poolReady = false;
-    const tPoolStart = Date.now();
-    if (parallel && total >= minRefsForPool()) {
-      pool = ResolverPool.tryCreate(parallel.dbPath, this.projectRoot);
-      pool?.ready().then(
+    // True once pool creation has been attempted by EITHER engage site (the
+    // up-front ref-count gate or the adaptive projection below) — a pool that
+    // failed or was destroyed must stay down (downgrade is permanent), and
+    // tryCreate's sizing probes shouldn't re-run every batch on hosts that
+    // declined.
+    let poolEngageTried = false;
+    const createPool = (t0: number, why: string): ResolverPool | null => {
+      poolEngageTried = true;
+      if (!parallel) return null;
+      const p = ResolverPool.tryCreate(parallel.dbPath, this.projectRoot);
+      p?.ready().then(
         () => {
           poolReady = true;
-          if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[pool-timing] pool ready after ${Date.now() - tPoolStart}ms`);
+          if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[pool-timing] pool ready after ${Date.now() - t0}ms (${why})`);
         },
-        () => { void pool?.destroy().catch(() => undefined); pool = null; }
+        () => {
+          void p.destroy().catch(() => undefined);
+          if (pool === p) pool = null;
+        }
       );
+      return p;
+    };
+    if (parallel && total >= minRefsForPool()) {
+      pool = createPool(Date.now(), 'ref-count');
     }
+    // Adaptive engagement bar (see the batch-loop hook): projected remaining
+    // sequential settle above this boots the pool mid-loop. Boot is async and
+    // fan-out waits for ready, so a marginal engage costs background boot
+    // only; the bar just needs to clear the fan-out's own overhead class.
+    const ADAPTIVE_ENGAGE_SETTLE_MS = 400;
+    let adaptiveSeqMs = 0;
+    let adaptiveSeqRefs = 0;
 
     // Process in PIPELINED batches (double-buffer). The enumeration is the
     // head of the pending set in rowid order; every ref a persisted batch
@@ -1567,6 +1629,28 @@ export class ReferenceResolver {
       const result = await settleBatch(inFlight, batch);
       if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[pool-timing] batch ${inFlight.mode}: ${batch.length} refs in ${Date.now() - tBatch}ms`);
       lp('settle', tBatch);
+
+      // Adaptive pool engagement: the fixed ref-count gate can't see PER-REF
+      // cost, and settle rates differ ~9× by language (56k Rust refs cost
+      // more sequential settle than 154k Go refs — 36µs vs 4µs measured on
+      // tokio/prometheus). After each sequential batch, project the remaining
+      // settle from the observed rate and boot the pool mid-loop when it
+      // clears the bar. The loop already switches to fan-out only when the
+      // async boot reports ready, admission order is mode-independent, and
+      // 2-core/low-memory hosts still decline inside tryCreate's sizing —
+      // so the switch changes wall-clock, never the graph.
+      if (inFlight.mode === 'seq' && parallel && pool === null && !poolEngageTried) {
+        adaptiveSeqMs += Date.now() - tBatch;
+        adaptiveSeqRefs += batch.length;
+        const remaining = total - processed - batch.length;
+        const projectedMs = (adaptiveSeqMs / Math.max(1, adaptiveSeqRefs)) * Math.max(0, remaining);
+        if (projectedMs >= ADAPTIVE_ENGAGE_SETTLE_MS) {
+          if (process.env.CODEGRAPH_SYNTH_TIMINGS) {
+            console.error(`[pool-timing] adaptive engage: projected ${Math.round(projectedMs)}ms sequential settle over ${remaining} remaining refs`);
+          }
+          pool = createPool(Date.now(), 'adaptive');
+        }
+      }
 
       // WAL-valve backstop at the ONE pool-idle boundary of the double-buffer
       // (this batch settled, the next not yet fanned out): past the hard cap

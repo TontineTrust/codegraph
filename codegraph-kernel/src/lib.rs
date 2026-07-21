@@ -19,12 +19,21 @@
 mod buffers;
 mod ccpp;
 mod cfnptr;
+mod csharp;
+mod dart;
 mod docstring;
 mod ids;
 mod go;
 mod java;
+mod kotlin;
 mod langs;
+mod lua;
+mod php;
+mod rlang;
+mod ruby;
 mod rustlang;
+mod scala;
+mod swift;
 mod textutil;
 mod python;
 mod tsjs;
@@ -213,6 +222,15 @@ pub fn extract_file(file_path: String, content: String, language: String) -> Res
         "go" => go::extract(&file_path, &content).map_err(Error::from_reason)?,
         "c" | "cpp" => ccpp::extract(&file_path, &content, &language).map_err(Error::from_reason)?,
         "rust" => rustlang::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "csharp" => csharp::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "ruby" => ruby::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "php" => php::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "swift" => swift::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "kotlin" => kotlin::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "r" => rlang::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "lua" | "luau" => lua::extract(&file_path, &content, &language).map_err(Error::from_reason)?,
+        "scala" => scala::extract(&file_path, &content).map_err(Error::from_reason)?,
+        "dart" => dart::extract(&file_path, &content).map_err(Error::from_reason)?,
         _ => tsjs::extract(&file_path, &content, &language).map_err(Error::from_reason)?,
     };
     Ok(ExtractBuffers {
