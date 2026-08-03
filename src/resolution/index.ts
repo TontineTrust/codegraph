@@ -1298,13 +1298,18 @@ export class ReferenceResolver {
       const viaImport = this.gateLanguage(resolveViaImport(ref, this.context), ref);
       if (viaImport) {
         const target = this.queries.getNodeById(viaImport.targetNodeId);
-        if (target && (
-          target.kind === 'function'
-          || target.kind === 'method'
-          || (ref.language === 'haskell' && target.kind === 'enum_member')
-          || (ref.language === 'haskell' && target.kind === 'field')
-          || (ref.language === 'haskell' && target.kind === 'constant')
-        )) {
+        if (
+          target &&
+          (target.kind === 'function' ||
+            target.kind === 'method' ||
+            // Python (#1478): an imported class used as a value (`return
+            // OrgSerializerFull`) resolves through its import like any
+            // callback — mirrors matchFunctionRef's bareClassOk.
+            (ref.language === 'python' && target.kind === 'class') ||
+            (ref.language === 'haskell' && target.kind === 'enum_member') ||
+            (ref.language === 'haskell' && target.kind === 'field') ||
+            (ref.language === 'haskell' && target.kind === 'constant'))
+        ) {
           return viaImport;
         }
       }
