@@ -25,6 +25,7 @@ import { extractFromSource } from './tree-sitter';
 import { ParseWorkerPool, resolveParsePoolSize, resolveParseTimeoutMs } from './parse-pool';
 import { StoreWriter, StoreBundle, finalizeStoreBundle } from './store-writer';
 import { materializeKernelResult } from './kernel';
+import { detectGeneratedFile } from './generated-detection';
 import { detectLanguage, isSourceFile, isLanguageSupported, isFileLevelOnlyLanguage, initGrammars, loadGrammarsForLanguages, readGrammarWasmBytes } from './grammars';
 import { loadExtensionOverrides, loadIncludeIgnoredPatterns, loadExcludePatterns, loadIncludePatterns } from '../project-config';
 import { isCodeGraphDataDir } from '../directory';
@@ -2316,6 +2317,11 @@ export class ExtractionOrchestrator {
       return; // No changes
     }
 
+    // Re-decided on every re-index of a changed file, so a banner added (or
+    // removed) by an edit is reflected on the next sync (#1500). Computed after
+    // the unchanged-file early return so untouched files pay nothing.
+    const generated = detectGeneratedFile(filePath, content);
+
     // Snapshot incoming cross-file edges BEFORE deleting this file's nodes.
     // `deleteFile` cascades to delete every edge whose source OR target is a
     // node in this file (edges.FK ... ON DELETE CASCADE). Edges whose SOURCE is
@@ -2384,6 +2390,7 @@ export class ExtractionOrchestrator {
             ? computeHaskellTopologyHash(filePath, content, result)
             : undefined,
           errors: result.errors.length > 0 ? result.errors : undefined,
+          generated,
         },
       });
       if (crossFileIncomingEdges.length > 0) {
@@ -2447,6 +2454,7 @@ export class ExtractionOrchestrator {
         ? computeHaskellTopologyHash(filePath, content, result)
         : undefined,
       errors: result.errors.length > 0 ? result.errors : undefined,
+      generated,
     };
     this.queries.upsertFile(fileRecord);
   }
@@ -2477,6 +2485,10 @@ export class ExtractionOrchestrator {
         ? computeHaskellTopologyHash(filePath, content, result)
         : undefined,
       errors: result.errors.length > 0 ? result.errors : undefined,
+      // Decided here, once, while the content is already in memory — never at
+      // query time (#1500). The header scan short-circuits on a single
+      // substring test for ~every hand-written file.
+      generated: detectGeneratedFile(filePath, content),
     };
   }
 

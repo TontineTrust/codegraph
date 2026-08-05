@@ -9,7 +9,7 @@ import { SqliteDatabase } from './sqlite-adapter';
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 /**
  * Migration definition
@@ -152,6 +152,33 @@ const migrations: Migration[] = [
   },
   {
     version: 9,
+    description:
+      'Add files.generated — index-time content-header generated-file detection for ranking (#1500)',
+    up: (db) => {
+      // DDL only — instant on any size database, and NO backfill: the flag is
+      // derived from file CONTENT, which this migration has no access to (the
+      // files table stores a hash, not the bytes). Migrated rows therefore stay
+      // 0 until the next full index re-extracts them, and every reader unions
+      // the flag with the path-only check, so an un-backfilled database keeps
+      // exactly the pre-#1500 behavior instead of regressing. `sync` heals it
+      // file-by-file as files change. This is why the CHANGELOG entry says a
+      // re-index is required to pick up the new detection.
+      //
+      // ALTER TABLE has no IF NOT EXISTS, so guard for idempotency — a database
+      // created from current schema.sql already has the column (matters when
+      // migrations are re-run from an older recorded version, as the v6
+      // regression test does). Keep in lockstep with schema.sql.
+      const cols = db.prepare('PRAGMA table_info(files)').all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'generated')) {
+        db.exec('ALTER TABLE files ADD COLUMN generated INTEGER NOT NULL DEFAULT 0');
+      }
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_files_generated ON files(path) WHERE generated = 1'
+      );
+    },
+  },
+  {
+    version: 10,
     description:
       'Persist Haskell module/import/export topology fingerprints for scoped incremental sync invalidation',
     up: (db) => {
