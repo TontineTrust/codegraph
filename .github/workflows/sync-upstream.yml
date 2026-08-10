@@ -114,3 +114,23 @@ jobs:
           git push
           "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           "HEAD:${FEATURE_BRANCH}"
+          
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "❌ GitHub Action Failed: ${{ github.workflow }}"
+          to: developer@example.com
+          from: GitHub Actions Bot <noreply@example.com>
+          secure: true
+          body: |
+            The workflow "${{ github.workflow }}" failed during execution.
+            
+            This usually indicates a merge conflict with the upstream repository or a broken test suite.
+            
+            View the failed run details here:
+            https://github.com{{ github.repository }}/actions/runs/${{ github.run_id }}
