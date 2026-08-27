@@ -82,7 +82,7 @@ export class NotIndexedError extends Error {}
  * retry guidance — abandoning this path is the desired agent reaction.
  */
 export class PathRefusalError extends Error {}
-import { resolve as resolvePath } from 'path';
+import { resolve as resolvePath, relative as relativePath } from 'path';
 
 /** Maximum output length to prevent context bloat (characters) */
 const MAX_OUTPUT_LENGTH = 15000;
@@ -122,9 +122,14 @@ const CONTAINER_NODE_KINDS = new Set<NodeKind>([
   'class', 'struct', 'union', 'interface', 'trait', 'protocol', 'enum', 'namespace', 'module',
 ]);
 
-/** Last `::` / `.` / `/`-separated segment of a qualified symbol. */
+/**
+ * Last `::` / `.` / `/`-separated segment of a qualified symbol. An Erlang
+ * arity tail (`mod::fn/3`, `fn/3`) is stripped first — the useful last segment
+ * is the function name, never the digits (#1610).
+ */
 function lastQualifierPart(symbol: string): string {
-  const parts = symbol.split(/::|[./]/).filter((p) => p.length > 0);
+  const noArity = symbol.replace(/\/\d{1,3}$/, '') || symbol;
+  const parts = noArity.split(/::|[./]/).filter((p) => p.length > 0);
   return parts[parts.length - 1] ?? symbol;
 }
 
@@ -1314,6 +1319,13 @@ export class ToolHandler {
   // The directory the server last searched for a default project. Surfaced in
   // the "not initialized" error so users can see why detection missed.
   private defaultProjectHint: string | null = null;
+  // Indexed sub-projects the engine's bounded down-scan saw below the search
+  // base when no default project resolved (#1607). Listed in the "not
+  // initialized" error so the fact is reachable through the protocol, not just
+  // the host's stderr capture. Engine-maintained (initial resolve + throttled
+  // retry) — tool calls themselves never scan.
+  private knownSubprojects: string[] = [];
+  private knownSubprojectsBase: string | null = null;
   // Per-start-path cache of the git worktree/index mismatch (issue #155). The
   // mismatch is a fixed property of (where the request came from → which
   // .codegraph/ it resolves to), so the up-to-two `git rev-parse` spawns run
@@ -1409,6 +1421,27 @@ export class ToolHandler {
    */
   setDefaultProjectHint(searchedPath: string): void {
     this.defaultProjectHint = searchedPath;
+  }
+
+  /**
+   * Engine-only: record the indexed sub-projects the workspace down-scan saw
+   * when it could not adopt a default project (#1606/#1607). An empty list
+   * clears any previous note.
+   */
+  setKnownSubprojects(roots: string[], base: string): void {
+    this.knownSubprojects = roots;
+    this.knownSubprojectsBase = base;
+  }
+
+  /** One message line naming the indexed sub-projects, or '' when none known. */
+  private formatKnownSubprojects(): string {
+    if (this.knownSubprojects.length === 0) return '';
+    const base = this.knownSubprojectsBase;
+    const rels = this.knownSubprojects.map((r) => (base ? relativePath(base, r) || '.' : r));
+    return (
+      `Indexed sub-projects were found below it: ${rels.join(', ')} — ` +
+      'pass one of them (absolute, or resolved against that directory) as projectPath.\n'
+    );
   }
 
   /**
@@ -1533,6 +1566,7 @@ export class ToolHandler {
         throw new NotIndexedError(
           'No CodeGraph project is loaded for this session.\n' +
           `Searched for a .codegraph/ directory starting from: ${searched}\n` +
+          this.formatKnownSubprojects() +
           'Either the server root has no index of its own (e.g. a monorepo where only ' +
           "sub-projects are indexed), or the MCP client launched the server outside your " +
           'project without reporting the workspace root. Either way, target the project ' +
@@ -6694,6 +6728,19 @@ export class ToolHandler {
    *      Python — `stage_apply::run` matches a `run` in `stage_apply.rs`)
    */
   private matchesSymbol(node: Node, symbol: string): boolean {
+    // Erlang arity spelling (`fn/3`, `mod:fn/3` → normalized `mod.fn/3`): when
+    // the node's qualifiedName carries an arity (`mod::fn/3`, #1610), the
+    // written arity must match it exactly; the remaining comparison then runs
+    // on the arity-less spelling. A node with no arity in its qualifiedName
+    // keeps the original symbol (a `/` there means a path-ish name instead).
+    const aritySpelling = /^(.+)\/(\d{1,3})$/.exec(symbol);
+    if (aritySpelling) {
+      const nodeArity = /\/(\d{1,3})$/.exec(node.qualifiedName ?? '')?.[1];
+      if (nodeArity !== undefined) {
+        if (nodeArity !== aritySpelling[2]) return false;
+        symbol = aritySpelling[1]!;
+      }
+    }
     // Simple name match
     if (node.name === symbol) return true;
     // File basename match (e.g., "product-card" matches "product-card.liquid")
