@@ -244,6 +244,47 @@ describe('named-symbol flow with Haskell prime identifiers', () => {
       .toEqual(['(<+>)', 'request', 'finish']);
   });
 
+  it('keeps bare dollar-only JavaScript identifiers alongside Haskell operators', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-dollar-flow-'));
+    fs.writeFileSync(path.join(dir, 'main.js'), [
+      'function $$$() { return finish(); }',
+      'function finish() { return finishLeaf(); }',
+      'function finishLeaf() { return 1; }',
+      'class Ops { $$$() { return finish(); } }',
+    ].join('\n'));
+    fs.writeFileSync(path.join(dir, 'Ops.hs'), [
+      'module Ops where',
+      '($$) value = haskellFinish value',
+      '($$$) value = haskellFinish value',
+      'haskellFinish value = haskellLeaf value',
+      'haskellLeaf value = value',
+    ].join('\n'));
+    cg = CodeGraph.initSync(dir);
+    await cg.indexAll();
+
+    expect(flowTokens('$$$ finish')).toEqual(['$$$', 'finish']);
+    expect(normalizeToken('$$$')).toBe('$$$');
+    const jsFlow = resolveNamedSymbolFlow(cg, '$$$ finish');
+    expect(jsFlow.chains[0]?.steps.map(({ node }) => node.name)).toEqual(['$$$', 'finish']);
+    expect(findAllSymbols(cg, 'Ops.$$$').nodes.map((node) => node.qualifiedName))
+      .toEqual(['Ops::($$$)', 'Ops::$$$']);
+    expect(findAllSymbols(cg, '$$$$').nodes).toEqual([]);
+    for (const token of ['$$', '($$)', 'Ops.$$', 'Ops::($$)']) {
+      const flow = resolveNamedSymbolFlow(cg, `${token} haskellFinish`);
+      expect(flow.chains[0]?.steps.map(({ node }) => node.name)).toEqual(['($$)', 'haskellFinish']);
+    }
+    for (const [query, entry, file] of [
+      ['$$$ finish finishLeaf', '$$$', 'main.js'],
+      ['$$ haskellFinish haskellLeaf', '($$)', 'Ops.hs'],
+      ['$$$ haskellFinish haskellLeaf', '($$$)', 'Ops.hs'],
+    ]) {
+      const result = await new ToolHandler(cg).execute('codegraph_explore', { query });
+      const text = result.content[0]?.text as string;
+      expect(text).toContain('**Flow (call path among the symbols you queried)**');
+      expect(text).toContain(`1. ${entry} (${file}:`);
+    }
+  });
+
   it('does not let Haskell operator canonicalization hide a qualified Scala operator', async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-cross-language-op-flow-'));
     fs.writeFileSync(path.join(dir, 'Ops.scala'), [

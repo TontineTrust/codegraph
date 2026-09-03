@@ -23,6 +23,7 @@ import type { LanguageExtractor, ExtractorContext } from './tree-sitter-types';
 import { EXTRACTORS } from './languages';
 import { stripCppTemplateArgs } from './languages/c-cpp';
 import { rustImplTypeName } from './languages/rust';
+import { HASKELL_CONID_START_RE, haskellReferenceParts, normalizeReferenceText } from './languages/haskell';
 import { LiquidExtractor } from './liquid-extractor';
 import { RazorExtractor } from './razor-extractor';
 import { SvelteExtractor } from './svelte-extractor';
@@ -3834,64 +3835,8 @@ export class TreeSitterExtractor {
       }
       const sameSyntaxNode = (a: SyntaxNode | null, b: SyntaxNode): boolean =>
         !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex;
-      const haskellIdContinue = String.raw`[\p{L}\p{Mn}\p{N}_']`;
-      const haskellIdentifier = new RegExp(
-        String.raw`^[\p{Ll}\p{Lo}\p{Lu}\p{Lt}_]${haskellIdContinue}*#*$`,
-        'u',
-      );
-      const haskellConId = String.raw`[\p{Lu}\p{Lt}]${haskellIdContinue}*`;
-      const haskellConIdStart = /^[\p{Lu}\p{Lt}]/u;
-      const haskellModule = String.raw`${haskellConId}(?:\.${haskellConId})*`;
-      const normalizeQualified = (text: string): string => {
-        let compact = text.replace(/\s+/g, '').replace(/^`|`$/g, '');
-        if (compact.startsWith('(') && compact.endsWith(')')) {
-          const inner = compact.slice(1, -1);
-          if (new RegExp(`^(?:${haskellConId}\\.)+`, 'u').test(inner)) compact = inner;
-        }
-        const qualified = compact.match(new RegExp(`^((?:${haskellConId}\\.)+)(.+)$`, 'u'));
-        if (!qualified) return compact;
-        const member = qualified[2]!;
-        const canonicalMember = haskellIdentifier.test(member)
-          ? member
-          : member.startsWith('(') && member.endsWith(')') ? member : `(${member})`;
-        return `${qualified[1]!.slice(0, -1)}::${canonicalMember}`;
-      };
-      const haskellReferenceParts = (name: string): { qualifier: string | null; member: string } => {
-        const qualified = name.match(new RegExp(`^(${haskellModule})::(.+)$`, 'u'));
-        const rawMember = qualified?.[2] ?? name;
-        const member = rawMember.startsWith('(') && rawMember.endsWith(')')
-          ? rawMember.slice(1, -1)
-          : rawMember;
-        return { qualifier: qualified?.[1] ?? null, member };
-      };
-      const patternBinds = (name: string): boolean => {
-        if (haskellReferenceParts(name).qualifier !== null) return false;
-        if (this.extractor?.isLexicallyBound) {
-          return this.extractor.isLexicallyBound(name, node, this.source, this.nodes);
-        }
-        let ancestor: SyntaxNode | null = node.parent;
-        while (ancestor) {
-          if (ancestor.type === 'function' || ancestor.type === 'lambda') {
-            const patterns = getChildByField(ancestor, 'patterns');
-            if (patterns) {
-              const stack: SyntaxNode[] = [patterns];
-              while (stack.length > 0) {
-                const current = stack.pop()!;
-                if (current.type === 'variable' && getNodeText(current, this.source) === name) {
-                  return true;
-                }
-                for (let i = 0; i < current.namedChildCount; i++) {
-                  const child = current.namedChild(i);
-                  if (child) stack.push(child);
-                }
-              }
-            }
-          }
-          if (ancestor.type === 'function') break;
-          ancestor = ancestor.parent;
-        }
-        return false;
-      };
+      const patternBinds = (name: string): boolean =>
+        this.extractor!.isLexicallyBound!(name, node, this.source, this.nodes);
       const simpleReference = (candidate: SyntaxNode | null): { name: string; node: SyntaxNode } | null => {
         let current = candidate;
         while (current?.type === 'parens' && current.namedChildCount === 1) {
@@ -3902,7 +3847,7 @@ export class TreeSitterExtractor {
         }
         let name = getNodeText(current, this.source).trim();
         if (current.type === 'qualified' || name.includes('.') || name.startsWith('`')) {
-          name = normalizeQualified(name);
+          name = normalizeReferenceText(name);
         }
         if (!name || patternBinds(name)) return null;
         return { name, node: current };
@@ -3915,7 +3860,7 @@ export class TreeSitterExtractor {
         // explicitly executes them. The Haskell bare-reference walker records
         // the value dependency, so a speculative function_ref here would be a
         // duplicate (and can resolve to the wrong semantic kind).
-        if (haskellConIdStart.test(leaf) || leaf.startsWith(':')) return;
+        if (HASKELL_CONID_START_RE.test(leaf) || leaf.startsWith(':')) return;
         this.unresolvedReferences.push({
           fromNodeId: callerId,
           referenceName: reference.name,
@@ -4017,7 +3962,7 @@ export class TreeSitterExtractor {
               ? getChildByField(context, 'operator')
               : null;
             const contextOperatorName = contextOperator
-              ? normalizeQualified(getNodeText(contextOperator, this.source).trim())
+              ? normalizeReferenceText(getNodeText(contextOperator, this.source).trim())
               : '';
             const appliedByKnownApplicationOperator = context?.type === 'infix' && (
               ((contextOperatorName === '$' || contextOperatorName === '$!')
@@ -4091,7 +4036,7 @@ export class TreeSitterExtractor {
       if (node.type === 'infix') {
         const operator = getChildByField(node, 'operator');
         if (!operator) return;
-        const operatorName = normalizeQualified(getNodeText(operator, this.source).trim());
+        const operatorName = normalizeReferenceText(getNodeText(operator, this.source).trim());
         if (!operatorName || patternBinds(operatorName)) return;
 
         // `$`/`$!` and `&` are application syntax in practice. The function is

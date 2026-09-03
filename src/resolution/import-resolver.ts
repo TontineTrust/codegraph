@@ -1724,58 +1724,30 @@ function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
   const cleaned = trimmed.replace(/^(?:type|pattern)\s+/, '');
   if (!cleaned) return null;
   const operatorHead = cleaned.match(/^\(([^()]+)\)([\s\S]*)$/);
+  const name = operatorHead?.[1]?.trim()
+    ?? cleaned.match(new RegExp(`^(${HASKELL_IDENTIFIER_SOURCE})`, 'u'))?.[1]
+    ?? '';
+  let childList: string | null = null;
   if (operatorHead) {
-    const name = operatorHead[1]!.trim();
     const suffix = operatorHead[2]!.trim();
-    const typeOnly = explicitType || (!explicitPattern && name.startsWith(':'));
-    const valueOnly = explicitPattern || (!explicitType && !name.startsWith(':'));
-    if (!suffix) return {
-      name,
-      children: null,
-      ...(typeOnly ? { typeOnly: true } : {}),
-      ...(valueOnly ? { valueOnly: true } : {}),
-    };
-    if (!suffix.startsWith('(') || !suffix.endsWith(')')) return null;
-    const childList = suffix.slice(1, -1).trim();
-    return {
-      name,
-      children: childList === '..'
-        ? '*'
-        : splitHaskellList(childList)
-            .map(parseHaskellImportChild)
-            .filter((child): child is HaskellImportChild => child !== null),
-      ...(typeOnly ? { typeOnly: true } : {}),
-      ...(valueOnly ? { valueOnly: true } : {}),
-    };
+    if (suffix) {
+      if (!suffix.startsWith('(') || !suffix.endsWith(')')) return null;
+      childList = suffix.slice(1, -1).trim();
+    }
+  } else {
+    if (!name) return null;
+    const open = cleaned.indexOf('(', name.length);
+    const close = cleaned.lastIndexOf(')');
+    if (open >= 0 && close > open) childList = cleaned.slice(open + 1, close).trim();
   }
-  const name = cleaned.match(new RegExp(`^(${HASKELL_IDENTIFIER_SOURCE})`, 'u'))?.[1] ?? '';
-  if (!name) return null;
-  const typeOnly = explicitType || (!explicitPattern && HASKELL_CONID_START_RE.test(name));
-  const valueOnly = explicitPattern || (!explicitType && !HASKELL_CONID_START_RE.test(name));
-  const open = cleaned.indexOf('(', name.length);
-  const close = cleaned.lastIndexOf(')');
-  if (open < 0 || close <= open) {
-    return {
-      name,
-      children: null,
-      ...(typeOnly ? { typeOnly: true } : {}),
-      ...(valueOnly ? { valueOnly: true } : {}),
-    };
-  }
-  const childList = cleaned.slice(open + 1, close).trim();
-  if (childList === '..') {
-    return {
-      name,
-      children: '*',
-      ...(typeOnly ? { typeOnly: true } : {}),
-      ...(valueOnly ? { valueOnly: true } : {}),
-    };
-  }
+  const typeName = operatorHead ? name.startsWith(':') : HASKELL_CONID_START_RE.test(name);
+  const typeOnly = explicitType || (!explicitPattern && typeName);
+  const valueOnly = explicitPattern || (!explicitType && !typeName);
   return {
     name,
-    children: splitHaskellList(childList)
-      .map(parseHaskellImportChild)
-      .filter((child): child is HaskellImportChild => child !== null),
+    children: childList === null ? null : childList === '..' ? '*'
+      : splitHaskellList(childList).map(parseHaskellImportChild)
+          .filter((child): child is HaskellImportChild => child !== null),
     ...(typeOnly ? { typeOnly: true } : {}),
     ...(valueOnly ? { valueOnly: true } : {}),
   };
@@ -2346,15 +2318,13 @@ function compactHaskellReExports(reExports: ReExport[]): ReExport[] {
   const identityGroups = new Map<string, {
     source: string;
     packageQualifier?: string;
-    names: string[];
-    seen: Set<string>;
+    names: Set<string>;
     typeNames: Set<string>;
     valueNames: Set<string>;
   }>();
   const parentGroups = new Map<string, {
     base: Omit<WildcardReExport, 'includedParentExports'>;
-    parents: string[];
-    seen: Set<string>;
+    parents: Set<string>;
   }>();
 
   for (const reExport of reExports) {
@@ -2374,17 +2344,13 @@ function compactHaskellReExports(reExports: ReExport[]): ReExport[] {
           ...(reExport.packageQualifier
             ? { packageQualifier: reExport.packageQualifier }
             : {}),
-          names: [],
-          seen: new Set(),
+          names: new Set(),
           typeNames: new Set(),
           valueNames: new Set(),
         };
         identityGroups.set(key, group);
       }
-      if (!group.seen.has(reExport.exportedName)) {
-        group.seen.add(reExport.exportedName);
-        group.names.push(reExport.exportedName);
-      }
+      group.names.add(reExport.exportedName);
       if (namespace !== 'value') group.typeNames.add(reExport.exportedName);
       if (namespace !== 'type') group.valueNames.add(reExport.exportedName);
       continue;
@@ -2399,13 +2365,11 @@ function compactHaskellReExports(reExports: ReExport[]): ReExport[] {
       const key = JSON.stringify(base);
       let group = parentGroups.get(key);
       if (!group) {
-        group = { base, parents: [], seen: new Set() };
+        group = { base, parents: new Set() };
         parentGroups.set(key, group);
       }
       for (const parent of includedParentExports) {
-        if (group.seen.has(parent)) continue;
-        group.seen.add(parent);
-        group.parents.push(parent);
+        group.parents.add(parent);
       }
       continue;
     }
@@ -2414,17 +2378,18 @@ function compactHaskellReExports(reExports: ReExport[]): ReExport[] {
   }
 
   for (const group of identityGroups.values()) {
-    const typeOnlyNames = group.names.filter((name) =>
+    const names = [...group.names];
+    const typeOnlyNames = names.filter((name) =>
       group.typeNames.has(name) && !group.valueNames.has(name)
     );
-    const valueOnlyNames = group.names.filter((name) =>
+    const valueOnlyNames = names.filter((name) =>
       group.valueNames.has(name) && !group.typeNames.has(name)
     );
     passthrough.push({
       kind: 'wildcard',
       source: group.source,
       ...(group.packageQualifier ? { packageQualifier: group.packageQualifier } : {}),
-      includedNames: group.names,
+      includedNames: names,
       ...(typeOnlyNames.length > 0 ? { haskellTypeOnlyNames: typeOnlyNames } : {}),
       ...(valueOnlyNames.length > 0 ? { haskellValueOnlyNames: valueOnlyNames } : {}),
       haskellClearParent: true,
@@ -2433,7 +2398,7 @@ function compactHaskellReExports(reExports: ReExport[]): ReExport[] {
   for (const group of parentGroups.values()) {
     passthrough.push({
       ...group.base,
-      includedParentExports: group.parents,
+      includedParentExports: [...group.parents],
       haskellCollapsedParents: true,
     });
   }
@@ -4018,9 +3983,9 @@ function findExportedSymbolWalk(
     const parentVariants = clearsParent
       ? [undefined, ...restrictedParents]
       : rex.haskellCollapsedParents
-        ? [undefined]
+        ? [want.haskellParent]
       : restrictedParents.length > 0
-        ? restrictedParents
+        ? restrictedParents.filter((parent) => !want.haskellParent || parent === want.haskellParent)
         : [want.haskellParent];
     const haskellAllows = language === 'haskell'
       ? (node: Node): boolean => (
@@ -4052,6 +4017,7 @@ function findExportedSymbolWalk(
       return chained ? [chained] : [];
     });
     const unique = [...new Map(candidates.map((node) => [node.id, node])).values()];
+    if (language === 'haskell' && unique.length > 1) haskellAmbiguous = true;
     const chained = unique.length === 1 ? unique[0] : undefined;
     if (chained && (
       language !== 'haskell'

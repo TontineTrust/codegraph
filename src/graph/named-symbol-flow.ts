@@ -294,9 +294,16 @@ export function findAllSymbols(cg: CodeGraph, symbol: string): { nodes: Node[]; 
       return { nodes, note: '' };
     }
   }
-  const unqualifiedOperator = /^\(([^()\s]+)\)$/.exec(symbol)?.[1];
+  const unqualifiedOperator = /^\(([^()\s]+)\)$/.exec(symbol)?.[1]
+    ?? (/^\$+$/.test(symbol) ? symbol : undefined);
   if (unqualifiedOperator && isHaskellOperatorBody(unqualifiedOperator)) {
-    const exact = cg.getNodesByName(symbol).filter((node) => node.language === 'haskell');
+    const exact = cg.getNodesByName(`(${unqualifiedOperator})`)
+      .filter((node) => node.language === 'haskell');
+    // A bare dollar-only spelling is also a valid JavaScript identifier.
+    // Resolve both exact language-specific names, never a fuzzy operator match.
+    if (symbol === unqualifiedOperator) {
+      exact.push(...cg.getNodesByName(symbol).filter((node) => node.language !== 'haskell'));
+    }
     const isGen = cg.generatedFilePredicate(exact.map((node) => node.filePath));
     const nodes = [...exact].sort(
       (left, right) => (isGen(left.filePath) ? 1 : 0) - (isGen(right.filePath) ? 1 : 0),
@@ -496,7 +503,7 @@ function isPreciseToken(token: string): boolean {
 
 /** The symbol-shaped tokens of a query, deduped and capped. */
 export function flowTokens(query: string): string[] {
-  const found: Array<{ index: number; end: number; token: string }> = [];
+  const found: Array<{ index: number; token: string }> = [];
   const covered: Array<{ start: number; end: number }> = [];
   const overlapsQualifiedOperator = (start: number, end: number): boolean =>
     covered.some((range) => start < range.end && end > range.start);
@@ -511,7 +518,7 @@ export function flowTokens(query: string): string[] {
       if (start > 0 && /[\p{L}\p{N}_'$.:/]/u.test(query[start - 1]!)) continue;
       if (overlapsQualifiedOperator(start, end)) continue;
       covered.push({ start, end });
-      found.push({ index: start, end, token: parsed.canonical });
+      found.push({ index: start, token: parsed.canonical });
     }
   };
 
@@ -569,7 +576,7 @@ export function flowTokens(query: string): string[] {
       `^${HASKELL_FLOW_IDENTIFIER_SOURCE}(?:(?:::|\\.)${HASKELL_FLOW_IDENTIFIER_SOURCE})*$`,
       'u',
     ).test(token)) {
-      found.push({ index: start, end, token });
+      found.push({ index: start, token });
     }
   }
 
@@ -583,14 +590,14 @@ export function flowTokens(query: string): string[] {
     const start = match.index!;
     const end = start + match[0].length;
     if (overlapsQualifiedOperator(start, end) || !isHaskellOperatorBody(match[1]!)) continue;
-    found.push({ index: start, end, token: `(${match[1]})` });
+    found.push({ index: start, token: `(${match[1]})` });
   }
   const bareOperator = /(?:^|[\s,\[`])([^\s,\[\]()`]+)(?=$|[\s,\]`])/gu;
   for (const match of query.matchAll(bareOperator)) {
     const start = match.index! + match[0].indexOf(match[1]!);
     const end = start + match[1]!.length;
     if (overlapsQualifiedOperator(start, end) || !isHaskellOperatorBody(match[1]!)) continue;
-    found.push({ index: start, end, token: `(${match[1]})` });
+    found.push({ index: start, token: normalizeToken(match[1]!) });
   }
 
   found.sort((left, right) => left.index - right.index);
@@ -965,6 +972,7 @@ export function normalizeToken(token: string): string {
   if (qualifiedOperator) return qualifiedOperator.canonical;
   const parenthesized = /^\((.*)\)$/.exec(normalized)?.[1];
   if (parenthesized && isHaskellOperatorBody(parenthesized)) return `(${parenthesized})`;
+  if (/^\$+$/.test(normalized)) return normalized;
   if (isHaskellOperatorBody(normalized)) return `(${normalized})`;
   return normalized;
 }

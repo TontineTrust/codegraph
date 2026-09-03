@@ -3388,9 +3388,9 @@ export class ToolHandler {
         // 50+-overload name (tokio `poll`) ranks the wanted def (`Harness::poll`)
         // below the FTS cut, so findAllSymbols would never see it and the
         // type-token bias below couldn't pick the harness.rs one. (Same fix as
-        // codegraph_node's findSymbolMatches.) Qualified tokens keep findAllSymbols.
-        const isQual = /[.\/]|::/.test(t);
-        const raw = isQual ? this.findAllSymbols(cg, t).nodes : cg.getNodesByName(t);
+        // codegraph_node's findSymbolMatches.) Qualified and dollar-only names need canonical lookup.
+        const needsCanonicalLookup = /[.\/]|::/.test(t) || /^\$+$/.test(t);
+        const raw = needsCanonicalLookup ? this.findAllSymbols(cg, t).nodes : cg.getNodesByName(t);
         // A query that NAMES a declared type is a question ABOUT that type, and
         // must still reach its declaration file at full weight — so record the
         // files those declarations live in and exempt them from the
@@ -3419,7 +3419,7 @@ export class ToolHandler {
         // token at a hump boundary or as a prefix.
         // Exact-empty + camel-shaped only (bare words keep the NL-stopword
         // guard below), shortest-first, capped so a hot infix can't flood.
-        if (cands.length === 0 && !isQual && /[a-z][A-Z]/.test(t)) {
+        if (cands.length === 0 && !needsCanonicalLookup && /[a-z][A-Z]/.test(t)) {
           const lcToken = t.toLowerCase();
           cands = cg
             .getNodesByNameSubstring(t, {

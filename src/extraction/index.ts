@@ -2287,7 +2287,6 @@ export class ExtractionOrchestrator {
     let totalNodes = 0;
     let totalEdges = 0;
     const overrides = loadExtensionOverrides(this.rootDir);
-    const haskellBefore = new Map<string, { hash?: string; moduleNames: string[] }>();
     const changedModules = new Set<string>();
     const hadPendingHaskellInvalidation =
       this.queries.getMetadata(HASKELL_IMPORT_INVALIDATION_PENDING) === '1';
@@ -2299,6 +2298,11 @@ export class ExtractionOrchestrator {
       const trackedBefore = this.queries.getFileByPath(filePath);
       const isHaskell = trackedBefore?.language === 'haskell'
         || detectLanguage(filePath, undefined, overrides) === 'haskell';
+      const oldModuleNames = isHaskell && trackedBefore
+        ? this.queries.getNodesByFile(filePath)
+          .filter((node) => node.kind === 'namespace' && node.language === 'haskell')
+          .map((node) => node.name)
+        : [];
       if (isHaskell) {
         // Persist the recovery intent before indexFile can replace nodes/edges.
         // A thrown store or invalidation must leave this set so a later sync can
@@ -2307,24 +2311,15 @@ export class ExtractionOrchestrator {
           this.queries.setMetadata(HASKELL_IMPORT_INVALIDATION_PENDING, '1');
           haskellRecoveryArmed = true;
         }
-        haskellBefore.set(filePath, {
-          hash: trackedBefore?.haskellTopologyHash,
-          moduleNames: trackedBefore
-            ? this.queries.getNodesByFile(filePath)
-              .filter((node) => node.kind === 'namespace' && node.language === 'haskell')
-              .map((node) => node.name)
-            : [],
-        });
       }
 
       const result = await this.indexFile(filePath);
 
       if (isHaskell) {
-        const before = haskellBefore.get(filePath)!;
         const after = this.queries.getFileByPath(filePath);
-        if (after?.haskellTopologyHash !== before.hash) {
+        if (after?.haskellTopologyHash !== trackedBefore?.haskellTopologyHash) {
           topologyChanged = true;
-          for (const name of before.moduleNames) changedModules.add(name);
+          for (const name of oldModuleNames) changedModules.add(name);
           for (const node of this.queries.getNodesByFile(filePath)) {
             if (node.kind === 'namespace' && node.language === 'haskell') changedModules.add(node.name);
           }

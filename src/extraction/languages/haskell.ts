@@ -70,7 +70,7 @@ const HASKELL_IDENTIFIER_SOURCE = String.raw`(?:[\p{Ll}\p{Lo}\p{Lu}\p{Lt}_]${HAS
 const HASKELL_CONID_SOURCE = String.raw`(?:[\p{Lu}\p{Lt}]${HASKELL_ID_CONTINUE_SOURCE}*)`;
 const HASKELL_MODULE_NAME_SOURCE = String.raw`${HASKELL_CONID_SOURCE}(?:\.${HASKELL_CONID_SOURCE})*`;
 const HASKELL_IDENTIFIER_RE = new RegExp(`^${HASKELL_IDENTIFIER_SOURCE}$`, 'u');
-const HASKELL_CONID_START_RE = /^[\p{Lu}\p{Lt}]/u;
+export const HASKELL_CONID_START_RE = /^[\p{Lu}\p{Lt}]/u;
 const HASKELL_VARID_START_RE = /^[\p{Ll}\p{Lo}_]/u;
 
 function firstDescendant(node: SyntaxNode, types: ReadonlySet<string>): SyntaxNode | null {
@@ -216,7 +216,7 @@ function getHaskellPrecedingDocstring(node: SyntaxNode, source: string): string 
 }
 
 /** Canonical reference spelling used by the Haskell import resolver. */
-function normalizeReferenceText(text: string): string {
+export function normalizeReferenceText(text: string): string {
   let compact = text.replace(/\s+/g, '').trim().replace(/^`|`$/g, '');
   // tree-sitter represents a qualified prefix operator as one prefix_id whose
   // text is `(L.<+>)`. Remove only those reference-position parentheses; an
@@ -237,7 +237,7 @@ function normalizeReferenceText(text: string): string {
 }
 
 /** Split a normalized reference at its module delimiter, never inside an op. */
-function haskellReferenceParts(name: string): { qualifier: string | null; member: string } {
+export function haskellReferenceParts(name: string): { qualifier: string | null; member: string } {
   const qualified = name.match(new RegExp(
     `^(${HASKELL_MODULE_NAME_SOURCE})::(.+)$`,
     'u',
@@ -468,15 +468,15 @@ function associatedSignature(
 ): SyntaxNode | null {
   const container = node.parent;
   if (!container) return null;
-  const candidates = signatureIndex(container, source, stateOwner).get(name);
+  const index = node.type === 'pattern_synonym' ? patternSignatureIndex : signatureIndex;
+  const candidates = index(container, source, stateOwner).get(name);
   if (!candidates) return null;
   for (let i = candidates.length - 1; i >= 0; i--) {
     if (candidates[i]!.startIndex < node.startIndex) return candidates[i]!;
   }
-  // Haskell declaration order is semantically irrelevant, and GHC accepts a
-  // signature after its binding (`action = target; action :: IO ()`). Prefer
-  // the conventional preceding declaration, but fall back to the first later
-  // signature in this exact declaration container.
+  // Ordinary bindings and pattern synonyms both allow their signature after
+  // the equation. Prefer the conventional preceding declaration, then the
+  // first later signature in this exact declaration container.
   return candidates.find((candidate) => candidate.startIndex > node.endIndex) ?? null;
 }
 
@@ -550,27 +550,6 @@ function patternSignatureIndex(
   }
   state.signatureIndexes.set(key, index);
   return index;
-}
-
-function associatedPatternSignature(
-  node: SyntaxNode,
-  name: string,
-  source: string,
-  stateOwner: object,
-): SyntaxNode | null {
-  const container = node.parent;
-  if (!container) return null;
-  const candidates = patternSignatureIndex(container, source, stateOwner).get(name);
-  if (!candidates) return null;
-  for (let i = candidates.length - 1; i >= 0; i--) {
-    if (candidates[i]!.startIndex < node.startIndex) return candidates[i]!;
-  }
-  // Pattern-synonym declarations follow the same order-independent rule as
-  // ordinary signatures: GHC accepts the equation before its standalone
-  // `pattern P :: ...` declaration. Keep the conventional preceding match as
-  // the first choice, then associate the first later declaration in this
-  // exact lexical container.
-  return candidates.find((candidate) => candidate.startIndex > node.endIndex) ?? null;
 }
 
 function declarationGroupKey(
@@ -2024,7 +2003,7 @@ function handlePatternSynonym(node: SyntaxNode, ctx: ExtractorContext): boolean 
   // here and materialized together with the following equation.
   if (!equation) return true;
   const name = patternSynonymName(node, ctx.source);
-  const signatureNode = associatedPatternSignature(node, name, ctx.source, ctx.nodes as object);
+  const signatureNode = associatedSignature(node, name, ctx.source, ctx.nodes as object);
   const exportParents = bundledExportParents(node, ctx.source, name, ctx.nodes as object);
   const patternNode = ctx.createNode('enum_member', name, node, {
     signature: collapseWhitespace(getNodeText(signatureNode ?? node, ctx.source)).slice(0, 400),

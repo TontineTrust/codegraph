@@ -47,6 +47,7 @@ const CHAIN_SHAPE = /^(.+)\(\)\.(\w+)$/;
 
 /** PHP `$this->prop->method()` encoded as `this->prop.method` — no `()`, so CHAIN_SHAPE misses it. */
 const PHP_PROP_SHAPE = /^this->\w+\.\w+$/;
+const HASKELL_VARID_RE = new RegExp(`^${HASKELL_VARID_SOURCE}$`, 'u');
 
 /**
  * Cache size limits. Each per-resolver cache is bounded so memory
@@ -872,12 +873,11 @@ export class ReferenceResolver {
    * safely (for example the second field in `value.user.email`).
    */
   private getHaskellProjectionReceiver(ref: UnresolvedRef): string | null | undefined {
-    const varId = new RegExp(`^${HASKELL_VARID_SOURCE}$`, 'u');
     if (
       ref.language !== 'haskell'
       || ref.referenceKind !== 'references'
       || ref.referenceName.includes('::')
-      || !varId.test(ref.referenceName)
+      || !HASKELL_VARID_RE.test(ref.referenceName)
     ) return undefined;
 
     const lines = this.context.getFileLines?.(ref.filePath)
@@ -974,8 +974,7 @@ export class ReferenceResolver {
       parameters = raw === '' ? [] : raw.split(/\s+/);
       break;
     }
-    const varId = new RegExp(`^${HASKELL_VARID_SOURCE}$`, 'u');
-    if (!parameters || parameters.some((parameter) => !varId.test(parameter))) {
+    if (!parameters || parameters.some((parameter) => !HASKELL_VARID_RE.test(parameter))) {
       return null;
     }
     const argumentIndex = parameters.indexOf(receiver);
@@ -1477,24 +1476,11 @@ export class ReferenceResolver {
     // qualified-name fallback would only ever add wrong cross-module edges.
     // Nix static path imports are file references for the same reason —
     // falling through would let "./x.nix" name-match an unrelated node.
-    if (isPhpIncludePathRef(ref) || isCobolCopybookRef(ref) || isNixPathImportRef(ref) || ref.language === 'terraform') {
-      return candidates.length > 0
-        ? candidates.reduce((best, curr) =>
-            curr.confidence > best.confidence ? curr : best
-          )
-        : null;
-    }
-
-    // A Haskell module import is a file/module relationship and is resolved
-    // exclusively by the import mapper above. In a headerless script the
-    // source owner is the file node, while the imported module name also
-    // exists as this file's `import` declaration node. Letting generic name
-    // matching run therefore fabricates a self-edge such as
-    // `script.hs -> import Data.Monoid` for an external package module. A
-    // failed import lookup means the module is external or unavailable; it
-    // must remain unresolved rather than bind to a declaration of the import
-    // itself.
-    if (ref.language === 'haskell' && ref.referenceKind === 'imports') {
+    // Haskell module imports likewise must not name-match their own import
+    // declaration when the module is external or unavailable.
+    if (isPhpIncludePathRef(ref) || isCobolCopybookRef(ref) || isNixPathImportRef(ref)
+      || ref.language === 'terraform'
+      || (ref.language === 'haskell' && ref.referenceKind === 'imports')) {
       return candidates.length > 0
         ? candidates.reduce((best, curr) =>
             curr.confidence > best.confidence ? curr : best

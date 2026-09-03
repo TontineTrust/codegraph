@@ -1704,7 +1704,11 @@ describe('Haskell resolution round 2', () => {
       }
   });
 
-  it('does not let a direct Haskell export hide an ambiguous wildcard re-export', async () => {
+  it.each([
+    ['Origin', 'module Origin'],
+    ['Origin (A(field), B(field))', 'module Origin'],
+    ['Origin (A(..), B(..))', 'A(..), B(..)'],
+  ])('preserves wildcard ambiguity and explicit parent selection through import %s', async (importList, exports) => {
     const graph = await createGraph({
       'Origin.hs': [
         '{-# LANGUAGE DuplicateRecordFields #-}',
@@ -1714,8 +1718,8 @@ describe('Haskell resolution round 2', () => {
       ].join('\n'),
       'Facade.hs': [
         '{-# LANGUAGE DuplicateRecordFields #-}',
-        'module Facade (C(..), module Origin) where',
-        'import Origin',
+        `module Facade (C(..), ${exports}) where`,
+        `import ${importList}`,
         'data C = C { field :: Int }',
       ].join('\n'),
       'Consumer.hs': [
@@ -1723,9 +1727,17 @@ describe('Haskell resolution round 2', () => {
         'import Facade (field)',
         'use value = field value',
       ].join('\n'),
+      'Selected.hs': [
+        'module Selected where',
+        'import Facade (B(field))',
+        'selected value = field value',
+      ].join('\n'),
     });
       expect(outgoingTargets(graph, 'use', 'Consumer.hs')
         .some(({ target }) => target.name === 'field')).toBe(false);
+      expect(outgoingTargets(graph, 'selected', 'Selected.hs')
+        .filter(({ target }) => target.name === 'field')
+        .map(({ target }) => target.qualifiedName)).toEqual(['Origin::B::field']);
   });
 
   it('keeps same-line local helper IDs distinct and resolves each call to its own scope', async () => {
