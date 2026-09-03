@@ -10,22 +10,22 @@ current `main` HEAD), so the "with" arm reflects the shipped 0.9.4 resolvers.
 
 ## Headline
 
-**Across 41 cells, codegraph cut total file reads from 227 → 38 — 83% fewer.** It never
+**Across 37 cells, codegraph cut total file reads from 159 → 38 — 76% fewer.** It never
 *increased* reads in any cell (0 regressions). The mechanism: a few sub-millisecond codegraph
 calls replace a read-and-grep exploration.
 
-**Cost stays roughly flat.** Across all 82 agent runs, both arms cost `$31.63` combined. On
-these short single-flow questions the without-arm
+**Cost stays roughly flat — marginally higher on the with-arm here** (summed across the 37
+cells: with `$15.4` vs without `$13.8`). On these short single-flow questions the without-arm
 resolves in <10 calls and never balloons, so it doesn't reach the regime where codegraph's cost
 savings compound, while the with-arm pays fixed MCP overhead (tool definitions in context +
-tool-loading) that short tasks don't amortize. The win is **fewer file reads and shell searches
-and lower wall-clock** (mean **39s vs 53s**), which is the design target. On harder multi-turn
+tool-loading) that short tasks don't amortize. The win is **fewer tool calls (189 vs 321, −41%)
++ lower wall-clock** (mean **38s vs 48s**), which is the design target. On harder multi-turn
 investigations cost flips to a net saving as the without-arm's accumulated context balloons —
 see `docs/benchmarks/call-sequence-analysis.md`.
 
 The gap widens with repo size and flow complexity: on medium/large repos the without-codegraph
 arm often **thrashes** — many greps/globs, shell `find`/`grep` (Bash), and occasionally spawning
-a **sub-agent** — while the with-codegraph arm answers in 2–9 calls. On tiny repos (a handful of
+a **sub-agent** — while the with-codegraph arm answers in 2–8 calls. On tiny repos (a handful of
 files) the two arms tie or codegraph is marginally slower (MCP/index overhead doesn't pay off
 when the whole flow fits in one or two files) — but reads still drop.
 
@@ -53,10 +53,6 @@ when the whole flow fits in one or two files) — but reads still drop.
 | Go | S | `gin-realworld` | 21 | 0R / 0G | 5 | 35s | 4R / 3G / 1Gl | 57s | 4 |
 | Go | M | `gin-vueadmin` | 625 | 1R / 1G | 4 | 47s | 3R / 3G / 1Gl | 44s | 2 |
 | Go | L | `gin-gitness` | 4438 | 4R / 3G | 4 | 64s | 8R / 7G / 2Gl | 57s | 4 |
-| Haskell | S | `xmonad` | 39 | 0R / 0G | 2 | 29s | 14R / 1G / 7B / 1Ag | 84s | 14 |
-| Haskell | S | `shellcheck` | 33 | 0R / 0G | 9 | 57s | 20R / 1G / 18B / 1Ag | 118s | 20 |
-| Haskell | M | `purescript` | 270 | 0R / 0G | 9 | 69s | 18R / 15B / 1Ag | 110s | 18 |
-| Haskell | M | `pandoc` | 557 | 0R / 0G | 5 | 50s | 16R / 2G / 15B / 1Ag | 103s | 16 |
 | Java | S | `spring-realworld` | 117 | 2R / 0G | 3 | 35s | 8R / 1G / 5B | 57s | 6 |
 | Java | M | `spring-mall` | 536 | 1R / 0G | 5 | 39s | 2R / 4G / 2Gl | 49s | 1 |
 | Java | L | `spring-halo` | 2444 | 1R / 2G | 8 | 60s | 4R / 1G / 6B | 52s | 3 |
@@ -85,10 +81,24 @@ when the whole flow fits in one or two files) — but reads still drop.
 | TypeScript/JS | M | `excalidraw` | 643 | 1R / 0G | 3 | 55s | 7R / 5G / 3Gl / 1B | 87s | 6 |
 | TypeScript/JS | L | `nest-immich` | 2759 | 1R / 0G | 7 | 50s | 3R / 0G / 1Gl | 44s | 2 |
 
-**Totals (41 cells):** with codegraph **38 reads / 22 greps**, without **227 reads / 76 greps** —
-**83% fewer reads, ~71% fewer greps.** Codegraph never increased reads in any cell, and the
-without-arm additionally ran **52 globs + 92 shell `find`/`grep` (Bash) + 5 sub-agents** that the
-with-arm (**0 Bash, 0 sub-agents**) never needed. (82 agent runs, $31.63 total.)
+**Totals (37 cells):** with codegraph **38 reads / 22 greps**, without **159 reads / 72 greps** —
+**76% fewer reads, ~69% fewer greps.** Codegraph never increased reads in any cell, and the
+without-arm additionally ran **52 globs + 37 shell `find`/`grep` (Bash) + 1 sub-agent** that the
+with-arm (**0 Bash, 0 sub-agents**) never needed. (74 agent runs, $29.18 total.)
+
+### Provisional Haskell PR snapshot (excluded from the totals above)
+
+These Haskell results were contributed with the unreleased implementation after the official
+0.9.4 matrix run. They are **one run per arm**, cover Small and Medium repositories only, and are
+directional rather than release-grade evidence; repeat them on Small, Medium, and Large public
+repositories with the current multi-run harness before folding Haskell into the official totals.
+
+| Language | Size | Repo | files | **with** R/G | cg-calls | dur | **without** R/G | dur | reads saved |
+|---|---|---|--:|---|--:|--:|---|--:|--:|
+| Haskell | S | `xmonad` | 39 | 0R / 0G | 2 | 29s | 14R / 1G / 7B / 1Ag | 84s | 14 |
+| Haskell | S | `shellcheck` | 33 | 0R / 0G | 9 | 57s | 20R / 1G / 18B / 1Ag | 118s | 20 |
+| Haskell | M | `purescript` | 270 | 0R / 0G | 9 | 69s | 18R / 15B / 1Ag | 110s | 18 |
+| Haskell | M | `pandoc` | 557 | 0R / 0G | 5 | 50s | 16R / 2G / 15B / 1Ag | 103s | 16 |
 
 ## Observations
 
@@ -98,15 +108,15 @@ with-arm (**0 Bash, 0 sub-agents**) never needed. (82 agent runs, $31.63 total.)
   django-wagtail (2R vs 8R), excalidraw (1R / 55s vs 7R / 87s), Luau Knit (0R vs 5R), aspnet-realworld
   (0R vs 5R), c-redis (0R vs 5R).
 - **Without codegraph, large repos make the agent thrash:** it falls back to shell `find`/`grep`
-  (92 Bash calls across the matrix) and in five cells spawned a sub-agent — exactly the behavior
-  codegraph is meant to prevent. The with-arm answers those in 2–9 codegraph calls and used **0 Bash
+  (37 Bash calls across the matrix) and on jellyfin even spawned a sub-agent — exactly the behavior
+  codegraph is meant to prevent. The with-arm answers those in 2–8 codegraph calls and used **0 Bash
   and 0 sub-agents** anywhere.
 - **Tie zone = tiny repos** (Kotlin Jetcaster 1R/1R, Rust cratesio 1R/1R, express 1R/2R, Swift template
   0R/2R): the whole flow fits in 1–2 files, so reading is already cheap; codegraph ties on reads and is
   sometimes a few seconds slower (MCP + index overhead — Kotlin petclinic 37s vs 23s, cratesio 22s vs
   18s). This matches the design note that codegraph's value scales with repo size.
 - **Duration tracks reads on the big repos** (jellyfin 51s vs 212s, excalidraw 55s vs 87s, aspnet-eshop
-  39s vs 58s, django-wagtail 45s vs 66s) and is noise on small ones; mean wall-clock is 39s with vs 53s
+  39s vs 58s, django-wagtail 45s vs 66s) and is noise on small ones; mean wall-clock is 38s with vs 48s
   without.
 - Some "with" cells still read 2–4 files (jellyfin, gitness, forem, saleor, django) — the residual is
   the documented frontier (anonymous handlers, deep service chains, dynamic finders); codegraph gets the
@@ -114,10 +124,11 @@ with-arm (**0 Bash, 0 sub-agents**) never needed. (82 agent runs, $31.63 total.)
 
 ## Coverage note
 
-All 14 README frameworks and every flow-relevant language are validated (see the playbook). The
-sizes here are by indexed file count; a few languages lack a clean third size in the corpus
+For the 0.9.4 language set, all 14 README frameworks and every flow-relevant language were
+validated (see the playbook). Sizes here are by indexed file count; a few languages lack a clean third size in the corpus
 (Dart/Kotlin = S/M, Scala/Luau = S only, C = L only, C++ = M only) — those cells are omitted rather
-than faked.
+than faked. This official 0.9.4 claim predates Haskell; the provisional Haskell rows above are not
+part of it and still need the current Small/Medium/Large multi-run validation.
 
 ## Reproduce
 

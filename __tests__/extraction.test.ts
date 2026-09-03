@@ -10,6 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { CodeGraph } from '../src';
 import { extractFromSource, scanDirectory, buildDefaultIgnore, discoverEmbeddedRepoRoots, buildScopeIgnore } from '../src/extraction';
+import { generateNodeId } from '../src/extraction/tree-sitter';
 import { detectLanguage, isLanguageSupported, getSupportedLanguages, initGrammars, loadAllGrammars, isSourceFile } from '../src/extraction/grammars';
 import { stripCppTemplateArgs, blankCppExportMacros, blankCppInlineMacros, blankMetalAttributes, blankCudaConstructs, blankCppAnnotationMacroCalls, blankCppApiPrefixMacros, blankCppInlineAnnotationMacros, blankCLeadingAttrMacros, recoverMangledCppName } from '../src/extraction/languages/c-cpp';
 import { normalizePath } from '../src/utils';
@@ -395,6 +396,23 @@ in
 });
 
 describe('TypeScript Extraction', () => {
+  it('keeps WASM node IDs on the kernel line-based wire contract', () => {
+    // Distinct scopes can legally contain same-named declarations on one line.
+    // The native kernel hashes (file, kind, name, line), so the generic WASM
+    // extractor must not introduce a column-only identity that the kernel can
+    // never reproduce. Haskell has a scoped exception because it is WASM-only.
+    const result = extractFromSource(
+      'same-line.ts',
+      'if (true) { function same() {} } if (false) { function same() {} }',
+      'typescript',
+    );
+    const functions = result.nodes.filter((node) => node.kind === 'function' && node.name === 'same');
+    expect(functions).toHaveLength(2);
+    for (const node of functions) {
+      expect(node.id).toBe(generateNodeId('same-line.ts', node.kind, node.name, node.startLine));
+    }
+  });
+
   it('should extract function declarations', () => {
     const code = `
 export function processPayment(amount: number): Promise<Receipt> {
@@ -7077,6 +7095,28 @@ export function multiply(a: number, b: number): number {
     cg.close();
   });
 
+  it('should revalidate an incoming import when indexFiles removes its export', async () => {
+    const srcDir = path.join(tempDir, 'src');
+    fs.mkdirSync(srcDir);
+    fs.writeFileSync(path.join(srcDir, 'lib.ts'), 'export function foo() { return 1; }\n');
+    fs.writeFileSync(
+      path.join(srcDir, 'main.ts'),
+      "import { foo } from './lib';\nexport function run() { return foo(); }\n",
+    );
+
+    const cg = CodeGraph.initSync(tempDir);
+    await cg.indexAll();
+    const run = cg.getNodesByName('run')[0]!;
+    const callsFoo = () => cg.getCallees(run.id).some(({ node }) => node.name === 'foo');
+    expect(callsFoo()).toBe(true);
+
+    fs.writeFileSync(path.join(srcDir, 'lib.ts'), 'function foo() { return 2; }\n');
+    await cg.indexFiles(['src/lib.ts']);
+    expect(callsFoo()).toBe(false);
+
+    cg.close();
+  });
+
   it('should count file-level tracked YAML files as indexed', async () => {
     fs.writeFileSync(path.join(tempDir, 'app.yaml'), 'name: test\n');
     fs.writeFileSync(path.join(tempDir, 'routes.yml'), 'route: value\n');
@@ -7246,6 +7286,24 @@ describe('Directory Exclusion', () => {
 
     expect(files).toContain('packages/app/src/index.ts');
     expect(files.every((f) => !f.includes('node_modules'))).toBe(true);
+  });
+
+  it('should exclude Haskell build trees without hiding neighboring source', () => {
+    const sourceDir = path.join(tempDir, 'packages', 'app');
+    const stackCache = path.join(tempDir, '.stack-work', 'downloaded', 'dep', 'src');
+    const cabalCache = path.join(tempDir, 'dist-newstyle', 'src', 'dep');
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.mkdirSync(stackCache, { recursive: true });
+    fs.mkdirSync(cabalCache, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, 'Main.hs'), 'module Main where\n');
+    fs.writeFileSync(path.join(stackCache, 'StackDependency.hs'), 'module StackDependency where\n');
+    fs.writeFileSync(path.join(cabalCache, 'CabalDependency.hs'), 'module CabalDependency where\n');
+
+    const files = scanDirectory(tempDir);
+
+    expect(files).toContain('packages/app/Main.hs');
+    expect(files.some((file) => file.startsWith('.stack-work/'))).toBe(false);
+    expect(files.some((file) => file.startsWith('dist-newstyle/'))).toBe(false);
   });
 
   it('should apply a nested .gitignore only to its own subtree', () => {

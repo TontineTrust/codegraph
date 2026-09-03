@@ -260,6 +260,15 @@ export interface FrameworkResolver {
 /**
  * Import mapping from a file
  */
+export interface HaskellParentChildRestriction {
+  parent: string;
+  child: string;
+  /** The grouped child contributes only in the type namespace (`C(type F)`). */
+  haskellTypeOnly?: true;
+  /** The grouped child contributes only in the value namespace (`T(pattern P)`). */
+  haskellValueOnly?: true;
+}
+
 export interface ImportMapping {
   /** Local name used in the file */
   localName: string;
@@ -267,6 +276,19 @@ export interface ImportMapping {
   exportedName: string;
   /** Source module/path */
   source: string;
+  /** Haskell PackageImports package qualifier (`import "pkg" Module`). */
+  packageQualifier?: string;
+  /** Haskell type-namespace import item; it contributes no value binding. */
+  haskellTypeOnly?: true;
+  /** Haskell `pattern`-qualified import item; it contributes no type binding. */
+  haskellValueOnly?: true;
+  /**
+   * Names in an aggregate Haskell import restriction that were introduced
+   * exclusively in the type namespace.
+   */
+  haskellTypeOnlyNames?: string[];
+  /** Names in an aggregate Haskell restriction limited to the value namespace. */
+  haskellValueOnlyNames?: string[];
   /** Whether it's a default import */
   isDefault: boolean;
   /** Whether it's a namespace import (import * as X) */
@@ -283,13 +305,13 @@ export interface ImportMapping {
   /** Namespace/wildcard allow-list of all children owned by these exports. */
   includedParentExports?: string[];
   /** Haskell: specifically allowed children keyed by their owning type/class. */
-  includedParentChildren?: Array<{ parent: string; child: string }>;
+  includedParentChildren?: HaskellParentChildRestriction[];
   /** Namespace/wildcard deny-list of directly named exports. */
   excludedNames?: string[];
   /** Namespace/wildcard deny-list of all children owned by these exports. */
   excludedParentExports?: string[];
   /** Haskell: specifically hidden children keyed by their owning type/class. */
-  excludedParentChildren?: Array<{ parent: string; child: string }>;
+  excludedParentChildren?: HaskellParentChildRestriction[];
   /** Resolved file path (if local) */
   resolvedPath?: string;
 }
@@ -308,6 +330,12 @@ export type ReExport =
       originalName: string;
       /** Module specifier of the upstream module. */
       source: string;
+      /** Haskell PackageImports package qualifier on the upstream import. */
+      packageQualifier?: string;
+      /** Haskell type-namespace re-export; it contributes no value binding. */
+      haskellTypeOnly?: true;
+      /** Haskell `pattern`-qualified re-export; it contributes no type binding. */
+      haskellValueOnly?: true;
       /** Haskell grouped export owner (`T(C)`) when the child is ambiguous. */
       parentExport?: string;
     }
@@ -315,11 +343,32 @@ export type ReExport =
       kind: 'wildcard';
       /** Module specifier of the upstream module. */
       source: string;
+      /** Haskell PackageImports package qualifier on the upstream import. */
+      packageQualifier?: string;
+      /** Haskell allow/deny names that apply only in the type namespace. */
+      haskellTypeOnlyNames?: string[];
+      /** Haskell allow/deny names that apply only in the value namespace. */
+      haskellValueOnlyNames?: string[];
       /** Optional Haskell re-export allow/deny lists inherited from its import. */
       includedNames?: string[];
       includedParentExports?: string[];
-      includedParentChildren?: Array<{ parent: string; child: string }>;
+      includedParentChildren?: HaskellParentChildRestriction[];
+      /**
+       * Haskell-only compact form for identity named re-exports. A named
+       * export introduces the value independently of any downstream grouped
+       * import (`T(value)`), whereas an ordinary wildcard propagates that
+       * parent restriction. The walker uses this marker to preserve the
+       * named-route semantics after grouping many names by source.
+       */
+      haskellClearParent?: true;
+      /**
+       * Haskell-only compact form for several otherwise-identical
+       * parent-scoped wildcard routes. The combined allow predicate carries
+       * the union, so the walker can inspect the upstream module once instead
+       * of recursively repeating the same lookup for every parent.
+       */
+      haskellCollapsedParents?: true;
       excludedNames?: string[];
       excludedParentExports?: string[];
-      excludedParentChildren?: Array<{ parent: string; child: string }>;
+      excludedParentChildren?: HaskellParentChildRestriction[];
     };

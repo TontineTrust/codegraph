@@ -171,7 +171,7 @@ export const EXTENSION_MAP: Record<string, Language> = {
   '.tf': 'terraform',
   '.tfvars': 'terraform',
   '.tofu': 'terraform',
-  // Haskell — vendored tree-sitter/tree-sitter-haskell 0.23.1 (MIT, ABI 14).
+  // Haskell — vendored tree-sitter/tree-sitter-haskell 0.23.1 (MIT, ABI 15).
   '.hs': 'haskell',
 };
 

@@ -7,17 +7,76 @@ beforeAll(async () => {
   await loadAllGrammars();
 });
 
-function refsFrom(source: string, ownerName: string) {
-  const result = extractFromSource('Round2.hs', source);
+type ExtractionResult = ReturnType<typeof extractFromSource>;
+
+function refsFor(result: ExtractionResult, ownerName: string) {
   const owner = result.nodes.find((node) => node.name === ownerName);
   expect(owner, `missing owner ${ownerName}`).toBeDefined();
-  return {
-    result,
-    refs: result.unresolvedReferences.filter((ref) => ref.fromNodeId === owner!.id),
-  };
+  return result.unresolvedReferences.filter((ref) => ref.fromNodeId === owner!.id);
+}
+
+function refsFrom(source: string, ownerName: string) {
+  const result = extractFromSource('Round2.hs', source);
+  return { result, refs: refsFor(result, ownerName) };
 }
 
 describe('Haskell extractor round 2', () => {
+  it('preserves type and value namespaces in explicit module exports', () => {
+    const source = `
+{-# LANGUAGE ExplicitNamespaces, PatternSynonyms, TypeOperators #-}
+module Round2 (type T, pattern V, W, X(..), (+++), type (+++)) where
+data T = T
+data V = V
+data W = W
+data X = X
+type a +++ b = (a, b)
+(+++) :: Int -> Int -> Int
+(+++) = (+)
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const exported = (name: string, kind: string): boolean => result.nodes.some((node) =>
+      node.name === name && node.kind === kind && node.isExported === true
+    );
+
+    expect(exported('T', 'enum')).toBe(true);
+    expect(exported('T', 'enum_member')).toBe(false);
+    expect(exported('V', 'enum')).toBe(false);
+    expect(exported('V', 'enum_member')).toBe(true);
+    expect(exported('W', 'enum')).toBe(true);
+    expect(exported('W', 'enum_member')).toBe(false);
+    expect(exported('X', 'enum')).toBe(true);
+    expect(exported('X', 'enum_member')).toBe(true);
+    expect(exported('(+++)', 'type_alias')).toBe(true);
+    expect(exported('(+++)', 'function')).toBe(true);
+  });
+
+  it('preserves namespaces for grouped class children while keeping C(..) open', () => {
+    const source = `
+{-# LANGUAGE ExplicitNamespaces, TypeFamilies, TypeOperators #-}
+module Round2 (C(type (<+>)), D((<!>)), E(..)) where
+class C a where
+  type a <+> b
+  (<+>) :: a -> a -> a
+class D a where
+  type a <!> b
+  (<!>) :: a -> a -> a
+class E a where
+  type a <#> b
+  (<#>) :: a -> a -> a
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const exported = (name: string, kind: string): boolean => result.nodes.some((node) =>
+      node.name === name && node.kind === kind && node.isExported === true
+    );
+
+    expect(exported('(<+>)', 'type_alias')).toBe(true);
+    expect(exported('(<+>)', 'method')).toBe(false);
+    expect(exported('(<!>)', 'type_alias')).toBe(false);
+    expect(exported('(<!>)', 'method')).toBe(true);
+    expect(exported('(<#>)', 'type_alias')).toBe(true);
+    expect(exported('(<#>)', 'method')).toBe(true);
+  });
+
   it('normalizes qualified and left-spine class references', () => {
     const source = `
 module Round2 where
@@ -42,6 +101,23 @@ data Thing = Thing deriving (A.Read)
     expect(result.unresolvedReferences).toContainEqual(expect.objectContaining({
       fromNodeId: thing.id, referenceKind: 'implements', referenceName: 'A::Read',
     }));
+  });
+
+  it('extracts classes from every deriving strategy clause', () => {
+    const source = `
+{-# LANGUAGE DeriveAnyClass, DerivingStrategies #-}
+module Round2 where
+data Thing = Thing
+  deriving stock (Eq)
+  deriving anyclass (Show, Read)
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const thing = result.nodes.find((node) => node.kind === 'enum' && node.name === 'Thing')!;
+    expect(result.unresolvedReferences
+      .filter((ref) => ref.fromNodeId === thing.id && ref.referenceKind === 'implements')
+      .map((ref) => ref.referenceName)
+      .sort())
+      .toEqual(['Eq', 'Read', 'Show']);
   });
 
   it('extracts infix type, data, class, instance, and constructor declarations from their LHS', () => {
@@ -78,6 +154,79 @@ data Pair a b = a :**: b
     expect(result.unresolvedReferences).toContainEqual(expect.objectContaining({
       fromNodeId: operatorInstance.id, referenceKind: 'implements', referenceName: ':=:',
     }));
+  });
+
+  it('keeps backtick declaration identifiers bare and joins their signatures and exports', () => {
+    const source = [
+      '{-# LANGUAGE TypeOperators #-}',
+      'module Round2 (foo, sommé, PairAlias) where',
+      'foo :: Int -> Int -> Int',
+      'x `foo` y = x + y',
+      'sommé :: Int -> Int -> Int',
+      'x `sommé` y = x + y',
+      'type a `PairAlias` b = (a, b)',
+      '',
+    ].join('\n');
+    const result = extractFromSource('Round2.hs', source);
+    const foo = result.nodes.filter((node) => node.kind === 'function' && node.name === 'foo');
+
+    expect(foo).toHaveLength(1);
+    expect(foo[0]).toEqual(expect.objectContaining({
+      signature: 'foo :: Int -> Int -> Int',
+      isExported: true,
+    }));
+    expect(result.nodes.some((node) => node.name === '(`foo`)')).toBe(false);
+    expect(result.nodes).toContainEqual(expect.objectContaining({
+      kind: 'function', name: 'sommé', isExported: true,
+      signature: 'sommé :: Int -> Int -> Int',
+    }));
+    expect(result.nodes.some((node) => node.name === '(sommé)')).toBe(false);
+    expect(result.nodes).toContainEqual(expect.objectContaining({
+      kind: 'type_alias',
+      name: 'PairAlias',
+      isExported: true,
+    }));
+  });
+
+  it('canonicalizes alphabetic infix classes, instances, and pattern synonyms', () => {
+    const source = [
+      '{-# LANGUAGE MultiParamTypeClasses, PatternSynonyms, StandaloneDeriving, TypeOperators #-}',
+      'module Round2 (Rel, Wrapped(WrappedBy), pattern Pair) where',
+      'class a `Rel` b where',
+      '  relate :: a -> b -> Bool',
+      'instance Int `Rel` Bool where',
+      '  relate _ _ = True',
+      'deriving instance Int `Rel` Bool',
+      'data Wrapped a b = a `WrappedBy` b',
+      'useWrapped left right = left `WrappedBy` right',
+      'pattern Pair :: a -> b -> (a, b)',
+      'pattern left `Pair` right = (left, right)',
+      '',
+    ].join('\n');
+    const result = extractFromSource('Round2.hs', source);
+
+    expect(result.nodes).toContainEqual(expect.objectContaining({
+      kind: 'trait', name: 'Rel', isExported: true,
+    }));
+    expect(result.nodes).toContainEqual(expect.objectContaining({
+      kind: 'enum_member', name: 'Pair', isExported: true,
+      signature: expect.stringContaining('pattern Pair ::'),
+    }));
+    expect(result.nodes).toContainEqual(expect.objectContaining({
+      kind: 'enum_member', name: 'WrappedBy', isExported: true,
+    }));
+    expect(result.nodes.some((node) =>
+      node.name === '`Rel`'
+      || node.name === '`Pair`'
+      || node.name === '`WrappedBy`')).toBe(false);
+    expect(result.unresolvedReferences.filter((ref) => ref.referenceKind === 'implements'))
+      .toEqual([
+        expect.objectContaining({ referenceName: 'Rel' }),
+        expect.objectContaining({ referenceName: 'Rel' }),
+      ]);
+    expect(result.unresolvedReferences.some((ref) => ref.referenceName === 'e')).toBe(false);
+    expect(refsFrom(source, 'useWrapped').refs.filter((ref) => ref.referenceName === 'WrappedBy'))
+      .toEqual([expect.objectContaining({ referenceKind: 'calls' })]);
   });
 
   it('keeps infix operands lexical and executes view-pattern expressions', () => {
@@ -118,6 +267,58 @@ h value = case value of
     expect(result.unresolvedReferences.filter((ref) => ref.fromNodeId === h.id
       && ref.referenceKind === 'references').map((ref) => ref.referenceName))
       .toEqual(expect.arrayContaining(['Nothing', 'Just']));
+  });
+
+  it('treats prefix symbolic parameters as lexical binders', () => {
+    const source = `
+module Round2 where
+import Ops ((<::>))
+f (<::>) = (<::>) 1 2
+g = \\(<::>) -> (<::>) 1 2
+control x = (<::>) x x
+`;
+    const result = extractFromSource('Round2.hs', source);
+    for (const owner of ['f', 'g']) {
+      const refs = refsFrom(source, owner).refs.filter((ref) =>
+        ['<::>', '(<::>)'].includes(ref.referenceName));
+      expect(refs).toEqual([]);
+    }
+    expect(refsFrom(source, 'control').refs.filter((ref) =>
+      ['<::>', '(<::>)'].includes(ref.referenceName)))
+      .toEqual([expect.objectContaining({ referenceKind: 'calls' })]);
+  });
+
+  it('does not duplicate a Unicode constructor passed to a known HOF', () => {
+    const source = `
+module Round2 where
+data T = Éclair Int
+a xs = map Éclair xs
+b f = f Éclair
+d x = Éclair x
+`;
+    expect(refsFrom(source, 'a').refs.filter((ref) => ref.referenceName === 'Éclair'))
+      .toEqual([expect.objectContaining({ referenceKind: 'calls' })]);
+    expect(refsFrom(source, 'b').refs.filter((ref) => ref.referenceName === 'Éclair'))
+      .toEqual([expect.objectContaining({ referenceKind: 'references' })]);
+    expect(refsFrom(source, 'd').refs.filter((ref) => ref.referenceName === 'Éclair'))
+      .toEqual([expect.objectContaining({ referenceKind: 'calls' })]);
+  });
+
+  it('extracts and calls identifiers in the Unicode Other_Letter category', () => {
+    const source = `
+module Round2 (函数, run) where
+import qualified Origin as O
+函数 value = value
+run = 函数 1
+qualifiedRun = O.函数 1
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const declaration = result.nodes.find((node) => node.name === '函数');
+    expect(declaration).toBeDefined();
+    expect(refsFrom(source, 'run').refs.filter((ref) => ref.referenceName === '函数'))
+      .toEqual([expect.objectContaining({ referenceKind: 'calls' })]);
+    expect(refsFrom(source, 'qualifiedRun').refs.filter((ref) => ref.referenceName === 'O::函数'))
+      .toEqual([expect.objectContaining({ referenceKind: 'calls' })]);
   });
 
   it('distinguishes record labels, explicit binders, and field puns', () => {
@@ -179,18 +380,417 @@ qualifiedSection = (1 L.<+>)
     expect(result.unresolvedReferences).toEqual(expect.arrayContaining([
       expect.objectContaining({ referenceKind: 'function_ref', referenceName: '+' }),
       expect.objectContaining({ referenceKind: 'function_ref', referenceName: 'op' }),
-      expect.objectContaining({ referenceKind: 'function_ref', referenceName: 'L::<+>' }),
+      expect.objectContaining({ referenceKind: 'function_ref', referenceName: 'L::(<+>)' }),
     ]));
     const qualifiedSection = result.nodes.find((node) => node.name === 'qualifiedSection')!;
     expect(result.unresolvedReferences).toContainEqual(expect.objectContaining({
-      fromNodeId: qualifiedSection.id, referenceKind: 'function_ref', referenceName: 'L::<+>',
+      fromNodeId: qualifiedSection.id, referenceKind: 'function_ref', referenceName: 'L::(<+>)',
     }));
+  });
+
+  it('keeps declaration types out of runtime edges while walking annotated expressions', () => {
+    const source = `
+{-# LANGUAGE ScopedTypeVariables, TypeApplications #-}
+module Round2 where
+import qualified Request
+run :: Request.HandleMonad m => Int -> m ()
+run value = pure value
+outer =
+  let local :: forall m. Monad m => m Int
+      local = pure 1
+  in consume local
+typed value = (make value :: Wrapper Int)
+ctor = (Nothing :: Maybe Int)
+typedApplication value = Request.consume @Request.HandleMonad value
+nestedTypeApplication value = Request.consume @(ast Request.HandleMonad) value
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const runtimeNames = result.unresolvedReferences.map((ref) => ref.referenceName);
+    for (const typeName of ['Request::HandleMonad', 'Monad', 'Wrapper', 'Maybe', 'Int', 'm']) {
+      expect(runtimeNames).not.toContain(typeName);
+    }
+    const namespace = result.nodes.find((node) => node.kind === 'namespace' && node.name === 'Round2')!;
+    expect(result.unresolvedReferences.filter((ref) => ref.fromNodeId === namespace.id
+      && ['calls', 'function_ref', 'references'].includes(ref.referenceKind)))
+      .toEqual([]);
+
+    expect(refsFor(result, 'run')).toContainEqual(expect.objectContaining({
+      referenceKind: 'calls', referenceName: 'pure',
+    }));
+    expect(refsFor(result, 'typed')).toContainEqual(expect.objectContaining({
+      referenceKind: 'calls', referenceName: 'make',
+    }));
+    expect(refsFor(result, 'ctor')).toContainEqual(expect.objectContaining({
+      referenceKind: 'references', referenceName: 'Nothing',
+    }));
+    expect(refsFor(result, 'typedApplication')).toContainEqual(expect.objectContaining({
+      referenceKind: 'calls', referenceName: 'Request::consume',
+    }));
+    expect(refsFor(result, 'nestedTypeApplication')).toEqual([
+      expect.objectContaining({ referenceKind: 'calls', referenceName: 'Request::consume' }),
+    ]);
+  });
+
+  it('keeps type annotations and later view-pattern binders out of term scope', () => {
+    const source = `
+{-# LANGUAGE ScopedTypeVariables, ViewPatterns #-}
+module Round2 where
+helper value = value
+typed :: forall helper. helper -> helper
+typed (value :: helper) = helper value
+viewed (helper -> helper) = helper
+later (helper -> value) helper = value
+caseViewed input = case input of
+  (helper -> helper) -> helper
+sequenced = do
+  helper <- helper
+  pure helper
+guarded input
+  | Just helper <- helper input = helper
+comprehended input = [helper | helper <- helper input]
+visibleTypeApplication (Just @helper value) = helper value
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const refs = (owner: string) => refsFor(result, owner)
+      .filter((ref) => ref.referenceName === 'helper');
+
+    for (const owner of [
+      'typed', 'viewed', 'later', 'caseViewed', 'sequenced', 'guarded', 'comprehended',
+      'visibleTypeApplication',
+    ]) {
+      expect(refs(owner), owner).toEqual([
+        expect.objectContaining({ referenceKind: 'calls' }),
+      ]);
+    }
+  });
+
+  it('does not turn visible type specialization into a term call', () => {
+    const source = `
+{-# LANGUAGE GADTs, ScopedTypeVariables, TypeApplications, ViewPatterns #-}
+module Round2 where
+data Proxy a = Proxy
+helper :: forall a. Int -> Int
+helper value = value
+action :: forall a. IO Int
+action = pure 1
+specialized = helper @Int
+applied value = helper @Int value
+viaDollar = helper @Int $ 1
+viaStrictDollar = helper @Int $! 1
+multilineDollar =
+  helper @Int
+    $ 1
+viaAmp value = value & helper @Int
+composed = id . helper @Int
+passed = consume (helper @Int)
+proxy = Proxy @Int
+effectAlias :: IO Int
+effectAlias = action @Int
+run = do
+  value <- action @Int
+  action @Bool
+view (helper @Int -> value) = value
+guarded | Just value <- matcher @Int = value
+generated = [value | value <- source @Int]
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const refs = (owner: string) => refsFor(result, owner);
+    const named = (owner: string, name: string) => refs(owner)
+      .filter((ref) => ref.referenceName === name);
+
+    for (const owner of ['specialized', 'composed', 'passed']) {
+      expect(named(owner, 'helper'), owner).toEqual([
+        expect.objectContaining({ referenceKind: 'function_ref' }),
+      ]);
+    }
+    for (const owner of ['applied', 'viaDollar', 'viaStrictDollar', 'multilineDollar', 'viaAmp']) {
+      expect(named(owner, 'helper')).toEqual([
+        expect.objectContaining({ referenceKind: 'calls' }),
+      ]);
+    }
+    expect(named('proxy', 'Proxy')).toEqual([
+      expect.objectContaining({ referenceKind: 'references' }),
+    ]);
+    expect(named('effectAlias', 'action')).toEqual([
+      expect.objectContaining({ referenceKind: 'haskell_effect_alias' }),
+    ]);
+    expect(named('run', 'action')).toEqual([
+      expect.objectContaining({ referenceKind: 'calls' }),
+      expect.objectContaining({ referenceKind: 'calls' }),
+    ]);
+    expect(named('view', 'helper')).toEqual([
+      expect.objectContaining({ referenceKind: 'calls' }),
+    ]);
+    expect(named('guarded', 'matcher')).toEqual([
+      expect.objectContaining({ referenceKind: 'calls' }),
+    ]);
+    expect(named('generated', 'source')).toEqual([
+      expect.objectContaining({ referenceKind: 'calls' }),
+    ]);
+  });
+
+  it('keeps Template Haskell code-as-data out of runtime flow while visiting active splices', () => {
+    const source = `
+{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
+module Round2 where
+data QuotedType = QuotedConstructor Int
+runtimeTarget value = value
+compileExpr value = value
+compileTyped value = value
+compileDecl value = value
+compileType value = value
+compilePattern value = value
+deferredCompile value = value
+exprQuote = [| runtimeTarget quoteArgument |]
+typedExprQuote = [|| runtimeTarget quoteArgument ||]
+declQuote = [d| generated = runtimeTarget quoteArgument |]
+typeQuote = [t| Either QuotedType QuotedType |]
+patternQuote = [p| QuotedConstructor captured |]
+nameQuote = 'runtimeTarget
+typeNameQuote = ''QuotedType
+quasiQuote = [qq| runtimeTarget quoteArgument |]
+untypedSplice = $(compileExpr spliceArgument)
+typedSplice = $$(compileTyped spliceArgument)
+bareSplice = $compileExpr
+parenthesizedBareSplice = $(compileExpr)
+typedBareSplice = $$(compileTyped)
+exprWithSplice = [| runtimeTarget ($(compileExpr spliceArgument)) |]
+typedExprWithSplice = [|| runtimeTarget ($$(compileTyped spliceArgument)) ||]
+exprWithBareSplice = [| runtimeTarget ($(compileExpr)) |]
+typedExprWithBareSplice = [|| runtimeTarget ($$(compileTyped)) ||]
+declWithSplice = [d| generatedWithSplice = $(compileDecl spliceArgument) |]
+typeWithSplice = [t| Maybe $(compileType spliceArgument) |]
+patternWithSplice = [p| Just $(compilePattern spliceArgument) |]
+instanceWithSplice = [d| instance Eq $(compileType spliceArgument) where |]
+nestedQuote = [| [| runtimeTarget ($(deferredCompile spliceArgument)) |] |]
+nestedBareQuote = [| [| runtimeTarget ($(deferredCompile)) |] |]
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const refs = (owner: string) => {
+      const node = result.nodes.find((candidate) => candidate.name === owner)!;
+      return result.unresolvedReferences.filter((ref) => ref.fromNodeId === node.id);
+    };
+
+    for (const owner of [
+      'exprQuote', 'typedExprQuote', 'declQuote', 'typeQuote', 'patternQuote',
+      'nameQuote', 'typeNameQuote', 'quasiQuote', 'nestedQuote', 'nestedBareQuote',
+    ]) {
+      expect(refs(owner), owner).toEqual([]);
+    }
+    for (const [owner, target] of [
+      ['untypedSplice', 'compileExpr'],
+      ['typedSplice', 'compileTyped'],
+      ['bareSplice', 'compileExpr'],
+      ['parenthesizedBareSplice', 'compileExpr'],
+      ['typedBareSplice', 'compileTyped'],
+      ['exprWithSplice', 'compileExpr'],
+      ['typedExprWithSplice', 'compileTyped'],
+      ['exprWithBareSplice', 'compileExpr'],
+      ['typedExprWithBareSplice', 'compileTyped'],
+      ['declWithSplice', 'compileDecl'],
+      ['typeWithSplice', 'compileType'],
+      ['patternWithSplice', 'compilePattern'],
+      ['instanceWithSplice', 'compileType'],
+    ] as const) {
+      expect(refs(owner).filter((ref) => ref.referenceKind === 'calls'), owner).toEqual([
+        expect.objectContaining({ referenceName: target }),
+      ]);
+      expect(refs(owner).some((ref) => ref.referenceName === 'runtimeTarget'), owner).toBe(false);
+    }
+    expect(result.nodes.some((node) =>
+      node.name === 'generated' || node.name === 'generatedWithSplice'
+    )).toBe(false);
+  });
+
+  it('classifies no-argument effectful bindings without promoting pure applied values', () => {
+    const cases = [
+      ['main', 'function', 'main = do\n  tick'],
+      ['scheduler', 'function', 'scheduler :: MonadIO m => m ()\nscheduler = forever tick'],
+      ['readerAction', 'function', 'readerAction :: MonadReader env m => m Env\nreaderAction = ask'],
+      ['primitiveAction', 'function', 'primitiveAction :: PrimMonad m => m Value\nprimitiveAction = load'],
+      ['transactionAction', 'function', 'transactionAction :: RunTx m => m Value\ntransactionAction = loadTransaction'],
+      ['ioAction', 'function', 'ioAction :: IO ()\nioAction = launch'],
+      ['ioDo', 'function', 'ioDo :: IO ()\nioDo = do\n  launch'],
+      ['stAction', 'function', 'stAction :: ST scope Value\nstAction = runStateThread'],
+      ['stmAction', 'function', 'stmAction :: STM Value\nstmAction = runTransactionally'],
+      ['exceptAction', 'function', 'exceptAction :: Monad m => ExceptT Failure m ()\nexceptAction = runExceptAction'],
+      ['exceptIoAction', 'function', 'exceptIoAction :: ExceptT Failure IO ()\nexceptIoAction = runExceptIO'],
+      ['readerTAction', 'function', 'readerTAction :: Monad m => ReaderT Env m Value\nreaderTAction = runReaderAction'],
+      ['stateTAction', 'function', 'stateTAction :: Monad m => StateT State m Value\nstateTAction = runStateAction'],
+      ['writerTAction', 'function', 'writerTAction :: Monad m => WriterT Log m Value\nwriterTAction = runWriterAction'],
+      ['rwstAction', 'function', 'rwstAction :: Monad m => RWST Env Log State m Value\nrwstAction = runRwstAction'],
+      ['getAction', 'constant', 'getAction :: Get Value\ngetAction = do\n  value <- parseValue\n  pure value'],
+      ['parserAction', 'constant', 'parserAction :: Parser Value\nparserAction = do\n  value <- parseValue\n  pure value'],
+      ['beamQuery', 'constant', 'beamQuery :: Beam.Q db scope Row\nbeamQuery = do\n  row <- selectRows\n  pure row'],
+      ['unsignaturedBind', 'function', 'unsignaturedBind = do\n  value <- load\n  pure value'],
+      ['unsignaturedSequence', 'function', 'unsignaturedSequence = do\n  prepare\n  launch'],
+      ['signedActionSequence', 'constant', 'signedActionSequence :: CustomEffect\nsignedActionSequence = do\n  prepare\n  launch'],
+      ['boxed', 'constant', 'boxed :: Maybe Int\nboxed = Just 1'],
+      ['qValue', 'constant', 'qValue :: Q Int\nqValue = QValue'],
+      ['parserValue', 'constant', 'parserValue :: Parser Value\nparserValue = parseValue'],
+      ['getValue', 'constant', 'getValue :: Get Value\ngetValue = parseValue'],
+      ['qualifiedParserValue', 'constant', 'qualifiedParserValue :: Domain.Parser Value\nqualifiedParserValue = Domain.parseValue'],
+      ['qualifiedIoValue', 'constant', 'qualifiedIoValue :: Domain.IO ()\nqualifiedIoValue = Domain.launch'],
+      ['beamValue', 'constant', 'beamValue :: Beam.Q db scope Row\nbeamValue = selectRows'],
+      ['fakeTransformer', 'constant', 'fakeTransformer :: ExceptT Failure m Value\nfakeTransformer = boxedEffect'],
+      ['qualifiedTransformerValue', undefined, 'qualifiedTransformerValue :: Monad m => Domain.ExceptT Failure m Value\nqualifiedTransformerValue = Domain.boxedEffect'],
+      ['maybeDo', 'constant', 'maybeDo :: Maybe Int\nmaybeDo = do\n  Just 1'],
+      ['maybeBoundDo', 'constant', 'maybeBoundDo :: Maybe Int\nmaybeBoundDo = do\n  value <- Just 1\n  pure value'],
+      ['clientErrorStyle', 'constant', 'clientErrorStyle :: Result\nclientErrorStyle = do\n  let base = defaultResult\n  Result base'],
+      ['unsignaturedPureDo', 'constant', 'unsignaturedPureDo = do\n  Just 1'],
+      ['notMonadValue', 'constant', 'notMonadValue :: NotMonad a => a\nnotMonadValue = defaultNotMonad'],
+      ['notMonadDo', 'constant', 'notMonadDo :: NotMonad a => a\nnotMonadDo = do\n  defaultNotMonad'],
+      ['nonMonadValue', 'constant', 'nonMonadValue :: NonMonad a => a\nnonMonadValue = defaultNonMonad'],
+      ['functorValue', 'constant', 'functorValue :: Functor f => f Int\nfunctorValue = pure 1'],
+      ['environment', 'constant', 'environment :: MonadReader env m => env\nenvironment = defaultEnvironment'],
+      ['label', 'constant', 'label :: String\nlabel = renderLabel config'],
+    ] as const;
+    const source = [
+      '',
+      'module Round2 where',
+      'class NotMonad a where\n  notMarker :: a -> Bool',
+      'class NonMonad a where\n  nonMarker :: a -> Bool',
+      'data Parser a = ParserValue a',
+      'data Get a = GetValue a',
+      ...cases.map(([, , declaration]) => declaration),
+      '',
+    ].join('\n');
+    const result = extractFromSource('Round2.hs', source);
+    for (const [name, kind] of cases) {
+      if (kind) {
+        expect(result.nodes).toContainEqual(expect.objectContaining({ kind, name }));
+      }
+    }
+  });
+
+  it('defers nominal effect heads for whole-RHS aliases while preserving structural proof', () => {
+    const effectAliases = [
+      ['effectAlias', 'effectAlias :: IO ()\neffectAlias = runAction', 'runAction', ['haskell-effect-head:IO']],
+      ['qualifiedEffect', 'qualifiedEffect :: Monad m => Bool -> ExceptT Failure m ()\nqualifiedEffect _ = Actions.runAction', 'Actions::runAction', ['haskell-effect-head:ExceptT']],
+      ['canonicalQualifiedEffect', 'canonicalQualifiedEffect :: Monad m => Control.Monad.Trans.Except.ExceptT Failure m ()\ncanonicalQualifiedEffect = Actions.runAction', 'Actions::runAction', ['haskell-effect-head:Control.Monad.Trans.Except::ExceptT']],
+      ['exceptIoAlias', 'exceptIoAlias :: ExceptT Failure IO ()\nexceptIoAlias = Actions.runAction', 'Actions::runAction', ['haskell-effect-head:ExceptT', 'haskell-effect-head:IO']],
+      ['stAlias', 'stAlias :: ST scope ()\nstAlias = Actions.runAction', 'Actions::runAction', undefined],
+      ['stmAlias', 'stmAlias :: STM ()\nstmAlias = Actions.runAction', 'Actions::runAction', undefined],
+      ['transactionAlias', 'transactionAlias :: RunTx m => m ()\ntransactionAlias = Actions.runTransaction', 'Actions::runTransaction', ['haskell-effect-head:m']],
+      ['qualifiedTransformer', 'qualifiedTransformer :: Monad m => Domain.ExceptT Failure m ()\nqualifiedTransformer = Actions.runAction', 'Actions::runAction', ['haskell-effect-head:Domain::ExceptT']],
+    ] as const;
+    const functionRefs = [
+      ['parserAlias', 'parserAlias :: Parser Value\nparserAlias = Actions.parseValue'],
+      ['getAlias', 'getAlias :: Get Value\ngetAlias = Actions.getValue'],
+      ['qualifiedParserAlias', 'qualifiedParserAlias :: Domain.Parser Value\nqualifiedParserAlias = Actions.parseValue'],
+      ['beamAlias', 'beamAlias :: Beam.Q db scope Row\nbeamAlias = Actions.selectRows'],
+      ['qualifiedIoAlias', 'qualifiedIoAlias :: Domain.IO ()\nqualifiedIoAlias = Actions.runAction'],
+      ['unprovenTransformer', 'unprovenTransformer :: ExceptT Failure m ()\nunprovenTransformer = Actions.runAction'],
+      ['choose', 'choose :: Bool -> (Int -> Int)\nchoose _ = Actions.callback'],
+      ['answer', 'answer :: Bool -> Int\nanswer _ = Actions.answer'],
+      ['valueAlias', 'valueAlias :: Int\nvalueAlias = Actions.answer'],
+    ] as const;
+    const source = [
+      '',
+      'module Round2 where',
+      'import qualified Actions',
+      'data Parser a = ParserValue a',
+      'data Get a = GetValue a',
+      ...effectAliases.slice(0, 7).map(([, declaration]) => declaration),
+      ...functionRefs.slice(0, 6).map(([, declaration]) => declaration),
+      effectAliases[7][1],
+      ...functionRefs.slice(6).map(([, declaration]) => declaration),
+      '',
+    ].join('\n');
+    const result = extractFromSource('Round2.hs', source);
+
+    for (const [owner, , referenceName, candidates] of effectAliases) {
+      expect(refsFor(result, owner)).toContainEqual(expect.objectContaining({
+        referenceKind: 'haskell_effect_alias',
+        referenceName,
+        ...(candidates ? { candidates: [...candidates] } : {}),
+      }));
+    }
+    for (const [owner] of functionRefs) {
+      const refs = refsFor(result, owner);
+      expect(refs).toContainEqual(expect.objectContaining({ referenceKind: 'function_ref' }));
+      expect(refs.some((ref) => ref.referenceKind === 'calls')).toBe(false);
+    }
+  });
+
+  it('associates trailing signatures without moving the binding docstring', () => {
+    const source = `
+module Round2 where
+-- | Runs the documented action.
+trailingAction = Actions.runAction
+{-# INLINE trailingAction #-}
+trailingAction :: IO ()
+trailingValue = Actions.answer
+trailingValue :: Int
+trailingFunction = id
+trailingFunction :: Int -> Int
+firstAction = Actions.first
+secondAction = Actions.second
+firstAction, secondAction :: IO ()
+`;
+    const result = extractFromSource('Round2.hs', source);
+    expect(result.nodes.find((node) => node.name === 'trailingAction')).toEqual(
+      expect.objectContaining({
+        kind: 'function',
+        signature: 'trailingAction :: IO ()',
+        docstring: expect.stringContaining('Runs the documented action.'),
+      }),
+    );
+    expect(result.nodes.find((node) => node.name === 'trailingValue')).toEqual(
+      expect.objectContaining({ kind: 'constant', signature: 'trailingValue :: Int' }),
+    );
+    expect(result.nodes.find((node) => node.name === 'trailingFunction')).toEqual(
+      expect.objectContaining({ kind: 'function', signature: 'trailingFunction :: Int -> Int' }),
+    );
+    for (const [owner, target] of [
+      ['trailingAction', 'Actions::runAction'],
+      ['firstAction', 'Actions::first'],
+      ['secondAction', 'Actions::second'],
+    ] as const) {
+      expect(refsFrom(source, owner).refs).toEqual([
+        expect.objectContaining({
+          referenceKind: 'haskell_effect_alias',
+          referenceName: target,
+          candidates: ['haskell-effect-head:IO'],
+        }),
+      ]);
+    }
+    expect(refsFrom(source, 'trailingValue').refs).toEqual([
+      expect.objectContaining({
+        referenceKind: 'function_ref', referenceName: 'Actions::answer',
+      }),
+    ]);
+  });
+
+  it('rejects locally shadowed primitive and transformer effect names', () => {
+    const source = `
+module Round2 where
+import qualified Actions
+data IO value = LocalIO value
+data ST scope value = LocalST value
+data STM value = LocalSTM value
+shadowedIO :: IO ()
+shadowedIO = Actions.runAction
+shadowedST :: ST scope ()
+shadowedST = Actions.runAction
+shadowedSTM :: STM ()
+shadowedSTM = Actions.runAction
+shadowedExcept :: Monad m => ExceptT Failure m ()
+shadowedExcept = Actions.runAction
+data ExceptT error monad value = LocalExcept value
+`;
+    for (const name of ['shadowedIO', 'shadowedST', 'shadowedSTM', 'shadowedExcept']) {
+      expect(refsFrom(source, name).result.nodes).toContainEqual(expect.objectContaining({
+        kind: 'constant', name,
+      }));
+      expect(refsFrom(source, name).refs.some((ref) => ref.referenceKind === 'calls')).toBe(false);
+    }
   });
 
   it('applies class-child export semantics to associated data families only', () => {
     const source = `
-{-# LANGUAGE TypeFamilies #-}
-module Round2 (C(..), FamilyInt) where
+{-# LANGUAGE ExplicitNamespaces, PatternSynonyms, TypeFamilies #-}
+module Round2 (C(..), pattern FamilyInt) where
 class C a where
   data Family a
 instance C Int where
@@ -220,13 +820,17 @@ instance C Int where
     expect(durationMs).toBeLessThan(4_000);
   });
 
-  it('extracts foreign imports and links foreign exports without duplicating bindings', () => {
+  it('extracts foreign imports and applies foreign-export signatures to their bindings', () => {
     const source = `
 {-# LANGUAGE ForeignFunctionInterface #-}
-module Round2 (c_sin, run) where
+module Round2 (c_sin, run, action) where
 foreign import ccall unsafe "sin" c_sin :: Double -> IO Double
 foreign export ccall "hs_run" run :: Int -> IO ()
 run _ = pure ()
+foreign export ccall "hs_action" action :: IO ()
+action = target
+target :: IO ()
+target = pure ()
 `;
     const result = extractFromSource('Round2.hs', source);
     expect(result.nodes.find((node) => node.name === 'c_sin')).toEqual(expect.objectContaining({
@@ -235,8 +839,20 @@ run _ = pure ()
       decorators: expect.arrayContaining(['haskell-foreign-import']),
     }));
     expect(result.nodes.filter((node) => node.name === 'run')).toHaveLength(1);
+    expect(result.nodes.find((node) => node.name === 'run')).toEqual(expect.objectContaining({
+      kind: 'function',
+      signature: 'run :: Int -> IO ()',
+    }));
+    expect(result.nodes.filter((node) => node.name === 'action')).toHaveLength(1);
+    expect(result.nodes.find((node) => node.name === 'action')).toEqual(expect.objectContaining({
+      kind: 'function',
+      signature: 'action :: IO ()',
+    }));
     expect(result.unresolvedReferences).toContainEqual(expect.objectContaining({
       referenceKind: 'function_ref', referenceName: 'run',
+    }));
+    expect(result.unresolvedReferences).toContainEqual(expect.objectContaining({
+      referenceKind: 'haskell_effect_alias', referenceName: 'target',
     }));
   });
 
@@ -291,6 +907,23 @@ pattern x :++: xs = x : xs
     expect(result.nodes.find((node) => node.name === '(:++:)')).toEqual(expect.objectContaining({
       signature: 'pattern (:++:) :: a -> [a] -> [a]',
       startLine: 7,
+    }));
+  });
+
+  it('attaches a standalone pattern-synonym signature declared after its equation', () => {
+    const source = `
+{-# LANGUAGE PatternSynonyms #-}
+module Round2 where
+-- | Documentation anchored to the equation.
+pattern Late value = Just value
+pattern Late :: a -> Maybe a
+`;
+    const result = extractFromSource('Round2.hs', source);
+    expect(result.nodes.find((node) => node.name === 'Late')).toEqual(expect.objectContaining({
+      signature: 'pattern Late :: a -> Maybe a',
+      docstring: expect.stringContaining('Documentation anchored to the equation.'),
+      startLine: 5,
+      endLine: 6,
     }));
   });
 
@@ -642,7 +1275,7 @@ i = (L.<.>)
       referenceKind: 'function_ref', referenceName: '.+.',
     }));
     expect(refsFrom(source, 'i').refs).toContainEqual(expect.objectContaining({
-      referenceKind: 'function_ref', referenceName: 'L::<.>',
+      referenceKind: 'function_ref', referenceName: 'L::(<.>)',
     }));
   });
 

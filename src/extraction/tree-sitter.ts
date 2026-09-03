@@ -404,11 +404,13 @@ export class TreeSitterExtractor {
   private source: string;
   private tree: Tree | null = null;
   private nodes: Node[] = [];
-  // Keep the long-standing line-based IDs stable for the overwhelmingly common
-  // case, while disambiguating declarations such as two same-named `let`
-  // helpers written on one physical line. Re-visiting the exact same syntax
-  // position retains the legacy ID; only a distinct-column collision gets the
-  // deterministic column-qualified fallback.
+  // Haskell can legally declare same-named lexical helpers in separate `let`
+  // scopes on one physical line. Keep their IDs distinct without changing the
+  // long-standing line-based identity of kernel-backed languages: the native
+  // kernel intentionally hashes only (file, kind, name, line), so applying the
+  // column fallback outside Haskell would make its WASM and native paths
+  // disagree. Re-visiting the exact same Haskell syntax position retains the
+  // legacy ID; only a distinct-column collision gets the deterministic fallback.
   private nodeIdColumns = new Map<string, number>();
   private edges: Edge[] = [];
   private unresolvedReferences: UnresolvedReference[] = [];
@@ -1370,11 +1372,14 @@ export class TreeSitterExtractor {
     const line = node.startPosition.row + 1;
     const column = node.startPosition.column;
     const legacyId = generateNodeId(this.filePath, kind, name, line);
-    const previousColumn = this.nodeIdColumns.get(legacyId);
-    const id = previousColumn === undefined || previousColumn === column
-      ? legacyId
-      : generateNodeId(this.filePath, kind, `${name}\0column:${column}`, line);
-    this.nodeIdColumns.set(legacyId, previousColumn ?? column);
+    let id = legacyId;
+    if (this.language === 'haskell') {
+      const previousColumn = this.nodeIdColumns.get(legacyId);
+      id = previousColumn === undefined || previousColumn === column
+        ? legacyId
+        : generateNodeId(this.filePath, kind, `${name}\0column:${column}`, line);
+      this.nodeIdColumns.set(legacyId, previousColumn ?? column);
+    }
 
     // Some grammars (e.g. Dart) model a function/method body as a *sibling* of
     // the signature node, so the declaration node's own range is just the
@@ -1663,12 +1668,6 @@ export class TreeSitterExtractor {
     if (body) {
       this.visitFunctionBody(body, funcNode.id);
     }
-    // Walk any extra body-shaped fields (e.g. Haskell's `binds:` for
-    // `where`-clause bindings — see LanguageExtractor.extraBodyFields).
-    for (const f of this.extractor.extraBodyFields ?? []) {
-      const extra = getChildByField(node, f);
-      if (extra) this.visitFunctionBody(extra, funcNode.id);
-    }
     this.nodeStack.pop();
   }
 
@@ -1888,12 +1887,6 @@ export class TreeSitterExtractor {
       ?? getChildByField(node, this.extractor.bodyField);
     if (body) {
       this.visitFunctionBody(body, methodNode.id);
-    }
-    // Walk any extra body-shaped fields (Haskell `where` etc. — see
-    // LanguageExtractor.extraBodyFields).
-    for (const f of this.extractor.extraBodyFields ?? []) {
-      const extra = getChildByField(node, f);
-      if (extra) this.visitFunctionBody(extra, methodNode.id);
     }
     this.nodeStack.pop();
   }
@@ -3832,21 +3825,47 @@ export class TreeSitterExtractor {
     // classic false edge where `runEventExpr (... f) = f err` links to an
     // unrelated top-level function named `f`.
     if (this.language === 'haskell') {
+      // The grammar reuses expression-shaped `apply` nodes inside visible type
+      // arguments (`parseAST @(ast GhcPs) value`). Nothing below `@(...)` is a
+      // runtime callee or function value, even when a lower-case type family
+      // makes it look exactly like term application.
+      for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+        if (ancestor.type === 'type_application') return;
+      }
       const sameSyntaxNode = (a: SyntaxNode | null, b: SyntaxNode): boolean =>
         !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex;
+      const haskellIdContinue = String.raw`[\p{L}\p{Mn}\p{N}_']`;
+      const haskellIdentifier = new RegExp(
+        String.raw`^[\p{Ll}\p{Lo}\p{Lu}\p{Lt}_]${haskellIdContinue}*#*$`,
+        'u',
+      );
+      const haskellConId = String.raw`[\p{Lu}\p{Lt}]${haskellIdContinue}*`;
+      const haskellConIdStart = /^[\p{Lu}\p{Lt}]/u;
+      const haskellModule = String.raw`${haskellConId}(?:\.${haskellConId})*`;
       const normalizeQualified = (text: string): string => {
         let compact = text.replace(/\s+/g, '').replace(/^`|`$/g, '');
         if (compact.startsWith('(') && compact.endsWith(')')) {
           const inner = compact.slice(1, -1);
-          if (/^(?:[A-Z][A-Za-z0-9_']*\.)+/.test(inner)) compact = inner;
+          if (new RegExp(`^(?:${haskellConId}\\.)+`, 'u').test(inner)) compact = inner;
         }
-        const qualified = compact.match(/^((?:[A-Z][A-Za-z0-9_']*\.)+)(.+)$/);
-        return qualified
-          ? `${qualified[1]!.slice(0, -1)}::${qualified[2]}`
-          : compact;
+        const qualified = compact.match(new RegExp(`^((?:${haskellConId}\\.)+)(.+)$`, 'u'));
+        if (!qualified) return compact;
+        const member = qualified[2]!;
+        const canonicalMember = haskellIdentifier.test(member)
+          ? member
+          : member.startsWith('(') && member.endsWith(')') ? member : `(${member})`;
+        return `${qualified[1]!.slice(0, -1)}::${canonicalMember}`;
+      };
+      const haskellReferenceParts = (name: string): { qualifier: string | null; member: string } => {
+        const qualified = name.match(new RegExp(`^(${haskellModule})::(.+)$`, 'u'));
+        const rawMember = qualified?.[2] ?? name;
+        const member = rawMember.startsWith('(') && rawMember.endsWith(')')
+          ? rawMember.slice(1, -1)
+          : rawMember;
+        return { qualifier: qualified?.[1] ?? null, member };
       };
       const patternBinds = (name: string): boolean => {
-        if (name.includes('::')) return false;
+        if (haskellReferenceParts(name).qualifier !== null) return false;
         if (this.extractor?.isLexicallyBound) {
           return this.extractor.isLexicallyBound(name, node, this.source, this.nodes);
         }
@@ -3891,15 +3910,12 @@ export class TreeSitterExtractor {
       const emitFunctionRef = (candidate: SyntaxNode | null): void => {
         const reference = simpleReference(candidate);
         if (!reference) return;
-        const separator = reference.name.lastIndexOf('::');
-        const leaf = reference.name
-          .slice(separator < 0 ? 0 : separator + 2)
-          .replace(/^\(|\)$/g, '');
+        const leaf = haskellReferenceParts(reference.name).member;
         // Constructor arguments are values unless a known combinator below
         // explicitly executes them. The Haskell bare-reference walker records
         // the value dependency, so a speculative function_ref here would be a
         // duplicate (and can resolve to the wrong semantic kind).
-        if (/^[A-Z]/.test(leaf) || leaf.startsWith(':')) return;
+        if (haskellConIdStart.test(leaf) || leaf.startsWith(':')) return;
         this.unresolvedReferences.push({
           fromNodeId: callerId,
           referenceName: reference.name,
@@ -3951,6 +3967,84 @@ export class TreeSitterExtractor {
       }
 
       if (node.type === 'apply') {
+        // Visible type applications (`f @T`, `Proxy @T`) specialize a value;
+        // without a term argument they are not themselves calls. The Haskell
+        // grammar nevertheless represents each `@T` as an `apply` argument,
+        // so treating every such node as a call fabricated large call fans for
+        // polymorphic values (notably `Proxy @T` and point-free conversions).
+        //
+        // Keep the few contexts that independently prove execution: a monadic
+        // bind/statement executes an action and a view/pattern guard applies or
+        // evaluates its expression. A whole declaration RHS is handled by
+        // emitPointFreeReference in the Haskell extractor, which can use the
+        // declared result type to distinguish an effect alias from a value.
+        if (
+          !(
+            node.parent?.type === 'apply'
+            && sameSyntaxNode(getChildByField(node.parent, 'function'), node)
+          )
+        ) {
+          const typeArguments: SyntaxNode[] = [];
+          let typeAppliedCallee: SyntaxNode | null = node;
+          while (typeAppliedCallee?.type === 'apply') {
+            const argumentNode = getChildByField(typeAppliedCallee, 'argument');
+            if (argumentNode) typeArguments.unshift(argumentNode);
+            typeAppliedCallee = getChildByField(typeAppliedCallee, 'function');
+          }
+          const hasOnlyTypeArguments = typeArguments.length > 0
+            && typeArguments.every((argumentNode) => argumentNode.type === 'type_application');
+          if (hasOnlyTypeArguments) {
+            let contextNode: SyntaxNode = node;
+            while (contextNode.parent) {
+              const wrapper = contextNode.parent;
+              if (wrapper.type === 'parens' && wrapper.namedChildCount === 1) {
+                contextNode = wrapper;
+                continue;
+              }
+              if (
+                wrapper.type === 'signature'
+                && sameSyntaxNode(getChildByField(wrapper, 'expression'), contextNode)
+              ) {
+                contextNode = wrapper;
+                continue;
+              }
+              break;
+            }
+            const context = contextNode.parent;
+            const exactContextExpression = !!context
+              && sameSyntaxNode(getChildByField(context, 'expression'), contextNode);
+            const contextOperator = context?.type === 'infix'
+              ? getChildByField(context, 'operator')
+              : null;
+            const contextOperatorName = contextOperator
+              ? normalizeQualified(getNodeText(contextOperator, this.source).trim())
+              : '';
+            const appliedByKnownApplicationOperator = context?.type === 'infix' && (
+              ((contextOperatorName === '$' || contextOperatorName === '$!')
+                && sameSyntaxNode(getChildByField(context, 'left_operand'), contextNode))
+              || (contextOperatorName === '&'
+                && sameSyntaxNode(getChildByField(context, 'right_operand'), contextNode))
+            );
+            // Named bindings/equations have a `match` wrapper; their dedicated
+            // visitor already emitted the one canonical value/effect edge.
+            if (context?.type === 'match' && exactContextExpression) return;
+
+            const executesSpecializedValue = (
+              context?.type === 'exp'
+              && context.namedChildCount === 1
+              && sameSyntaxNode(context.namedChild(0), contextNode)
+            ) || exactContextExpression && (
+              context?.type === 'view_pattern'
+              || context?.type === 'pattern_guard'
+              || context?.type === 'generator'
+              || (context?.type === 'bind' && !!getChildByField(context, 'pattern'))
+            ) || appliedByKnownApplicationOperator;
+            if (executesSpecializedValue) emitCall(typeAppliedCallee);
+            else emitFunctionRef(typeAppliedCallee);
+            return;
+          }
+        }
+
         // A named expression passed as an application argument is a function
         // value candidate (`mapM_ handler xs`). The function-ref resolver is
         // intentionally strict (callables only; import/same-file/unique), so
@@ -3963,11 +4057,9 @@ export class TreeSitterExtractor {
           prefixCallee = getChildByField(prefixCallee, 'function');
         }
         const prefixReference = simpleReference(prefixCallee);
-        const prefixSeparator = prefixReference?.name.lastIndexOf('::') ?? -1;
-        const prefixBaseRaw = prefixReference
-          ? prefixReference.name.slice(prefixSeparator < 0 ? 0 : prefixSeparator + 2)
+        const prefixBase = prefixReference
+          ? haskellReferenceParts(prefixReference.name).member
           : '';
-        const prefixBase = prefixBaseRaw.replace(/^\((.*)\)$/, '$1');
         const actionArgument = ['>>', '*>', '<*', '<*>', '<**>', '<|>'].includes(prefixBase)
           || (['<$>', '<$', '=<<'].includes(prefixBase) && appliedArgumentCount === 1)
           || (['<&>', '$>', '>>='].includes(prefixBase) && appliedArgumentCount === 0);
@@ -5828,36 +5920,6 @@ export class TreeSitterExtractor {
               referenceKind: 'extends',
               line: target.startPosition.row + 1,
               column: target.startPosition.column,
-            });
-          }
-        }
-      }
-
-      // Haskell type-class superclass constraints: `class (Eq a, Show a) => Ord a where ...`
-      // The `class` node has a `context:` child of type `context`, whose own `context:`
-      // field is either a single `apply` (one constraint) or a `tuple` of `apply` nodes.
-      // Each apply's `constructor:` field is the superclass name. Emit an `extends`
-      // reference per superclass.
-      if (child.type === 'context') {
-        const inner = getChildByField(child, 'context');
-        const applies: SyntaxNode[] = [];
-        if (inner?.type === 'apply') {
-          applies.push(inner);
-        } else if (inner?.type === 'tuple') {
-          for (let j = 0; j < inner.namedChildCount; j++) {
-            const a = inner.namedChild(j);
-            if (a?.type === 'apply') applies.push(a);
-          }
-        }
-        for (const a of applies) {
-          const ctor = getChildByField(a, 'constructor');
-          if (ctor) {
-            this.unresolvedReferences.push({
-              fromNodeId: classId,
-              referenceName: getNodeText(ctor, this.source),
-              referenceKind: 'extends',
-              line: ctor.startPosition.row + 1,
-              column: ctor.startPosition.column,
             });
           }
         }

@@ -47,6 +47,7 @@ import {
   lastQualifierPart,
   matchesSymbol,
   findAllSymbols,
+  flowTokens,
   resolveNamedSymbolFlow,
 } from '../graph/named-symbol-flow';
 import { getUpdateNotice } from '../upgrade/update-check';
@@ -3317,7 +3318,6 @@ export class ToolHandler {
     // for the declaration-only penalty (CG-28). Populated in the token loop.
     const namedTypeFiles = new Set<string>();
     {
-      const FILE_EXT = /\.(?:java|kt|kts|ts|tsx|js|jsx|mjs|cjs|cs|py|go|rb|php|swift|rs|cpp|cc|cxx|c|h|hpp|scala|lua|dart|vue|svelte|astro|erl|hrl)$/i;
       const CALLABLE = new Set(['method', 'function', 'component', 'constructor']);
       // Variables/constants seed too: in Svelte/React a `$state` variable
       // (`chatAtBottom`, `feedAtBottom`) is exactly the kind of symbol an agent
@@ -3326,14 +3326,16 @@ export class ToolHandler {
       // below applies unchanged, so bare English words still can't seed a
       // same-named local. Callables keep priority via the body-size sort.
       const SEEDABLE = new Set([...CALLABLE, 'variable', 'constant']);
-      const isTestPath = (p: string) => /(^|\/)(tests?|specs?|__tests__|testdata|mocks?|fixtures?)\//i.test(p) || /\.(test|spec)\.[a-z]+$/i.test(p);
+      const isTestPath = (p: string) =>
+        /(^|\/)(tests?|specs?|__tests__|testdata|mocks?|fixtures?)\//i.test(p) ||
+        /\.(test|spec)\.[a-z]+$/i.test(p) ||
+        (/\.hs$/i.test(p) && isTestFile(p));
       const bodyLines = (n: Node) => Math.max(0, (n.endLine ?? n.startLine) - n.startLine);
       const callerCount = (n: Node) => { try { return cg.getCallers(n.id).length; } catch { return 0; } };
-      const tokens = [...new Set(
-        matchQuery.split(/[\s,()[\]]+/)
-          .map((t) => t.replace(FILE_EXT, '').trim())
-          .filter((t) => t.length >= 3 && /^[A-Za-z_$][\w$]*(?:(?:::|\.)[\w$]+)*$/.test(t))
-      )].slice(0, 16);
+      // Share the flow path's exact split/filter/dedupe/extension/cap rules.
+      // Keeping a second FILE_EXT here let newly supported languages drift:
+      // `.hs` normalized for flow identity but not for MCP named seeding.
+      const tokens = flowTokens(matchQuery);
       // PascalCase tokens in the query are type/file disambiguators — when the
       // agent writes "DataRequest task validate", the `task`/`validate` it wants
       // are DataRequest's, NOT the same-named overloads in Validation.swift /
@@ -3626,6 +3628,7 @@ export class ToolHandler {
         /(test|spec|tests)\.(java|kt|scala)$/.test(lp) ||
         /(tests?|spec)\.cs$/.test(lp) ||
         /tests?\.swift$/.test(lp) ||
+        (/\.hs$/i.test(p) && isTestFile(p)) ||
         /_test\.dart$/.test(lp) ||
         /\bicons?\b/.test(lp) ||
         /\bi18n\b/.test(lp)

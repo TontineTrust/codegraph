@@ -12,13 +12,14 @@ import {
   UnresolvedReference,
   NodeKind,
   EdgeKind,
+  ReferenceKind,
   Language,
   GraphStats,
   SearchOptions,
   SearchResult,
 } from '../types';
 import { safeJsonParse } from '../utils';
-import { kindBonus, nameMatchBonus, scorePathRelevance } from '../search/query-utils';
+import { isTestFile, kindBonus, nameMatchBonus, scorePathRelevance } from '../search/query-utils';
 import { parseQuery, boundedEditDistance } from '../search/query-parser';
 import { isGeneratedFile } from '../extraction/generated-detection';
 import { splitIdentifierSegments } from '../search/identifier-segments';
@@ -48,6 +49,7 @@ function isLowValueFile(filePath: string, generated?: ReadonlySet<string>): bool
     /(test|spec|tests)\.(java|kt|scala)$/.test(lp) ||
     /(tests?|spec)\.cs$/.test(lp) ||
     /tests?\.swift$/.test(lp) ||
+    (/\.hs$/i.test(filePath) && isTestFile(filePath)) ||
     /_test\.dart$/.test(lp) ||
     isGeneratedFile(filePath)
   );
@@ -136,6 +138,20 @@ interface UnresolvedRefRow {
   language: string;
   status: string;
   name_tail: string;
+}
+
+function rowToUnresolvedReference(row: UnresolvedRefRow): UnresolvedReference {
+  return {
+    fromNodeId: row.from_node_id,
+    referenceName: row.reference_name,
+    referenceKind: row.reference_kind as ReferenceKind,
+    line: row.line,
+    column: row.col,
+    candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
+    filePath: row.file_path,
+    language: row.language as Language,
+    rowId: row.id,
+  };
 }
 
 /**
@@ -1141,6 +1157,31 @@ export class QueryBuilder {
   getAllNodes(): Node[] {
     const rows = this.db.prepare('SELECT * FROM nodes').all() as NodeRow[];
     return rows.map(rowToNode);
+  }
+
+  /** Compact language-local lookups used by Haskell invalidation and dispatch guards. */
+  getNodeIdsByLanguage(language: Language): Set<string> {
+    const rows = this.db.prepare('SELECT id FROM nodes WHERE language = ?')
+      .all(language) as Array<{ id: string }>;
+    return new Set(rows.map((row) => row.id));
+  }
+
+  getNodeNamesByLanguage(language: Language): string[] {
+    return (this.db.prepare('SELECT DISTINCT name FROM nodes WHERE language = ?')
+      .all(language) as Array<{ name: string }>).map((row) => row.name);
+  }
+
+  getHaskellModuleNamesByFile(): Map<string, string[]> {
+    const rows = this.db.prepare(
+      "SELECT file_path, name FROM nodes WHERE language = 'haskell' AND kind = 'namespace'"
+    ).all() as Array<{ file_path: string; name: string }>;
+    const modules = new Map<string, string[]>();
+    for (const row of rows) {
+      const names = modules.get(row.file_path) ?? [];
+      names.push(row.name);
+      modules.set(row.file_path, names);
+    }
+    return modules;
   }
 
   /**
@@ -2495,17 +2536,7 @@ export class QueryBuilder {
       );
     }
     const rows = this.stmts.getUnresolvedInFile.all(filePath, limit) as UnresolvedRefRow[];
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -2524,17 +2555,7 @@ export class QueryBuilder {
       );
     }
     const rows = this.stmts.getUnresolvedFromNode.all(fromNodeId) as UnresolvedRefRow[];
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -2615,8 +2636,9 @@ export class QueryBuilder {
    */
   getCrossFileIncomingEdgesWithTarget(
     filePath: string
-  ): Array<Edge & { targetName: string; targetKind: NodeKind; sourceFilePath: string; sourceLanguage: Language }> {
+  ): Array<Edge & { targetName: string; targetKind: NodeKind; targetQualifiedName: string; sourceFilePath: string; sourceLanguage: Language }> {
     const sql = `SELECT e.*, tgt.name AS target_name, tgt.kind AS target_kind,
+        tgt.qualified_name AS target_qualified_name,
         src.file_path AS source_file_path, src.language AS source_language
       FROM edges e
       JOIN nodes tgt ON tgt.id = e.target
@@ -2625,12 +2647,13 @@ export class QueryBuilder {
         AND e.kind != 'contains'
         AND src.file_path != ?`;
     const rows = this.db.prepare(sql).all(filePath, filePath) as Array<
-      EdgeRow & { target_name: string; target_kind: NodeKind; source_file_path: string; source_language: Language }
+      EdgeRow & { target_name: string; target_kind: NodeKind; target_qualified_name: string; source_file_path: string; source_language: Language }
     >;
     return rows.map(row => ({
       ...rowToEdge(row),
       targetName: row.target_name,
       targetKind: row.target_kind,
+      targetQualifiedName: row.target_qualified_name,
       sourceFilePath: row.source_file_path,
       sourceLanguage: row.source_language,
     }));
@@ -2990,17 +3013,7 @@ export class QueryBuilder {
       );
     }
     const rows = this.stmts.getUnresolvedByName.all(name) as UnresolvedRefRow[];
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -3008,17 +3021,14 @@ export class QueryBuilder {
    */
   getUnresolvedReferences(): UnresolvedReference[] {
     const rows = this.db.prepare('SELECT * FROM unresolved_refs').all() as UnresolvedRefRow[];
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
+  }
+
+  getUnresolvedReferencesByLanguage(language: Language): UnresolvedReference[] {
+    const rows = this.db.prepare(
+      'SELECT * FROM unresolved_refs WHERE language = ?'
+    ).all(language) as UnresolvedRefRow[];
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -3056,17 +3066,7 @@ export class QueryBuilder {
       );
     }
     const rows = this.stmts.getUnresolvedBatch.all(limit, offset) as UnresolvedRefRow[];
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -3084,17 +3084,7 @@ export class QueryBuilder {
       );
     }
     const rows = this.stmts.getUnresolvedBatchAfter.all(afterRowId, limit) as UnresolvedRefRow[];
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -3158,17 +3148,7 @@ export class QueryBuilder {
       for (const row of chunkRows) rows.push(row);
     }
 
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -3343,17 +3323,7 @@ export class QueryBuilder {
       for (const row of chunkRows) rows.push(row);
     }
 
-    return rows.map((row) => ({
-      fromNodeId: row.from_node_id,
-      referenceName: row.reference_name,
-      referenceKind: row.reference_kind as EdgeKind,
-      line: row.line,
-      column: row.col,
-      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
-      filePath: row.file_path,
-      language: row.language as Language,
-      rowId: row.id,
-    }));
+    return rows.map(rowToUnresolvedReference);
   }
 
   /**
@@ -3385,6 +3355,9 @@ export class QueryBuilder {
     perNameCeiling: number = 500
   ): Array<Edge & { edgeId: number; sourceFilePath: string; sourceLanguage: Language }> {
     if (names.length === 0) return [];
+    const reconstructible = `
+      AND json_type(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END, '$.refName') = 'text'
+      AND length(json_extract(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END, '$.refName')) > 0`;
 
     // Pass 1: per-name edge counts, chunked under the SQLite parameter limit.
     const keep: string[] = [];
@@ -3398,6 +3371,7 @@ export class QueryBuilder {
              JOIN nodes tgt ON tgt.id = e.target
             WHERE tgt.name IN (${placeholders})
               AND (e.provenance IS NULL OR e.provenance != 'heuristic')
+              ${reconstructible}
             GROUP BY tgt.name`
         )
         .all(...chunk) as Array<{ name: string; count: number }>;
@@ -3420,7 +3394,8 @@ export class QueryBuilder {
              JOIN nodes tgt ON tgt.id = e.target
              JOIN nodes src ON src.id = e.source
             WHERE tgt.name IN (${placeholders})
-              AND (e.provenance IS NULL OR e.provenance != 'heuristic')`
+              AND (e.provenance IS NULL OR e.provenance != 'heuristic')
+              ${reconstructible}`
         )
         .all(...chunk) as Array<EdgeRow & { source_file_path: string; source_language: Language }>;
       for (const row of rows) {

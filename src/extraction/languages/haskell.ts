@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getChildByField, getNodeText, getPrecedingDocstring } from '../tree-sitter-helpers';
 import type { ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
+import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX } from '../../types';
 
 // tree-sitter-haskell emits signatures, default signatures, and equations as
 // separate syntax nodes. Keep them under one graph node per lexical declaration.
@@ -16,6 +17,7 @@ type ExtractedNode = NonNullable<ReturnType<ExtractorContext['createNode']>>;
 interface HaskellExtractionState {
   declarationGroups: Map<string, ExtractedNode>;
   moduleExports?: HaskellModuleExports | null;
+  localTypeNames?: Set<string>;
   lexicalBindings: Map<string, Map<string, LexicalBinding[]>>;
   signatureIndexes: Map<string, Map<string, SyntaxNode[]>>;
   scopeNodes: Map<string, ExtractedNode | undefined>;
@@ -60,6 +62,17 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+// Haskell identifiers are Unicode-aware. Centralize their lexical shape so
+// accented/Greek declarations, exports, and qualified references are all
+// classified the same way instead of being mistaken for symbolic operators.
+const HASKELL_ID_CONTINUE_SOURCE = String.raw`[\p{L}\p{Mn}\p{N}_']`;
+const HASKELL_IDENTIFIER_SOURCE = String.raw`(?:[\p{Ll}\p{Lo}\p{Lu}\p{Lt}_]${HASKELL_ID_CONTINUE_SOURCE}*#*)`;
+const HASKELL_CONID_SOURCE = String.raw`(?:[\p{Lu}\p{Lt}]${HASKELL_ID_CONTINUE_SOURCE}*)`;
+const HASKELL_MODULE_NAME_SOURCE = String.raw`${HASKELL_CONID_SOURCE}(?:\.${HASKELL_CONID_SOURCE})*`;
+const HASKELL_IDENTIFIER_RE = new RegExp(`^${HASKELL_IDENTIFIER_SOURCE}$`, 'u');
+const HASKELL_CONID_START_RE = /^[\p{Lu}\p{Lt}]/u;
+const HASKELL_VARID_START_RE = /^[\p{Ll}\p{Lo}_]/u;
+
 function firstDescendant(node: SyntaxNode, types: ReadonlySet<string>): SyntaxNode | null {
   if (types.has(node.type)) return node;
   for (let i = 0; i < node.namedChildCount; i++) {
@@ -72,10 +85,86 @@ function firstDescendant(node: SyntaxNode, types: ReadonlySet<string>): SyntaxNo
 }
 
 interface HaskellModuleExports {
-  direct: Set<string>;
+  /** Direct type/class exports (`T`, `type T`, and the parent in `T(..)`). */
+  directTypes: Set<string>;
+  /** Direct value exports (`foo`, `(+)`, and `pattern P`). */
+  directValues: Set<string>;
   allChildren: Set<string>;
-  children: Map<string, Set<string>>;
+  /** Per-parent grouped children, retaining their type/value namespace. */
+  children: Map<string, Map<string, Set<HaskellNamespace>>>;
   exportsSelf: boolean;
+}
+
+type HaskellNamespace = 'type' | 'value';
+
+interface HaskellChildExport {
+  name: string;
+  namespaces: Set<HaskellNamespace>;
+}
+
+/**
+ * Read one grouped export list from tree-sitter's concrete children. The
+ * grammar currently recovers `type (+)` / `pattern P` through ERROR nodes, so
+ * relying only on named fields loses the explicit namespace. Splitting on the
+ * concrete comma tokens keeps each recovery fragment together without having
+ * to reparse the surrounding module header.
+ */
+function groupedChildExports(children: SyntaxNode, source: string): HaskellChildExport[] {
+  const segments: SyntaxNode[][] = [];
+  let segment: SyntaxNode[] = [];
+  for (const child of children.children) {
+    if (child.type === ',') {
+      if (segment.length > 0) segments.push(segment);
+      segment = [];
+    } else if (child.type !== '(' && child.type !== ')') {
+      segment.push(child);
+    }
+  }
+  if (segment.length > 0) segments.push(segment);
+
+  const exportNameNodes = new Set(['variable', 'constructor', 'name', 'operator', 'constructor_operator']);
+  const descendantTexts = (nodes: SyntaxNode[]): string[] => {
+    const texts: string[] = [];
+    const stack = [...nodes];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (current.type === 'associated_type') texts.push('type');
+      if (exportNameNodes.has(current.type)
+        || (current.type === 'ERROR' && /^(?:type|pattern)$/.test(getNodeText(current, source).trim()))) {
+        const text = getNodeText(current, source).trim();
+        if (text) texts.push(text);
+      }
+      stack.push(...current.namedChildren);
+    }
+    return texts;
+  };
+
+  const exports: HaskellChildExport[] = [];
+  for (const nodes of segments) {
+    const texts = descendantTexts(nodes);
+    const explicitType = texts.includes('type');
+    const explicitPattern = texts.includes('pattern');
+    const rawName = [...texts].reverse().find((text) => text !== 'type' && text !== 'pattern') ?? '';
+    const name = rawName.startsWith('(') && rawName.endsWith(')')
+      ? rawName.slice(1, -1).trim()
+      : rawName;
+    if (!name || name === '..') continue;
+
+    const namespaces = new Set<HaskellNamespace>();
+    if (explicitType) namespaces.add('type');
+    else if (explicitPattern || HASKELL_VARID_START_RE.test(name)
+      || (!name.startsWith(':') && !HASKELL_IDENTIFIER_RE.test(name))) {
+      namespaces.add('value');
+    } else {
+      // Uppercase names and constructor operators are resolved relative to
+      // their parent: they can denote either a data constructor/pattern or an
+      // associated type. Preserve both until node-kind filtering has evidence.
+      namespaces.add('type');
+      namespaces.add('value');
+    }
+    exports.push({ name, namespaces });
+  }
+  return exports;
 }
 
 function syntaxRoot(node: SyntaxNode): SyntaxNode {
@@ -93,6 +182,23 @@ function parenthesizedOperator(name: string): string {
   const compact = name.replace(/\s+/g, '').trim();
   if (!compact) return compact;
   return compact.startsWith('(') && compact.endsWith(')') ? compact : `(${compact})`;
+}
+
+/** Canonical node name for the operator field of an infix declaration. */
+function declaredInfixName(text: string): string {
+  const compact = text.replace(/\s+/g, '').trim();
+  if (!compact) return compact;
+  // Backticks make an ordinary identifier infix; they do not turn its name
+  // into a symbolic operator. Keeping `foo` bare is what lets its signature,
+  // export entry, prefix calls, and backtick calls all meet on one symbol. The
+  // delimiters themselves prove the payload is an identifier, including a
+  // Unicode varid that an ASCII character-class cannot recognize.
+  if (compact.startsWith('`') && compact.endsWith('`') && compact.length > 2) {
+    return compact.slice(1, -1);
+  }
+  return HASKELL_IDENTIFIER_RE.test(compact)
+    ? compact
+    : parenthesizedOperator(compact);
 }
 
 function getHaskellPrecedingDocstring(node: SyntaxNode, source: string): string | undefined {
@@ -117,12 +223,36 @@ function normalizeReferenceText(text: string): string {
   // unqualified operator declaration keeps its conventional `(+)` node name.
   if (compact.startsWith('(') && compact.endsWith(')')) {
     const inner = compact.slice(1, -1);
-    if (/^(?:[A-Z][A-Za-z0-9_']*\.)+/.test(inner)) compact = inner;
+    if (new RegExp(`^(?:${HASKELL_CONID_SOURCE}\\.)+`, 'u').test(inner)) compact = inner;
   }
-  const qualified = compact.match(/^((?:[A-Z][A-Za-z0-9_']*\.)+)(.+)$/);
-  return qualified
-    ? `${qualified[1]!.slice(0, -1)}::${qualified[2]}`
-    : compact;
+  const qualified = compact.match(new RegExp(
+    `^((?:${HASKELL_CONID_SOURCE}\\.)+)(.+)$`,
+    'u',
+  ));
+  if (!qualified) return compact;
+  const member = qualified[2]!;
+  return `${qualified[1]!.slice(0, -1)}::${
+    HASKELL_IDENTIFIER_RE.test(member) ? member : parenthesizedOperator(member)
+  }`;
+}
+
+/** Split a normalized reference at its module delimiter, never inside an op. */
+function haskellReferenceParts(name: string): { qualifier: string | null; member: string } {
+  const qualified = name.match(new RegExp(
+    `^(${HASKELL_MODULE_NAME_SOURCE})::(.+)$`,
+    'u',
+  ));
+  const rawMember = qualified?.[2] ?? name;
+  const member = rawMember.startsWith('(') && rawMember.endsWith(')')
+    ? rawMember.slice(1, -1)
+    : rawMember;
+  return { qualifier: qualified?.[1] ?? null, member };
+}
+
+/** Canonical spelling for an unqualified term in Haskell's lexical scope. */
+function lexicalBindingName(name: string): string {
+  const parts = haskellReferenceParts(name);
+  return parts.qualifier === null ? parts.member : name;
 }
 
 interface HaskellDeclarationHead {
@@ -154,7 +284,7 @@ function declarationHead(node: SyntaxNode, source: string): HaskellDeclarationHe
   const operator = infix ? getChildByField(infix, 'operator') : null;
   if (!infix || !operator) return null;
   return {
-    baseName: parenthesizedOperator(getNodeText(operator, source)),
+    baseName: declaredInfixName(getNodeText(operator, source)),
     displayName: collapseWhitespace(getNodeText(infix, source)),
     nameNode: operator,
     patterns: infix,
@@ -171,7 +301,8 @@ function parseModuleExports(node: SyntaxNode, source: string): HaskellModuleExpo
   if (!exportsNode) return null; // No list means Haskell's normal "export all".
 
   const result: HaskellModuleExports = {
-    direct: new Set(),
+    directTypes: new Set(),
+    directValues: new Set(),
     allChildren: new Set(),
     children: new Map(),
     exportsSelf: false,
@@ -190,11 +321,41 @@ function parseModuleExports(node: SyntaxNode, source: string): HaskellModuleExpo
     if (entry.type !== 'export') continue;
     const value = getChildByField(entry, 'variable')
       ?? getChildByField(entry, 'type')
+      ?? getChildByField(entry, 'operator')
       ?? firstDescendant(entry, new Set(['variable', 'constructor', 'name', 'prefix_id']));
     if (!value) continue;
-    const name = normalizedExportName(value, source);
+    const rawName = normalizedExportName(value, source);
+    let qualifiedValue = value;
+    while (qualifiedValue.type === 'prefix_id' && qualifiedValue.namedChildCount === 1) {
+      qualifiedValue = qualifiedValue.namedChild(0)!;
+    }
+    const qualifier = qualifiedValue.type === 'qualified'
+      ? getChildByField(qualifiedValue, 'module')
+      : null;
+    const qualifiedName = qualifiedValue.type === 'qualified'
+      ? getChildByField(qualifiedValue, 'id')
+      : null;
+    const name = qualifier && qualifiedName
+      && getNodeText(qualifier, source).replace(/\s+/g, '').replace(/\.$/, '') === ownModuleName
+      ? normalizedExportName(qualifiedName, source)
+      : rawName;
     if (!name) continue;
-    result.direct.add(name);
+    const explicitNamespace = getChildByField(entry, 'namespace');
+    const namespaceText = explicitNamespace
+      ? getNodeText(explicitNamespace, source).trim()
+      : '';
+    // The AST's field distinguishes ordinary lowercase/value operators from
+    // uppercase type names. `pattern` deliberately switches an uppercase
+    // constructor/pattern synonym back to the value namespace.
+    const namespace: HaskellNamespace = namespaceText === 'pattern'
+      ? 'value'
+      : namespaceText === 'type'
+        ? 'type'
+        : getChildByField(entry, 'variable') !== null
+          || getChildByField(entry, 'operator') !== null
+          ? 'value'
+          : 'type';
+    (namespace === 'value' ? result.directValues : result.directTypes).add(name);
 
     const children = getChildByField(entry, 'children');
     if (!children) continue;
@@ -202,16 +363,11 @@ function parseModuleExports(node: SyntaxNode, source: string): HaskellModuleExpo
       result.allChildren.add(name);
       continue;
     }
-    const names = new Set<string>();
-    const stack = [...children.namedChildren];
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      if (['variable', 'constructor', 'name', 'prefix_id'].includes(current.type)) {
-        const childName = normalizedExportName(current, source);
-        if (childName) names.add(childName);
-      } else {
-        stack.push(...current.namedChildren);
-      }
+    const names = new Map<string, Set<HaskellNamespace>>();
+    for (const child of groupedChildExports(children, source)) {
+      const namespaces = names.get(child.name) ?? new Set<HaskellNamespace>();
+      for (const namespace of child.namespaces) namespaces.add(namespace);
+      names.set(child.name, namespaces);
     }
     result.children.set(name, names);
   }
@@ -235,6 +391,7 @@ function isNameExported(
   name: string,
   stateOwner: object,
   parentName?: string,
+  namespace: HaskellNamespace = 'value',
 ): boolean {
   const exports = moduleExports(node, source, stateOwner);
   if (!exports || exports.exportsSelf) return true;
@@ -242,10 +399,13 @@ function isNameExported(
   const canonicalParent = parentName?.startsWith('(') && parentName.endsWith(')')
     ? parentName.slice(1, -1)
     : parentName;
-  if (!canonicalParent) return exports.direct.has(canonical);
-  return exports.direct.has(canonical)
+  const directlyExported = namespace === 'value'
+    ? exports.directValues.has(canonical)
+    : exports.directTypes.has(canonical);
+  if (!canonicalParent) return directlyExported;
+  return directlyExported
     || exports.allChildren.has(canonicalParent)
-    || exports.children.get(canonicalParent)?.has(canonical)
+    || exports.children.get(canonicalParent)?.get(canonical)?.has(namespace)
     || false;
 }
 
@@ -260,7 +420,7 @@ function bundledExportParents(
   if (!exports) return [];
   const canonical = name.startsWith('(') && name.endsWith(')') ? name.slice(1, -1) : name;
   return [...exports.children]
-    .filter(([, children]) => children.has(canonical))
+    .filter(([, children]) => children.get(canonical)?.has('value') === true)
     .map(([parent]) => parent);
 }
 
@@ -292,7 +452,9 @@ function signatureIndex(
       ? child
       : child.type === 'default_signature'
         ? child.namedChildren.find((candidate) => candidate.type === 'signature') ?? null
-        : null;
+        : child.type === 'foreign_export'
+          ? foreignSignature(child)
+          : null;
     if (!signature) continue;
     for (const name of signatureNames(signature, source)) {
       const entries = index.get(name) ?? [];
@@ -304,7 +466,7 @@ function signatureIndex(
   return index;
 }
 
-function precedingSignature(
+function associatedSignature(
   node: SyntaxNode,
   name: string,
   source: string,
@@ -317,7 +479,27 @@ function precedingSignature(
   for (let i = candidates.length - 1; i >= 0; i--) {
     if (candidates[i]!.startIndex < node.startIndex) return candidates[i]!;
   }
-  return null;
+  // Haskell declaration order is semantically irrelevant, and GHC accepts a
+  // signature after its binding (`action = target; action :: IO ()`). Prefer
+  // the conventional preceding declaration, but fall back to the first later
+  // signature in this exact declaration container.
+  return candidates.find((candidate) => candidate.startIndex > node.endIndex) ?? null;
+}
+
+function bindingDocstring(
+  node: SyntaxNode,
+  signatureNode: SyntaxNode | null,
+  source: string,
+): string | undefined {
+  if (signatureNode && signatureNode.startIndex < node.startIndex) {
+    return getHaskellPrecedingDocstring(signatureNode, source)
+      ?? getHaskellPrecedingDocstring(node, source);
+  }
+  // A trailing signature must not move the doc anchor past a Haddock comment
+  // attached to the binding itself. Still accept a comment on that signature
+  // as a fallback for the less common reverse-declaration style.
+  return getHaskellPrecedingDocstring(node, source)
+    ?? (signatureNode ? getHaskellPrecedingDocstring(signatureNode, source) : undefined);
 }
 
 function patternSynonymNameNode(node: SyntaxNode): SyntaxNode | null {
@@ -337,10 +519,7 @@ function patternSynonymNameNode(node: SyntaxNode): SyntaxNode | null {
 function patternSynonymName(node: SyntaxNode, source: string): string {
   const nameNode = patternSynonymNameNode(node);
   if (!nameNode) return '';
-  const rawName = normalizedExportName(nameNode, source);
-  return nameNode.type === 'constructor_operator' || nameNode.type === 'prefix_id'
-    ? parenthesizedOperator(rawName)
-    : rawName;
+  return declaredInfixName(normalizedExportName(nameNode, source));
 }
 
 function patternSignatureIndex(
@@ -367,12 +546,7 @@ function patternSignatureIndex(
     for (const nameNode of nameNodes) {
       const rawName = normalizedExportName(nameNode, source);
       if (!rawName) continue;
-      const name = nameNode.type === 'constructor_operator'
-        || nameNode.type === 'operator'
-        || nameNode.type === 'prefix_id'
-        || rawName.startsWith(':')
-        ? parenthesizedOperator(rawName)
-        : rawName;
+      const name = declaredInfixName(rawName);
       const entries = index.get(name) ?? [];
       // Retain the wrapper: the nested `signature` span omits the `pattern`
       // keyword and a preceding Haddock comment belongs to this declaration.
@@ -384,7 +558,7 @@ function patternSignatureIndex(
   return index;
 }
 
-function precedingPatternSignature(
+function associatedPatternSignature(
   node: SyntaxNode,
   name: string,
   source: string,
@@ -397,7 +571,12 @@ function precedingPatternSignature(
   for (let i = candidates.length - 1; i >= 0; i--) {
     if (candidates[i]!.startIndex < node.startIndex) return candidates[i]!;
   }
-  return null;
+  // Pattern-synonym declarations follow the same order-independent rule as
+  // ordinary signatures: GHC accepts the equation before its standalone
+  // `pattern P :: ...` declaration. Keep the conventional preceding match as
+  // the first choice, then associate the first later declaration in this
+  // exact lexical container.
+  return candidates.find((candidate) => candidate.startIndex > node.endIndex) ?? null;
 }
 
 function declarationGroupKey(
@@ -485,12 +664,296 @@ function signatureDeclaresFunction(signatureNode: SyntaxNode): boolean {
   return type?.type === 'function';
 }
 
-function isFunctionBinding(node: SyntaxNode, signatureNode: SyntaxNode | null, source: string): boolean {
-  if (signatureNode && signatureDeclaresFunction(signatureNode)) return true;
+// A transformer name is not enough to prove an effect: Haskell modules may
+// declare the same nominal type. Require its monad-carrier argument to be a
+// type variable corroborated by the signature context as well, then defer the
+// nominal head's origin to import/re-export resolution.
+const TRANSFORMER_CARRIER_ARGUMENT = new Map<string, number>([
+  ['ExceptT', 1],
+  ['ReaderT', 1],
+  ['StateT', 1],
+  ['WriterT', 1],
+  ['RWST', 3],
+]);
+
+const PRIMITIVE_EFFECT_HEADS = new Set(['IO', 'ST', 'STM']);
+
+interface ExecutableResultProof {
+  /** Nominal heads whose canonical origins must all be checked by the resolver. */
+  importedEffectHeads: string[];
+}
+
+function isMonadConstraintHead(name: string): boolean {
+  // Some project-level effect capabilities do not follow the Monad* naming
+  // convention. Keep the transaction capability validated on real code; the
+  // carrier-position check below still prevents unrelated mentions of `m`
+  // from promoting a binding.
+  return name === 'Monad' || name.startsWith('Monad') || name === 'PrimMonad' || name === 'RunTx';
+}
+
+function appliedTypeHead(type: SyntaxNode | null): SyntaxNode | null {
+  let current = type;
+  while (current?.type === 'parens') {
+    current = getChildByField(current, 'type')
+      ?? (current.namedChildCount === 1 ? current.namedChild(0) : null);
+  }
+  while (current?.type === 'apply') {
+    current = getChildByField(current, 'constructor') ?? current.namedChild(0);
+    while (current?.type === 'parens') {
+      current = getChildByField(current, 'type')
+        ?? (current.namedChildCount === 1 ? current.namedChild(0) : null);
+    }
+  }
+  return current;
+}
+
+function appliedTypeParts(type: SyntaxNode | null): {
+  head: SyntaxNode | null;
+  typeArguments: SyntaxNode[];
+} {
+  let current = type;
+  while (current?.type === 'parens') {
+    current = getChildByField(current, 'type')
+      ?? (current.namedChildCount === 1 ? current.namedChild(0) : null);
+  }
+  const typeArguments: SyntaxNode[] = [];
+  while (current?.type === 'apply') {
+    const argument = getChildByField(current, 'argument')
+      ?? (current.namedChildCount > 1 ? current.namedChild(current.namedChildCount - 1) : null);
+    if (argument) typeArguments.unshift(argument);
+    current = getChildByField(current, 'constructor') ?? current.namedChild(0);
+    while (current?.type === 'parens') {
+      current = getChildByField(current, 'type')
+        ?? (current.namedChildCount === 1 ? current.namedChild(0) : null);
+    }
+  }
+  return { head: current, typeArguments };
+}
+
+const LOCAL_TYPE_DECLARATION_NODES = new Set([
+  'class', 'data_type', 'newtype', 'type_synomym', 'data_family', 'type_family',
+]);
+
+function moduleLocalTypeNames(
+  node: SyntaxNode,
+  source: string,
+  stateOwner: object,
+): Set<string> {
+  const state = extractionState(stateOwner);
+  if (state.localTypeNames) return state.localTypeNames;
+  const names = new Set<string>();
+  const stack = [syntaxRoot(node)];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (LOCAL_TYPE_DECLARATION_NODES.has(current.type)) {
+      const head = declarationHead(current, source);
+      if (head?.baseName) names.add(head.baseName);
+    }
+    stack.push(...current.namedChildren);
+  }
+  state.localTypeNames = names;
+  return names;
+}
+
+function primitiveEffectProof(
+  normalized: string,
+  leaf: string,
+  localTypeNames: ReadonlySet<string>,
+): ExecutableResultProof | null {
+  if (!PRIMITIVE_EFFECT_HEADS.has(leaf)) return null;
+  // Qualified IO-like names are not accepted. Exact IO still goes through the
+  // resolver so `Prelude hiding (IO)` plus a custom import cannot fabricate a
+  // call edge.
+  if (leaf === 'IO') {
+    return normalized === leaf && !localTypeNames.has(leaf)
+      ? { importedEffectHeads: [normalized] }
+      : null;
+  }
+  if (normalized === leaf && localTypeNames.has(leaf)) return null;
+  return { importedEffectHeads: [normalized] };
+}
+
+function isTransformerCandidate(
+  normalized: string,
+  leaf: string,
+  localTypeNames: ReadonlySet<string>,
+): boolean {
+  if (!TRANSFORMER_CARRIER_ARGUMENT.has(leaf)) return false;
+  if (normalized === leaf) return !localTypeNames.has(leaf);
+  // A qualifier may be canonical, an alias for a canonical module, or custom.
+  // The persisted marker lets import resolution decide without guessing.
+  return true;
+}
+
+function monadicConstraintUsesVariable(
+  context: SyntaxNode | null,
+  variable: string,
+  source: string,
+): boolean {
+  if (!context) return false;
+  const stack = [context];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.type === 'parens' || current.type === 'tuple') {
+      stack.push(...current.namedChildren);
+      continue;
+    }
+    if (current.type === 'forall' || current.type === 'context') {
+      const nested = getChildByField(current, 'context')
+        ?? getChildByField(current, 'constraint')
+        ?? getChildByField(current, 'type');
+      if (nested) stack.push(nested);
+      continue;
+    }
+    if (current.type === 'apply') {
+      const head = appliedTypeHead(current);
+      const normalized = head ? normalizeReferenceText(getNodeText(head, source)) : '';
+      const leaf = haskellReferenceParts(normalized).member;
+      let carrier = getChildByField(current, 'argument');
+      while (carrier?.type === 'parens' && carrier.namedChildCount === 1) {
+        carrier = carrier.namedChild(0);
+      }
+      // MTL-style classes put the monad carrier last (`MonadReader env m`,
+      // `MonadError err m`). Requiring that position avoids mistaking an
+      // environment/state parameter mentioned by the same constraint for the
+      // executable result constructor.
+      if (isMonadConstraintHead(leaf)
+        && carrier?.type === 'variable'
+        && getNodeText(carrier, source).trim() === variable) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * A no-argument Haskell binding can still be an executable computation. Keep
+ * the heuristic intentionally type-directed: concrete primitive effects, or a
+ * result constructor variable proven monadic by the signature context. This
+ * avoids turning ordinary applied values (`Maybe Int`, `Functor f => f Int`)
+ * into functions merely because their RHS happens to contain an application.
+ */
+function executableResultProof(
+  signatureNode: SyntaxNode,
+  source: string,
+  stateOwner: object,
+): ExecutableResultProof | null {
+  let type = getChildByField(signatureNode, 'type');
+  let context: SyntaxNode | null = null;
+  while (type && (type.type === 'forall' || type.type === 'context' || type.type === 'parens')) {
+    if (type.type === 'context') context = getChildByField(type, 'context');
+    type = getChildByField(type, 'type') ?? (type.namedChildCount === 1 ? type.namedChild(0) : null);
+  }
+  // For a binding with parameters, only the terminal result tells us whether
+  // returning a whole-RHS action invokes a computation. In particular,
+  // `Bool -> (Int -> Int)` and `Bool -> Int` are ordinary value/function
+  // results and must not turn `choose _ = callback` / `foo _ = answer` into
+  // call edges.
+  while (type?.type === 'function') {
+    type = getChildByField(type, 'result')
+      ?? (type.namedChildCount > 0 ? type.namedChild(type.namedChildCount - 1) : null);
+    while (type?.type === 'parens') {
+      type = getChildByField(type, 'type')
+        ?? (type.namedChildCount === 1 ? type.namedChild(0) : null);
+    }
+  }
+  const { head, typeArguments } = appliedTypeParts(type);
+  if (!head) return null;
+  const normalized = normalizeReferenceText(getNodeText(head, source));
+  const leaf = haskellReferenceParts(normalized).member;
+  const localTypeNames = moduleLocalTypeNames(signatureNode, source, stateOwner);
+  const primitive = primitiveEffectProof(normalized, leaf, localTypeNames);
+  if (primitive) return primitive;
+  const carrierIndex = TRANSFORMER_CARRIER_ARGUMENT.get(leaf);
+  if (carrierIndex !== undefined) {
+    if (!isTransformerCandidate(normalized, leaf, localTypeNames)) return null;
+    let carrier = typeArguments[carrierIndex] ?? null;
+    while (carrier?.type === 'parens' && carrier.namedChildCount === 1) {
+      carrier = carrier.namedChild(0);
+    }
+    if (!carrier) return null;
+    if (carrier.type === 'variable') {
+      return monadicConstraintUsesVariable(
+        context,
+        getNodeText(carrier, source).trim(),
+        source,
+      ) ? { importedEffectHeads: [normalized] } : null;
+    }
+    const carrierHead = appliedTypeHead(carrier);
+    if (!carrierHead) return null;
+    const carrierName = normalizeReferenceText(getNodeText(carrierHead, source));
+    const carrierLeaf = haskellReferenceParts(carrierName).member;
+    // A concrete carrier must itself be unambiguously executable. IO is the
+    // only such carrier accepted here, and both nominal origins are persisted:
+    // proving only the outer transformer would let a project-defined pure IO
+    // type fabricate a runtime call edge.
+    const carrierProof = primitiveEffectProof(carrierName, carrierLeaf, localTypeNames);
+    return carrierProof && carrierName === 'IO'
+      ? { importedEffectHeads: [normalized, ...carrierProof.importedEffectHeads] }
+      : null;
+  }
+  return head.type === 'variable' && monadicConstraintUsesVariable(context, leaf, source)
+    // We have no sound canonical-origin proof for arbitrary capability class
+    // names here. Persist the result variable so resolution fails closed to a
+    // `references` edge for a point-free alias.
+    ? { importedEffectHeads: [normalized] }
+    : null;
+}
+
+function signatureDeclaresExecutableResult(
+  signatureNode: SyntaxNode,
+  source: string,
+  stateOwner: object,
+): boolean {
+  return executableResultProof(signatureNode, source, stateOwner) !== null;
+}
+
+function doBlockProvesAction(node: SyntaxNode): boolean {
+  const statements = node.childrenForFieldName('statement');
+  // A direct `<-` bind necessarily executes an action. Otherwise require an
+  // intermediate executable statement: the final expression alone may be a
+  // pure value wrapped in `do` merely for layout, and `let` is not an action.
+  if (statements.some((statement) => statement.type === 'bind')) return true;
+  const executable = statements.filter((statement) => statement.type !== 'let');
+  return executable.length > 1;
+}
+
+function isTopLevelMainBinding(node: SyntaxNode, source: string): boolean {
+  const name = getChildByField(node, 'name');
+  return node.type === 'bind'
+    && name !== null
+    && getNodeText(name, source).trim() === 'main'
+    && node.parent?.type === 'declarations'
+    && node.parent.parent?.type === 'haskell';
+}
+
+function isFunctionBinding(
+  node: SyntaxNode,
+  signatureNode: SyntaxNode | null,
+  source: string,
+  stateOwner: object,
+): boolean {
+  if (signatureNode) {
+    if (signatureDeclaresFunction(signatureNode)
+      || signatureDeclaresExecutableResult(signatureNode, source, stateOwner)) return true;
+  }
+  // In an executable Haskell target the top-level `main` binding is the action
+  // GHC invokes, even when users omit its conventional `IO` signature. Keep an
+  // explicit non-effect signature authoritative, and never apply this shortcut
+  // to a local binding that merely shares the name.
+  if (signatureNode === null && isTopLevelMainBinding(node, source)) return true;
   const match = getChildByField(node, 'match');
   let expression = match ? getChildByField(match, 'expression') : null;
   while (expression?.type === 'parens' && expression.namedChildCount === 1) {
     expression = expression.namedChild(0);
+  }
+  if (expression?.type === 'do') {
+    // For an untyped binding, a direct bind or an intermediate non-let
+    // statement is the best available evidence of sequencing. An explicit
+    // signature is stronger evidence and cannot be overridden here: even
+    // `Maybe` and user-defined applicatives can use multi-statement `do`.
+    return signatureNode === null && doBlockProvesAction(expression);
   }
   if (
     expression?.type === 'lambda'
@@ -518,22 +981,36 @@ const HOF_NAMES = new Set([
   'zipWithM_', 'iterate', 'unfoldr', 'until',
 ]);
 
-function patternContainsName(pattern: SyntaxNode | null, name: string, source: string): boolean {
-  return collectPatternNames(pattern, source).includes(name);
-}
-
 function nodeContains(container: SyntaxNode | null, node: SyntaxNode): boolean {
   return !!container
     && node.startIndex >= container.startIndex
     && node.endIndex <= container.endIndex;
 }
 
-function collectPatternNames(pattern: SyntaxNode | null, source: string): string[] {
+interface HaskellPatternBinding {
+  name: string;
+  node: SyntaxNode;
+}
+
+function collectPatternBindings(pattern: SyntaxNode | null, source: string): HaskellPatternBinding[] {
   if (!pattern) return [];
-  const names: string[] = [];
+  const bindings: HaskellPatternBinding[] = [];
   const stack = [pattern];
   while (stack.length > 0) {
     const current = stack.pop()!;
+    if (current.type === 'type_application' || current.type === 'type_binder') {
+      // Visible type arguments inside a pattern (`Just @kind value`) inhabit
+      // the type namespace; their lower-case variables are not term binders.
+      continue;
+    }
+    if (current.type === 'signature') {
+      // In `(value :: typeVariable)`, only the annotated term/pattern can
+      // introduce a runtime binding. Descending through the type would make a
+      // scoped type variable shadow an unrelated term with the same spelling.
+      const expression = getChildByField(current, 'expression');
+      if (expression) stack.push(expression);
+      continue;
+    }
     if (current.type === 'view_pattern') {
       // The expression is executed; only the RHS pattern introduces names.
       const nestedPattern = getChildByField(current, 'pattern');
@@ -551,19 +1028,54 @@ function collectPatternNames(pattern: SyntaxNode | null, source: string): string
         const variable = field ? firstDescendant(field, new Set(['variable'])) : null;
         if (variable) {
           const name = getNodeText(variable, source).trim();
-          if (name) names.push(name);
+          if (name) bindings.push({ name, node: variable });
         }
+      }
+      continue;
+    }
+    if (current.type === 'prefix_id') {
+      // Symbolic variables are parenthesized in pattern position (`f (<+>)`
+      // and `\(<+>) -> ...`). tree-sitter represents them as prefix_id rather
+      // than variable, so treating only variable nodes as binders lets an
+      // imported homonym leak into both the binder position and its RHS uses.
+      // Constructor operators remain references to their data constructor.
+      const operator = firstDescendant(
+        current,
+        new Set(['operator', 'constructor_operator']),
+      );
+      const normalized = normalizeReferenceText(
+        operator ? getNodeText(operator, source) : getNodeText(current, source),
+      );
+      const parts = haskellReferenceParts(normalized);
+      if (parts.qualifier === null && parts.member && !parts.member.startsWith(':')) {
+        bindings.push({ name: parts.member, node: current });
       }
       continue;
     }
     if (current.type === 'variable') {
       const name = getNodeText(current, source).trim();
-      if (name) names.push(name);
+      if (name) bindings.push({ name, node: current });
     } else {
       stack.push(...current.namedChildren);
     }
   }
-  return names;
+  return bindings;
+}
+
+function collectPatternNames(pattern: SyntaxNode | null, source: string): string[] {
+  return collectPatternBindings(pattern, source).map(({ name }) => name);
+}
+
+function patternContainsName(
+  pattern: SyntaxNode | null,
+  name: string,
+  source: string,
+  beforeIndex: number | null = null,
+): boolean {
+  const canonicalName = lexicalBindingName(name);
+  return collectPatternBindings(pattern, source).some((binding) =>
+    lexicalBindingName(binding.name) === canonicalName
+      && (beforeIndex === null || binding.node.startIndex < beforeIndex));
 }
 
 function functionPatternRoots(node: SyntaxNode): SyntaxNode[] {
@@ -579,8 +1091,8 @@ function declarationBindings(
   node: SyntaxNode,
   source: string,
   stateOwner: object,
-): Array<[string, boolean]> {
-  const bindings: Array<[string, boolean]> = [];
+): Array<[string, boolean, number?]> {
+  const bindings: Array<[string, boolean, number?]> = [];
   const stack = [node];
   while (stack.length > 0) {
     const current = stack.pop()!;
@@ -593,20 +1105,24 @@ function declarationBindings(
     if (current.type === 'bind') {
       const pattern = getChildByField(current, 'pattern');
       if (pattern) {
-        for (const name of collectPatternNames(pattern, source)) bindings.push([name, false]);
+        // A monadic/generator pattern does not scope over its own RHS. Its
+        // binders become visible only after the whole statement/qualifier.
+        for (const name of collectPatternNames(pattern, source)) {
+          bindings.push([name, false, current.endIndex]);
+        }
       } else {
         const nameNode = getChildByField(current, 'name');
         const name = nameNode ? getNodeText(nameNode, source).trim() : '';
         if (name) {
-          const signature = precedingSignature(current, name, source, stateOwner);
-          bindings.push([name, isFunctionBinding(current, signature, source)]);
+          const signature = associatedSignature(current, name, source, stateOwner);
+          bindings.push([name, isFunctionBinding(current, signature, source, stateOwner)]);
         }
       }
       continue;
     }
     if (current.type === 'generator' || current.type === 'pattern_guard') {
       for (const name of collectPatternNames(getChildByField(current, 'pattern'), source)) {
-        bindings.push([name, false]);
+        bindings.push([name, false, current.endIndex]);
       }
       continue;
     }
@@ -627,10 +1143,15 @@ function lexicalBindingIndex(
 
   const index = new Map<string, LexicalBinding[]>();
   for (const child of container.namedChildren) {
-    for (const [name, materializedNode] of declarationBindings(child, source, stateOwner ?? container)) {
-      const occurrences = index.get(name) ?? [];
-      occurrences.push({ startIndex: child.startIndex, materializedNode });
-      index.set(name, occurrences);
+    for (const [name, materializedNode, scopeStartIndex] of declarationBindings(
+      child,
+      source,
+      stateOwner ?? container,
+    )) {
+      const key = lexicalBindingName(name);
+      const occurrences = index.get(key) ?? [];
+      occurrences.push({ startIndex: scopeStartIndex ?? child.startIndex, materializedNode });
+      index.set(key, occurrences);
     }
   }
   state?.lexicalBindings.set(key, index);
@@ -644,7 +1165,8 @@ function bindingAt(
   beforeIndex: number | null,
   stateOwner?: object,
 ): LexicalBinding | undefined {
-  const occurrences = lexicalBindingIndex(container, source, stateOwner).get(name);
+  const occurrences = lexicalBindingIndex(container, source, stateOwner)
+    .get(lexicalBindingName(name));
   if (!occurrences) return undefined;
   if (beforeIndex === null) return occurrences[occurrences.length - 1];
   for (let i = occurrences.length - 1; i >= 0; i--) {
@@ -660,7 +1182,7 @@ function isLexicallyBound(
   source: string,
   stateOwner?: object,
 ): boolean {
-  if (!name || name.includes('::')) return false;
+  if (!name || haskellReferenceParts(name).qualifier !== null) return false;
   let branch = node;
   let ancestor = node.parent;
   while (ancestor) {
@@ -670,7 +1192,12 @@ function isLexicallyBound(
         : [getChildByField(ancestor, 'patterns')].filter(
             (candidate): candidate is SyntaxNode => candidate !== null,
           );
-      if (patternRoots.some((pattern) => patternContainsName(pattern, name, source))) return true;
+      // View-pattern expressions are evaluated left-to-right. A binder in the
+      // view result (or in a later argument) must not retroactively shadow the
+      // callable used by the view expression; every binder is visible in the
+      // ordinary RHS because all pattern positions precede it.
+      if (patternRoots.some((pattern) =>
+        patternContainsName(pattern, name, source, node.startIndex))) return true;
       const whereBinds = getChildByField(ancestor, 'binds');
       if (whereBinds) {
         const binding = bindingAt(whereBinds, name, source, null, stateOwner);
@@ -687,10 +1214,15 @@ function isLexicallyBound(
     if (ancestor.type === 'pattern_synonym') {
       const equation = ancestor.namedChildren.find((child) => child.type === 'equation');
       const synonym = equation ? getChildByField(equation, 'synonym') : null;
-      if (patternContainsName(synonym, name, source)) return true;
+      if (patternContainsName(synonym, name, source, node.startIndex)) return true;
     }
     if (ancestor.type === 'alternative') {
-      if (patternContainsName(getChildByField(ancestor, 'pattern'), name, source)) return true;
+      if (patternContainsName(
+        getChildByField(ancestor, 'pattern'),
+        name,
+        source,
+        node.startIndex,
+      )) return true;
     }
     if (ancestor.type === 'let_in' || ancestor.type === 'let') {
       const binds = getChildByField(ancestor, 'binds');
@@ -712,8 +1244,10 @@ function isLexicallyBound(
       if (binding && !binding.materializedNode) return true;
     }
     if (ancestor.type === 'do') {
-      const recursiveDo = /^\s*(?:[A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)*\.)?mdo\b/
-        .test(getNodeText(ancestor, source));
+      const recursiveDo = new RegExp(
+        `^\\s*(?:${HASKELL_MODULE_NAME_SOURCE}\\.)?mdo\\b`,
+        'u',
+      ).test(getNodeText(ancestor, source));
       const binding = bindingAt(
         ancestor,
         name,
@@ -756,6 +1290,11 @@ function isLexicallyBound(
 function isHaskellPatternPosition(node: SyntaxNode): boolean {
   let ancestor = node.parent;
   while (ancestor) {
+    // The expression inside a Template Haskell splice is evaluated at the
+    // current stage even when the splice sits in a quoted pattern or instance
+    // head. Do not let those outer pattern-shaped fields downgrade its calls
+    // to constructor/value references.
+    if (ancestor.type === 'splice') return false;
     if (ancestor.type === 'view_pattern') {
       const expression = getChildByField(ancestor, 'expression');
       if (expression && nodeContains(expression, node)) return false;
@@ -777,11 +1316,33 @@ function isHaskellPatternPosition(node: SyntaxNode): boolean {
 
 function normalizedSimpleReference(node: SyntaxNode, source: string): { name: string; node: SyntaxNode } | null {
   let current: SyntaxNode | null = node;
-  while (current?.type === 'parens' && current.namedChildCount === 1) {
-    current = current.namedChild(0);
-  }
-  while (current?.type === 'infix_id' && current.namedChildCount === 1) {
-    current = current.namedChild(0);
+  // Visible type applications specialize a value but do not apply a term:
+  // `handler @Int` is still the same point-free value as `handler`. Unwrap
+  // only an all-type-argument spine; `handler @Int value` must remain an
+  // ordinary application for the call walker.
+  while (current) {
+    if (current.type === 'parens' && current.namedChildCount === 1) {
+      current = current.namedChild(0);
+      continue;
+    }
+    if (current.type === 'infix_id' && current.namedChildCount === 1) {
+      current = current.namedChild(0);
+      continue;
+    }
+    if (current.type === 'signature') {
+      const expression = getChildByField(current, 'expression');
+      if (!expression) break;
+      current = expression;
+      continue;
+    }
+    if (current.type === 'apply') {
+      const argument = getChildByField(current, 'argument');
+      const functionNode = getChildByField(current, 'function');
+      if (argument?.type !== 'type_application' || !functionNode) break;
+      current = functionNode;
+      continue;
+    }
+    break;
   }
   if (
     !current
@@ -839,11 +1400,11 @@ function constraintHeads(
   }
   const head = referenceHead(node, source);
   if (!head) return [];
-  const separator = head.name.lastIndexOf('::');
-  const leaf = head.name.slice(separator < 0 ? 0 : separator + 2).replace(/^\(|\)$/g, '');
+  const headParts = haskellReferenceParts(head.name);
+  const leaf = headParts.member;
   // Lowercase, unqualified heads in ConstraintKinds/quantified constraints
   // are bound type variables (`class c a => C c a`), not global classes.
-  if (separator < 0 && /^[a-z_]/.test(leaf)) return [];
+  if (headParts.qualifier === null && HASKELL_VARID_START_RE.test(leaf)) return [];
   // Equality/coercion constraints are predicates, not superclass declarations.
   if (['~', '~~', '~#', '~R#', '~N#'].includes(leaf)) return [];
   return [head];
@@ -854,17 +1415,58 @@ function emitPointFreeReference(node: SyntaxNode, ownerId: string, ctx: Extracto
   const expression = match ? getChildByField(match, 'expression') : null;
   const reference = expression ? normalizedSimpleReference(expression, ctx.source) : null;
   if (!reference || isLexicallyBound(reference.name, reference.node, ctx.source, ctx.nodes as object)) return;
-  const separator = reference.name.lastIndexOf('::');
-  const leaf = reference.name.slice(separator < 0 ? 0 : separator + 2).replace(/^\(|\)$/g, '');
+  const leaf = haskellReferenceParts(reference.name).member;
   // A point-free constructor is a value dependency, not a function reference.
-  // The bare-constructor walker emits its single canonical `references` edge.
-  if (/^[A-Z]/.test(leaf) || leaf.startsWith(':')) return;
+  // The bare-constructor walker emits its single canonical `references` edge
+  // for `alias = Constructor`; an all-type application is call-shaped in the
+  // grammar, so emit that value edge here before the call walker skips it.
+  if (HASKELL_CONID_START_RE.test(leaf) || leaf.startsWith(':')) {
+    let rhs: SyntaxNode = expression!;
+    while (rhs.type === 'parens' && rhs.namedChildCount === 1) rhs = rhs.namedChild(0)!;
+    if (rhs.type === 'signature') rhs = getChildByField(rhs, 'expression') ?? rhs;
+    if (rhs.type === 'apply') {
+      ctx.addUnresolvedReference({
+        fromNodeId: ownerId,
+        referenceName: reference.name,
+        referenceKind: 'references',
+        line: reference.node.startPosition.row + 1,
+        column: reference.node.startPosition.column,
+      });
+    }
+    return;
+  }
+  const owner = scopeOwner(ctx, ownerId);
+  const signatureNode = owner
+    ? associatedSignature(node, owner.name, ctx.source, ctx.nodes as object)
+    : null;
+  // A whole-RHS name represents execution only when the binding's terminal
+  // signature result is a proven computation carrier. Ordinary aliases remain
+  // strict function/value references: `choose _ = callback` returns a
+  // function, and `foo _ = answer` returns data, so neither fabricates Flow.
+  const proof = owner
+    && (owner.kind === 'function' || owner.kind === 'method')
+    && signatureNode
+    ? executableResultProof(signatureNode, ctx.source, ctx.nodes as object)
+    : null;
+  const implicitMainAction = signatureNode === null
+    && owner?.name === 'main'
+    && isTopLevelMainBinding(node, ctx.source);
+  const referenceKind = implicitMainAction
+    ? 'calls'
+    : proof
+      ? 'haskell_effect_alias'
+      : 'function_ref';
   ctx.addUnresolvedReference({
     fromNodeId: ownerId,
     referenceName: reference.name,
-    referenceKind: 'function_ref',
+    referenceKind,
     line: reference.node.startPosition.row + 1,
     column: reference.node.startPosition.column,
+    ...(proof ? {
+      candidates: proof.importedEffectHeads.map(
+        (head) => `${HASKELL_EFFECT_ALIAS_HEAD_PREFIX}${head}`,
+      ),
+    } : {}),
   });
 }
 
@@ -900,6 +1502,17 @@ function extractHaskellBareCall(
   if (parent.type === 'exp' && parent.namedChildCount === 1) {
     eligible = true;
   } else if (
+    parent.type === 'splice'
+    && getChildByField(parent, 'expression')?.startIndex === node.startIndex
+    && getChildByField(parent, 'expression')?.endIndex === node.endIndex
+  ) {
+    // `$compile`, `$(compile)`, and `$$(compile @T)` execute their whole
+    // expression at the current Template Haskell stage. Applied splices are
+    // already caught by the ordinary call walker; this covers the otherwise
+    // invisible nullary/bare spelling. Quotes remain opaque because
+    // handleTemplateQuote visits only splices at its own staging level.
+    eligible = true;
+  } else if (
     parent.type === 'bind'
     && nodeContains(getChildByField(parent, 'expression'), node)
     && getChildByField(parent, 'expression')?.startIndex === node.startIndex
@@ -927,11 +1540,7 @@ function extractHaskellBareCall(
       callee = getChildByField(callee, 'function');
     }
     const functionRef = callee ? normalizedSimpleReference(callee, source) : null;
-    const separator = functionRef?.name.lastIndexOf('::') ?? -1;
-    const functionBaseRaw = functionRef
-      ? functionRef.name.slice(separator < 0 ? 0 : separator + 2)
-      : '';
-    const functionBase = functionBaseRaw.replace(/^\((.*)\)$/, '$1');
+    const functionBase = functionRef ? haskellReferenceParts(functionRef.name).member : '';
     const argumentIndex = applicationArguments.findIndex((argument) =>
       argument.startIndex === node.startIndex && argument.endIndex === node.endIndex);
     eligible = argumentIndex >= 0 && (
@@ -945,10 +1554,7 @@ function extractHaskellBareCall(
     const right = getChildByField(parent, 'right_operand');
     const operator = getChildByField(parent, 'operator');
     const operatorRef = operator ? normalizedSimpleReference(operator, source) : null;
-    const separator = operatorRef?.name.lastIndexOf('::') ?? -1;
-    const operatorBase = operatorRef
-      ? operatorRef.name.slice(separator < 0 ? 0 : separator + 2)
-      : '';
+    const operatorBase = operatorRef ? haskellReferenceParts(operatorRef.name).member : '';
     const isLeft = nodeContains(left, node)
       && left?.startIndex === node.startIndex
       && left?.endIndex === node.endIndex;
@@ -1046,25 +1652,23 @@ function extractHaskellBareReference(
   // normal call-shaped pattern handler. Descendants of a qualified/prefix name
   // are likewise represented by their parent as one canonical reference.
   if (
-    (parent.type === 'apply' && nodeContains(getChildByField(parent, 'function'), node))
-    || (!inPattern && parent.type === 'infix'
-      && nodeContains(getChildByField(parent, 'operator'), node))
+    (sectionAncestor?.type === 'apply'
+      && nodeContains(getChildByField(sectionAncestor, 'function'), node))
+    || (!inPattern && sectionAncestor?.type === 'infix'
+      && nodeContains(getChildByField(sectionAncestor, 'operator'), node))
     || ((parent.type === 'left_section' || parent.type === 'right_section')
       && nodeContains(getChildByField(parent, 'operator'), node))
     || parent.type === 'qualified'
     || parent.type === 'prefix_id'
   ) return undefined;
 
-  if (!inPattern && parent.type === 'apply'
-    && nodeContains(getChildByField(parent, 'argument'), node)) {
-    const directFunction = getChildByField(parent, 'function');
+  if (!inPattern && sectionAncestor?.type === 'apply'
+    && nodeContains(getChildByField(sectionAncestor, 'argument'), node)) {
+    const directFunction = getChildByField(sectionAncestor, 'function');
     const directReference = directFunction
       ? normalizedSimpleReference(directFunction, source)
       : null;
-    const separator = directReference?.name.lastIndexOf('::') ?? -1;
-    const directBase = directReference
-      ? directReference.name.slice(separator < 0 ? 0 : separator + 2)
-      : '';
+    const directBase = directReference ? haskellReferenceParts(directReference.name).member : '';
     // A known higher-order combinator executes this constructor value, and
     // the call walker emits the semantic call edge. Avoid a second value edge.
     if (HOF_NAMES.has(directBase)) return undefined;
@@ -1072,10 +1676,22 @@ function extractHaskellBareReference(
   const reference = normalizedSimpleReference(node, source);
   if (!reference) return undefined;
 
+  const referenceParts = haskellReferenceParts(reference.name);
+  if (
+    inPattern
+    && node.type === 'prefix_id'
+    && referenceParts.qualifier === null
+    && !referenceParts.member.startsWith(':')
+  ) {
+    // This prefix_id is a symbolic variable binder, not a use of a global or
+    // imported operator. Constructor operators (whose member starts with `:`)
+    // continue to the pattern-reference path below.
+    return undefined;
+  }
+
   if (!inPattern) {
-    const separator = reference.name.lastIndexOf('::');
-    const leaf = reference.name.slice(separator < 0 ? 0 : separator + 2).replace(/^\(|\)$/g, '');
-    if (!/^[A-Z]/.test(leaf) && !leaf.startsWith(':')) return undefined;
+    const leaf = referenceParts.member;
+    if (!HASKELL_CONID_START_RE.test(leaf) && !leaf.startsWith(':')) return undefined;
 
     // Bare constructor values are semantic references only in expressions,
     // never in signatures, type heads, imports, or export lists.
@@ -1100,7 +1716,21 @@ function extractHaskellBareReference(
         expressionPosition = nodeContains(getChildByField(ancestor, 'match'), branch);
         break;
       }
-      if (['signature', 'header', 'import', 'data_type', 'newtype', 'type_synomym',
+      if (ancestor.type === 'signature') {
+        // An expression annotation (`value :: Type`) shares the same grammar
+        // node as a declaration signature. Its expression remains runtime
+        // code, but the annotation type does not.
+        expressionPosition = nodeContains(getChildByField(ancestor, 'expression'), branch);
+        break;
+      }
+      if (ancestor.type === 'type_application') {
+        // Visible type applications (`callee @Type`) place their type in an
+        // expression tree, but constructor-shaped names below this node still
+        // belong to the type namespace. The runtime callee is a sibling of the
+        // type_application node, so it continues through the normal call walk.
+        break;
+      }
+      if (['header', 'import', 'data_type', 'newtype', 'type_synomym',
         'type_family', 'type_instance', 'data_family', 'class', 'instance'].includes(ancestor.type)) {
         break;
       }
@@ -1113,19 +1743,23 @@ function extractHaskellBareReference(
 }
 
 function derivedClassNames(node: SyntaxNode, source: string): Array<{ name: string; node: SyntaxNode }> {
-  const deriving = getChildByField(node, 'deriving')
-    ?? node.namedChildren.find((child) => child.type === 'deriving');
-  if (!deriving) return [];
-  const classes = getChildByField(deriving, 'classes') ?? deriving;
+  const derivingClauses = node.childrenForFieldName('deriving');
+  if (derivingClauses.length === 0) {
+    derivingClauses.push(...node.namedChildren.filter((child) => child.type === 'deriving'));
+  }
+  if (derivingClauses.length === 0) return [];
   const result: Array<{ name: string; node: SyntaxNode }> = [];
-  const stack = [classes];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current.type === 'qualified' || current.type === 'name' || current.type === 'prefix_id') {
-      const reference = normalizedSimpleReference(current, source);
-      if (reference) result.push(reference);
-    } else {
-      stack.push(...current.namedChildren);
+  for (const deriving of derivingClauses) {
+    const classes = getChildByField(deriving, 'classes') ?? deriving;
+    const stack = [classes];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (current.type === 'qualified' || current.type === 'name' || current.type === 'prefix_id') {
+        const reference = normalizedSimpleReference(current, source);
+        if (reference) result.push(reference);
+      } else {
+        stack.push(...current.namedChildren);
+      }
     }
   }
   return result;
@@ -1152,13 +1786,13 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
       ? collapseWhitespace(getNodeText(pattern, ctx.source)).slice(0, 240)
       : '';
     for (const name of names) {
-      const signatureNode = precedingSignature(node, name, ctx.source, ctx.nodes as object);
+      const signatureNode = associatedSignature(node, name, ctx.source, ctx.nodes as object);
       const kind = signatureNode && signatureDeclaresFunction(signatureNode) ? 'function' : 'constant';
       const bindingNode = ctx.createNode(kind, name, node, {
         signature: signatureNode
           ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
           : lhs || undefined,
-        docstring: getHaskellPrecedingDocstring(signatureNode ?? node, ctx.source),
+        docstring: bindingDocstring(node, signatureNode, ctx.source),
         isExported: isNameExported(node, ctx.source, name, ctx.nodes as object),
       });
       if (!bindingNode) continue;
@@ -1170,8 +1804,9 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const name = getNodeText(nameNode, ctx.source).trim();
   if (!name) return false;
 
-  const signatureNode = precedingSignature(node, name, ctx.source, ctx.nodes as object);
-  const functionBinding = isMethod || isFunctionBinding(node, signatureNode, ctx.source);
+  const signatureNode = associatedSignature(node, name, ctx.source, ctx.nodes as object);
+  const functionBinding = isMethod
+    || isFunctionBinding(node, signatureNode, ctx.source, ctx.nodes as object);
   if (!isTopLevel && !functionBinding) return false;
 
   const kind = isMethod ? 'method' : functionBinding ? 'function' : 'constant';
@@ -1188,7 +1823,7 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
     : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
   const bindingNode = ctx.createNode(kind, name, node, {
     signature: signature || undefined,
-    docstring: getHaskellPrecedingDocstring(signatureNode ?? node, ctx.source),
+    docstring: bindingDocstring(node, signatureNode, ctx.source),
     isExported: isTopLevel
       ? isNameExported(node, ctx.source, name, ctx.nodes as object)
       : owner?.kind === 'trait' && isNameExported(node, ctx.source, name, ctx.nodes as object, owner.name),
@@ -1211,7 +1846,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
     const infix = node.namedChildren.find((child) => child.type === 'infix');
     const operator = infix ? getChildByField(infix, 'operator') : null;
     const operatorName = operator ? getNodeText(operator, ctx.source).trim() : '';
-    if (operatorName) name = `(${operatorName})`;
+    if (operatorName) name = declaredInfixName(operatorName);
   }
   if (!name) return true;
 
@@ -1225,17 +1860,18 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const existing = groupedNode(groupKey, ctx);
   if (existing) {
     extendGroupedNode(node, existing);
+    emitPointFreeReference(node, existing.id, ctx);
     visitFunctionPayload(node, existing.id, ctx);
     return true;
   }
 
-  const signatureNode = precedingSignature(node, name, ctx.source, ctx.nodes as object);
+  const signatureNode = associatedSignature(node, name, ctx.source, ctx.nodes as object);
   const signature = signatureNode
     ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
     : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
   const functionNode = ctx.createNode(kind, name, node, {
     signature: signature || undefined,
-    docstring: getHaskellPrecedingDocstring(signatureNode ?? node, ctx.source),
+    docstring: bindingDocstring(node, signatureNode, ctx.source),
     // Instance implementations and let/where helpers are lexical; class
     // methods are importable only when their parent class exports them.
     isExported: isTopLevel
@@ -1248,6 +1884,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
   if (!functionNode) return true;
 
   declarationGroupMap(ctx).set(groupKey, functionNode);
+  emitPointFreeReference(node, functionNode.id, ctx);
   visitFunctionPayload(node, functionNode.id, ctx);
   return true;
 }
@@ -1272,7 +1909,7 @@ function handleDataDeclaration(
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
     docstring: getHaskellPrecedingDocstring(node, ctx.source),
     isExported: options?.isExported
-      ?? isNameExported(node, ctx.source, name, ctx.nodes as object),
+      ?? isNameExported(node, ctx.source, name, ctx.nodes as object, undefined, 'type'),
   });
   if (!typeNode) return true;
 
@@ -1292,11 +1929,7 @@ function handleDataDeclaration(
           .filter((candidate): candidate is SyntaxNode => candidate !== null);
       for (const constructorName of constructorNames) {
         const rawConstructor = getNodeText(constructorName, ctx.source).trim();
-        const constructor = constructorName.type === 'constructor_operator'
-          || constructorName.type === 'prefix_id'
-          || rawConstructor.startsWith(':')
-          ? parenthesizedOperator(rawConstructor)
-          : rawConstructor;
+        const constructor = declaredInfixName(rawConstructor);
         ctx.createNode('enum_member', constructor, current, {
           signature: collapseWhitespace(getNodeText(current, ctx.source)).slice(0, 260),
           isExported: isNameExported(
@@ -1362,8 +1995,8 @@ function handleDataFamily(node: SyntaxNode, ctx: ExtractorContext): boolean {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
     docstring: getHaskellPrecedingDocstring(node, ctx.source),
     isExported: owner?.kind === 'trait'
-      ? isNameExported(node, ctx.source, name, ctx.nodes as object, owner.name)
-      : isNameExported(node, ctx.source, name, ctx.nodes as object),
+      ? isNameExported(node, ctx.source, name, ctx.nodes as object, owner.name, 'type')
+      : isNameExported(node, ctx.source, name, ctx.nodes as object, undefined, 'type'),
     decorators: ['haskell-data-family'],
   });
   return true;
@@ -1397,11 +2030,11 @@ function handlePatternSynonym(node: SyntaxNode, ctx: ExtractorContext): boolean 
   // here and materialized together with the following equation.
   if (!equation) return true;
   const name = patternSynonymName(node, ctx.source);
-  const signatureNode = precedingPatternSignature(node, name, ctx.source, ctx.nodes as object);
+  const signatureNode = associatedPatternSignature(node, name, ctx.source, ctx.nodes as object);
   const exportParents = bundledExportParents(node, ctx.source, name, ctx.nodes as object);
   const patternNode = ctx.createNode('enum_member', name, node, {
     signature: collapseWhitespace(getNodeText(signatureNode ?? node, ctx.source)).slice(0, 400),
-    docstring: getHaskellPrecedingDocstring(signatureNode ?? node, ctx.source),
+    docstring: bindingDocstring(node, signatureNode, ctx.source),
     isExported: isNameExported(node, ctx.source, name, ctx.nodes as object)
       || exportParents.length > 0,
     decorators: [
@@ -1510,7 +2143,7 @@ function handleTypeAlias(node: SyntaxNode, ctx: ExtractorContext): boolean {
     ctx.createNode('type_alias', name, node, {
       signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
       docstring: getHaskellPrecedingDocstring(node, ctx.source),
-      isExported: isNameExported(node, ctx.source, name, ctx.nodes as object),
+      isExported: isNameExported(node, ctx.source, name, ctx.nodes as object, undefined, 'type'),
     });
   }
   return true;
@@ -1528,8 +2161,8 @@ function handleTypeFamily(node: SyntaxNode, ctx: ExtractorContext): boolean {
     docstring: getHaskellPrecedingDocstring(node, ctx.source),
     isExported: node.type !== 'type_instance' && (
       owner?.kind === 'trait'
-        ? isNameExported(node, ctx.source, baseName, ctx.nodes as object, owner.name)
-        : isNameExported(node, ctx.source, baseName, ctx.nodes as object)
+        ? isNameExported(node, ctx.source, baseName, ctx.nodes as object, owner.name, 'type')
+        : isNameExported(node, ctx.source, baseName, ctx.nodes as object, undefined, 'type')
     ),
   });
   return true;
@@ -1552,7 +2185,7 @@ function handleTypeclass(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const typeclass = ctx.createNode('trait', name, node, {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
     docstring: getHaskellPrecedingDocstring(node, ctx.source),
-    isExported: isNameExported(node, ctx.source, name, ctx.nodes as object),
+    isExported: isNameExported(node, ctx.source, name, ctx.nodes as object, undefined, 'type'),
   });
   if (typeclass) {
     const context = getChildByField(node, 'context');
@@ -1578,10 +2211,7 @@ function handleTypeclass(node: SyntaxNode, ctx: ExtractorContext): boolean {
 function handleInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const head = declarationHead(node, ctx.source);
   if (!head) return true;
-  const className = head.baseName;
-  const classReference = head.isInfix
-    ? className.slice(1, -1)
-    : normalizeReferenceText(getNodeText(head.nameNode, ctx.source));
+  const classReference = normalizeReferenceText(getNodeText(head.nameNode, ctx.source));
   const instanceName = head.displayName;
   const instanceNode = ctx.createNode('class', instanceName, node, {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
@@ -1602,10 +2232,7 @@ function handleInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
 function handleDerivingInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const head = declarationHead(node, ctx.source);
   if (!head) return true;
-  const className = head.baseName;
-  const classReference = head.isInfix
-    ? className.slice(1, -1)
-    : normalizeReferenceText(getNodeText(head.nameNode, ctx.source));
+  const classReference = normalizeReferenceText(getNodeText(head.nameNode, ctx.source));
   const instanceName = head.displayName;
   const instanceNode = ctx.createNode('class', instanceName, node, {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
@@ -1623,11 +2250,19 @@ function handleDerivingInstance(node: SyntaxNode, ctx: ExtractorContext): boolea
   return true;
 }
 
-function handleClassSignature(node: SyntaxNode, ctx: ExtractorContext): boolean {
+function handleSignature(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const expression = getChildByField(node, 'expression');
+  if (expression) {
+    // Preserve calls and constructor references in an annotated expression,
+    // while never walking its type subtree as runtime code.
+    ctx.visitNode(expression);
+    return true;
+  }
+
   const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1];
-  if (!ownerId) return false;
+  if (!ownerId) return true;
   const owner = scopeOwner(ctx, ownerId);
-  if (!owner || (owner.kind !== 'trait' && !owner.decorators?.includes('haskell-instance'))) return false;
+  if (!owner || (owner.kind !== 'trait' && !owner.decorators?.includes('haskell-instance'))) return true;
 
   const namesNode = getChildByField(node, 'names');
   const nameNodes = namesNode
@@ -1649,6 +2284,38 @@ function handleClassSignature(node: SyntaxNode, ctx: ExtractorContext): boolean 
     });
     if (method) declarationGroupMap(ctx).set(groupKey, method);
   }
+  return true;
+}
+
+const TEMPLATE_QUOTE_NODES = new Set(['quote', 'typed_quote']);
+
+/**
+ * A Template Haskell bracket is code-as-data, not an execution boundary for
+ * the enclosing binding. Tree-sitter still gives its body ordinary `apply`
+ * nodes, so a normal walk would fabricate runtime calls from `[| f x |]`,
+ * `[d| f x |]`, and their type/pattern variants.
+ *
+ * Splices at the bracket's current staging level are different: their
+ * expression is evaluated while constructing the quoted syntax. Walk only
+ * those expressions. A nested bracket raises the staging level again, so its
+ * splices belong to generated code and must remain opaque to this binding.
+ */
+function handleTemplateQuote(node: SyntaxNode, ctx: ExtractorContext): boolean {
+  const visitCurrentStageSplices = (current: SyntaxNode): void => {
+    for (let i = 0; i < current.namedChildCount; i++) {
+      const child = current.namedChild(i);
+      if (!child) continue;
+      if (TEMPLATE_QUOTE_NODES.has(child.type)) continue;
+      if (child.type === 'splice') {
+        const expression = getChildByField(child, 'expression');
+        if (expression) ctx.visitNode(expression);
+        continue;
+      }
+      visitCurrentStageSplices(child);
+    }
+  };
+
+  visitCurrentStageSplices(node);
   return true;
 }
 
@@ -1721,7 +2388,16 @@ export const haskellExtractor: LanguageExtractor = {
       case 'foreign_export':
         return handleForeignExport(node, ctx);
       case 'signature':
-        return handleClassSignature(node, ctx);
+        return handleSignature(node, ctx);
+      case 'quote':
+      case 'typed_quote':
+        return handleTemplateQuote(node, ctx);
+      case 'th_quoted_name':
+      case 'quasiquote':
+        // Names and quasiquote bodies are code-as-data. Quasiquote bodies are
+        // opaque in the grammar; generated declarations and quoter semantics
+        // remain deliberately outside the Haskell model.
+        return true;
       default:
         return false;
     }

@@ -180,6 +180,50 @@ extractBankDetails value = value
     }));
   });
 
+  it('parses layout-split and SOURCE imports without consuming the next declaration', () => {
+    const mappings = extractImportMappings('Consumer.hs', [
+      'module Consumer where',
+      'import',
+      '  -- lexical whitespace inside the incomplete declaration',
+      '',
+      '  qualified Lib.Leading as Leading',
+      'import Lib.Post',
+      '  {- the postpositive modifier may also follow a comment -}',
+      '',
+      '  qualified',
+      '  as Post',
+      'import {-# SOURCE #-} Lib.SourcePlain (plain)',
+      'import',
+      '  {-# SOURCE #-}',
+      '  qualified Lib.Boot as Boot',
+      '',
+      '-- the complete import must not consume this declaration',
+      'run = Leading.foo + Post.foo + Boot.foo',
+    ].join('\n'), 'haskell');
+
+    expect(mappings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        localName: 'Leading', source: 'Lib.Leading', isNamespace: true,
+        isQualifiedOnly: true,
+      }),
+      expect.objectContaining({
+        localName: 'Post', source: 'Lib.Post', isNamespace: true,
+        isQualifiedOnly: true,
+      }),
+      expect.objectContaining({
+        localName: 'Boot', source: 'Lib.Boot', isNamespace: true,
+        isQualifiedOnly: true,
+      }),
+      expect.objectContaining({
+        localName: 'plain', exportedName: 'plain', source: 'Lib.SourcePlain',
+        isNamespace: false,
+      }),
+    ]));
+    // Three qualified namespace routes plus the namespace and named routes
+    // contributed by the unqualified explicit SOURCE import.
+    expect(mappings).toHaveLength(5);
+  });
+
   it('resolves same-named functions by imported module and captures higher-order uses', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-haskell-'));
     fs.mkdirSync(path.join(tmpDir, 'Lib'), { recursive: true });
@@ -730,6 +774,64 @@ pattern Present x = Just x
     ].join('\n'), 'haskell');
     expect(mappings.some((mapping) => mapping.source === 'Phantom')).toBe(false);
     expect(mappings.some((mapping) => mapping.source === 'Real')).toBe(true);
+  });
+
+  it('ignores source-looking imports inside quasiquotes and multiline strings', () => {
+    const mappings = extractImportMappings('QuotedImports.hs', [
+      '{-# LANGUAGE MultilineStrings, PackageImports, QuasiQuotes #-}',
+      'module QuotedImports where',
+      'import "home" Real (foo)',
+      "import Primed (foo', bar')",
+      'plain = [r|',
+      'import Phantom.Plain (foo)',
+      '|]',
+      'qualified = [QQ.r|',
+      'import Phantom.Qualified (foo)',
+      '|]',
+      'deep = [A.B.r|',
+      'import Phantom.Deep (foo)',
+      '|]',
+      'multiline = """',
+      'import Phantom.Multiline (foo)',
+      '\\""" still inside',
+      'import Phantom.AfterEscape (foo)',
+      '"""',
+      'literal = "[r| this is ordinary string data"',
+      '-- [r| this is a comment opener',
+      '[value| no quasiquote closer',
+      'import StillReal (bar)',
+      'quote = \'"\'',
+      '{- nested after a character containing a double quote',
+      '   {- inner -}',
+      '   import Phantom.AfterChar (foo)',
+      '-}',
+      'import AfterChar (baz)',
+    ].join('\r\n'), 'haskell');
+
+    expect(new Set(mappings.map((mapping) => mapping.source)))
+      .toEqual(new Set(['Real', 'Primed', 'StillReal', 'AfterChar']));
+    expect(mappings).toContainEqual(expect.objectContaining({
+      source: 'Real', packageQualifier: 'home', localName: 'foo',
+    }));
+    expect(mappings.filter((mapping) => mapping.source === 'Primed').map((mapping) => mapping.localName))
+      .toEqual(expect.arrayContaining(["foo'", "bar'"]));
+    expect(mappings.some((mapping) => mapping.source === 'Primed' && mapping.localName === 'foo'))
+      .toBe(false);
+  });
+
+  it('does not close a Template Haskell quote on a string containing its delimiter', () => {
+    const mappings = extractImportMappings('TemplateQuote.hs', [
+      '{-# LANGUAGE TemplateHaskell #-}',
+      'module TemplateQuote where',
+      'import A (foo)',
+      'quoted = [e| "|]" |]',
+      '{- ordinary comment after the quoted string',
+      '   import Phantom (foo)',
+      '-}',
+      'run = foo 1',
+    ].join('\n'), 'haskell');
+
+    expect(new Set(mappings.map((mapping) => mapping.source))).toEqual(new Set(['A']));
   });
 
   it('indexes long do blocks without quadratic lexical rescans', () => {

@@ -35,7 +35,7 @@ import ignore, { Ignore } from 'ignore';
 import { detectFrameworks } from '../resolution/frameworks';
 import type { ResolutionContext } from '../resolution/types';
 import { createYielder, type MaybeYield } from '../resolution/cooperative-yield';
-import { extractImportMappings, extractReExports } from '../resolution/import-resolver';
+import { extractImportMappings, extractReExports, parseHaskellReferenceName } from '../resolution/import-resolver';
 
 /**
  * Number of files to read in parallel during indexing.
@@ -219,6 +219,8 @@ const DEFAULT_IGNORE_DIRS: ReadonlySet<string> = new Set([
   '.ipynb_checkpoints', '.eggs',
   // Rust / JVM (Maven, Gradle, Scala)
   'target', '.gradle',
+  // Haskell (Cabal / Stack build trees and dependency caches)
+  'dist-newstyle', '.stack-work',
   // .NET
   'obj',
   // Vendored deps (Go, PHP/Composer, Ruby/Bundler)
@@ -1465,6 +1467,7 @@ function resurrectRefFromDroppedEdge(
   const refName = e.metadata?.refName;
   if (typeof refName !== 'string' || refName.length === 0) return null;
   const refKind = typeof e.metadata?.refKind === 'string' ? (e.metadata.refKind as ReferenceKind) : e.kind;
+  const refCandidates = e.metadata?.refCandidates;
   return {
     fromNodeId: e.source,
     referenceName: refName,
@@ -1473,6 +1476,11 @@ function resurrectRefFromDroppedEdge(
     column: e.column ?? 0,
     filePath: e.sourceFilePath,
     language: e.sourceLanguage,
+    ...(refKind === 'haskell_effect_alias'
+      && Array.isArray(refCandidates)
+      && refCandidates.every((candidate) => typeof candidate === 'string')
+      ? { candidates: refCandidates as string[] }
+      : {}),
   };
 }
 
@@ -1659,6 +1667,13 @@ export class ExtractionOrchestrator {
       });
     });
     if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] scan: ${Date.now() - tScan}ms (${files.length} files)`);
+
+    const trackedBeforeIndexAll = new Map(
+      this.queries.getAllFiles().map((file) => [file.path, file] as const),
+    );
+    const oldHaskellModulesByFile = this.queries.getHaskellModuleNamesByFile();
+    const hadExistingHaskell = [...trackedBeforeIndexAll.values()]
+      .some((file) => file.language === 'haskell');
 
     // A re-index over an existing DB skips unchanged-hash files at the store,
     // which would preserve wiped zero-node rows (#1541) — drop them first so
@@ -2201,8 +2216,33 @@ export class ExtractionOrchestrator {
       }
     }
 
-    // Shut down the parse worker pool.
+    // Shut down the parse worker pool before final main-thread graph work.
     if (pool) await pool.destroy();
+
+    if (hadExistingHaskell) {
+      const trackedAfter = new Map(
+        this.queries.getAllFiles().map((file) => [file.path, file] as const),
+      );
+      const changedModules = new Set<string>();
+      let topologyChanged = false;
+      for (const filePath of files) {
+        const before = trackedBeforeIndexAll.get(filePath);
+        const after = trackedAfter.get(filePath);
+        if (before?.language !== 'haskell' && after?.language !== 'haskell') continue;
+        if (before?.haskellTopologyHash === after?.haskellTopologyHash) continue;
+        topologyChanged = true;
+        for (const name of oldHaskellModulesByFile.get(filePath) ?? []) changedModules.add(name);
+        for (const node of this.queries.getNodesByFile(filePath)) {
+          if (node.kind === 'namespace' && node.language === 'haskell') changedModules.add(node.name);
+        }
+      }
+      if (topologyChanged) {
+        const haskellFiles = [...trackedAfter.values()]
+          .filter((file) => file.language === 'haskell')
+          .map((file) => file.path);
+        this.invalidateHaskellImportEdges(haskellFiles, changedModules);
+      }
+    }
 
     return {
       success: filesIndexed > 0 || errors.filter((e) => e.severity === 'error').length === 0,
@@ -2228,9 +2268,39 @@ export class ExtractionOrchestrator {
     let filesErrored = 0;
     let totalNodes = 0;
     let totalEdges = 0;
+    const overrides = loadExtensionOverrides(this.rootDir);
+    const haskellBefore = new Map<string, { hash?: string; moduleNames: string[] }>();
+    const changedModules = new Set<string>();
+    let topologyChanged = false;
 
     for (const filePath of filePaths) {
+      const trackedBefore = this.queries.getFileByPath(filePath);
+      const isHaskell = trackedBefore?.language === 'haskell'
+        || detectLanguage(filePath, undefined, overrides) === 'haskell';
+      if (isHaskell) {
+        haskellBefore.set(filePath, {
+          hash: trackedBefore?.haskellTopologyHash,
+          moduleNames: trackedBefore
+            ? this.queries.getNodesByFile(filePath)
+              .filter((node) => node.kind === 'namespace' && node.language === 'haskell')
+              .map((node) => node.name)
+            : [],
+        });
+      }
+
       const result = await this.indexFile(filePath);
+
+      if (isHaskell) {
+        const before = haskellBefore.get(filePath)!;
+        const after = this.queries.getFileByPath(filePath);
+        if (after?.haskellTopologyHash !== before.hash) {
+          topologyChanged = true;
+          for (const name of before.moduleNames) changedModules.add(name);
+          for (const node of this.queries.getNodesByFile(filePath)) {
+            if (node.kind === 'namespace' && node.language === 'haskell') changedModules.add(node.name);
+          }
+        }
+      }
 
       if (result.errors.length > 0) {
         errors.push(...result.errors);
@@ -2250,6 +2320,13 @@ export class ExtractionOrchestrator {
           filesSkipped++;
         }
       }
+    }
+
+    if (topologyChanged) {
+      const haskellFiles = this.queries.getAllFiles()
+        .filter((file) => file.language === 'haskell')
+        .map((file) => file.path);
+      this.invalidateHaskellImportEdges(haskellFiles, changedModules);
     }
 
     return {
@@ -2448,6 +2525,11 @@ export class ExtractionOrchestrator {
     // removed) by an edit is reflected on the next sync (#1500). Computed after
     // the unchanged-file early return so untouched files pay nothing.
     const generated = detectGeneratedFile(filePath, content);
+    const haskellTopologyHash = language === 'haskell'
+      ? computeHaskellTopologyHash(filePath, content, result)
+      : undefined;
+    const haskellTopologyChanged = language === 'haskell'
+      && existingFile?.haskellTopologyHash !== haskellTopologyHash;
 
     // Snapshot incoming cross-file edges BEFORE deleting this file's nodes.
     // `deleteFile` cascades to delete every edge whose source OR target is a
@@ -2468,11 +2550,6 @@ export class ExtractionOrchestrator {
     const crossFileIncomingEdges = existingFile
       ? this.queries.getCrossFileIncomingEdgesWithTarget(filePath)
       : [];
-
-    // Delete existing data for this file
-    if (existingFile) {
-      this.queries.deleteFile(filePath);
-    }
 
     // Filter out nodes with missing required fields before insertion.
     // This prevents FK violations when edges reference nodes that would
@@ -2501,30 +2578,38 @@ export class ExtractionOrchestrator {
     if (fitsOneChunk) {
       // Snapshot/re-resolution of cross-file incoming edges (below) still runs
       // for the sync path; on a fresh bulk index crossFileIncomingEdges is [].
-      this.queries.storeFileBundle({
-        nodes: validNodes,
-        edges: validEdges,
-        refs: validRefs,
-        file: {
-          path: filePath,
-          contentHash,
-          language,
-          size: stats.size,
-          modifiedAt: stats.mtimeMs,
-          indexedAt: Date.now(),
-          nodeCount: result.nodes.length,
-          haskellTopologyHash: language === 'haskell'
-            ? computeHaskellTopologyHash(filePath, content, result)
-            : undefined,
-          errors: result.errors.length > 0 ? result.errors : undefined,
-          generated,
-        },
+      this.queries.transaction(() => {
+        if (existingFile) this.queries.deleteFile(filePath);
+        this.queries.storeFileBundle({
+          nodes: validNodes,
+          edges: validEdges,
+          refs: validRefs,
+          file: {
+            path: filePath,
+            contentHash,
+            language,
+            size: stats.size,
+            modifiedAt: stats.mtimeMs,
+            indexedAt: Date.now(),
+            nodeCount: result.nodes.length,
+            haskellTopologyHash,
+            errors: result.errors.length > 0 ? result.errors : undefined,
+            generated,
+          },
+        });
+        if (crossFileIncomingEdges.length > 0) {
+          this.reattachCrossFileEdges(
+            crossFileIncomingEdges,
+            validNodes,
+            language,
+            haskellTopologyChanged,
+          );
+        }
       });
-      if (crossFileIncomingEdges.length > 0) {
-        this.reattachCrossFileEdges(crossFileIncomingEdges, validNodes);
-      }
       return;
     }
+
+    if (existingFile) this.queries.deleteFile(filePath);
 
     // Insert nodes (chunked — see STORE_CHUNK above)
     for (let i = 0; i < validNodes.length; i += STORE_CHUNK) {
@@ -2559,7 +2644,12 @@ export class ExtractionOrchestrator {
     // a ref from the target's plain name would strip receiver/qualifier
     // context and risk a rebind a full re-index would never make.
     if (crossFileIncomingEdges.length > 0) {
-      this.reattachCrossFileEdges(crossFileIncomingEdges, validNodes);
+      this.reattachCrossFileEdges(
+        crossFileIncomingEdges,
+        validNodes,
+        language,
+        haskellTopologyChanged,
+      );
     }
 
     // Insert unresolved references in batch with denormalized filePath/language
@@ -2577,9 +2667,7 @@ export class ExtractionOrchestrator {
       modifiedAt: stats.mtimeMs,
       indexedAt: Date.now(),
       nodeCount: result.nodes.length,
-      haskellTopologyHash: language === 'haskell'
-        ? computeHaskellTopologyHash(filePath, content, result)
-        : undefined,
+      haskellTopologyHash,
       errors: result.errors.length > 0 ? result.errors : undefined,
       generated,
     };
@@ -2636,31 +2724,48 @@ export class ExtractionOrchestrator {
 
   /**
    * Re-attach cross-file incoming edges snapshotted before a re-index delete
-   * (#899). Resolution-created edges are always resurrected from their stamped
-   * original reference, even when a same-named target still exists: edits can
-   * change export lists, module names, visibility, or re-export restrictions
-   * without renaming the declaration. Blind reattachment would preserve a now
-   * illegal edge. Older/synthesized unstamped edges keep the stable id remap.
+   * (#899). Resolution-created edges normally return to their stamped original
+   * reference, even when a same-named target still exists: visibility or export
+   * edits can invalidate a link without renaming the declaration. The one safe
+   * fast path is a Haskell-to-Haskell edge when the target's module topology is
+   * unchanged; that keeps the extraction-only indexFiles() API useful for
+   * body/comment edits. Older/synthesized unstamped edges keep the stable remap.
    */
   private reattachCrossFileEdges(
-    crossFileIncomingEdges: Array<Edge & { targetKind: string; targetName: string; sourceFilePath: string; sourceLanguage: Language }>,
-    validNodes: Node[]
+    crossFileIncomingEdges: Array<Edge & { targetKind: string; targetName: string; targetQualifiedName: string; sourceFilePath: string; sourceLanguage: Language }>,
+    validNodes: Node[],
+    targetLanguage: Language,
+    targetHaskellTopologyChanged: boolean,
   ): void {
-    const newNodesByKindName = new Map<string, string>();
+    const qualified = new Map<string, string | null>();
+    const unqualified = new Map<string, string | null>();
+    const addUnique = (index: Map<string, string | null>, key: string, id: string): void => {
+      const current = index.get(key);
+      if (current === undefined) index.set(key, id);
+      else if (current !== id) index.set(key, null);
+    };
     for (const n of validNodes) {
-      newNodesByKindName.set(`${n.kind}\0${n.name}`, n.id);
+      addUnique(qualified, `${n.kind}\0${n.qualifiedName}`, n.id);
+      addUnique(unqualified, `${n.kind}\0${n.name}`, n.id);
     }
     const reinserted: Edge[] = [];
     const resurrected: UnresolvedReference[] = [];
     for (const e of crossFileIncomingEdges) {
       const ref = resurrectRefFromDroppedEdge(e);
-      if (ref) {
+      const canKeepStableHaskellImport = !targetHaskellTopologyChanged
+        && targetLanguage === 'haskell'
+        && e.sourceLanguage === 'haskell'
+        && e.metadata?.resolvedBy === 'import';
+      if (ref && !canKeepStableHaskellImport) {
         resurrected.push(ref);
         continue;
       }
-      const newTargetId = newNodesByKindName.get(`${e.targetKind}\0${e.targetName}`);
+      const newTargetId = qualified.get(`${e.targetKind}\0${e.targetQualifiedName}`)
+        ?? unqualified.get(`${e.targetKind}\0${e.targetName}`);
       if (newTargetId) {
         reinserted.push({ source: e.source, target: newTargetId, kind: e.kind, metadata: e.metadata, line: e.line, column: e.column, provenance: e.provenance });
+      } else if (ref) {
+        resurrected.push(ref);
       }
     }
     if (reinserted.length > 0) {
@@ -2703,7 +2808,8 @@ export class ExtractionOrchestrator {
           if (node.language !== 'haskell') continue;
           const outgoing = this.queries.getOutgoingEdges(node.id);
           const invalid = outgoing.filter((edge) =>
-            edge.metadata?.resolvedBy === 'import'
+            (edge.metadata?.resolvedBy === 'import'
+              || edge.metadata?.refKind === 'haskell_effect_alias')
             && typeof edge.metadata?.refName === 'string'
             && edge.metadata.refName.length > 0
           );
@@ -2731,19 +2837,18 @@ export class ExtractionOrchestrator {
       // us which source files depend on the changed module; include those files
       // in the retry set, then reset only refs whose leaf now exists somewhere in
       // the project (avoids retrying every Prelude/external name).
-      const existingRefs = this.queries.getUnresolvedReferences()
-        .filter((ref) => ref.language === 'haskell');
+      const existingRefs = this.queries.getUnresolvedReferencesByLanguage('haskell');
       for (const ref of existingRefs) {
         if (ref.filePath && ref.referenceKind === 'imports' && changedModuleNames.has(ref.referenceName)) {
           touchedSourceFiles.add(ref.filePath);
         }
       }
-      const knownNames = new Set(this.queries.getAllNodeNames());
+      const knownNames = new Set(this.queries.getNodeNamesByLanguage('haskell'));
       const retryable = existingRefs.filter((ref) => {
         if (!ref.filePath || !touchedSourceFiles.has(ref.filePath)) return false;
-        const normalized = ref.referenceName.replace(/^\(+|\)+$/g, '');
-        const separator = normalized.lastIndexOf('::');
-        const leaf = separator >= 0 ? normalized.slice(separator + 2) : normalized;
+        const parsed = parseHaskellReferenceName(ref.referenceName);
+        const normalized = parsed.normalized;
+        const leaf = parsed.member;
         return knownNames.has(normalized)
           || knownNames.has(leaf)
           || knownNames.has(`(${leaf})`);
@@ -2818,9 +2923,11 @@ export class ExtractionOrchestrator {
     // rebind to the same target is a clean no-op, but leaving the old row in
     // place for a rebind ELSEWHERE would keep both, turning drift into
     // duplication.
-    this.queries.deleteEdgesByIds(edgeIds);
-    this.queries.insertUnresolvedRefsBatch(refs);
-    return refs.length;
+    return this.queries.transaction(() => {
+      this.queries.deleteEdgesByIds(edgeIds);
+      this.queries.insertUnresolvedRefsBatch(refs);
+      return refs.length;
+    });
   }
 
   /**
@@ -2846,6 +2953,7 @@ export class ExtractionOrchestrator {
   ): Promise<SyncResult> {
     await initGrammars(); // Initialize WASM runtime (grammars loaded lazily below)
     const startTime = Date.now();
+    const extensionOverrides = loadExtensionOverrides(this.rootDir);
     let filesChecked = 0;
     let filesAdded = 0;
     let filesModified = 0;
@@ -2915,10 +3023,9 @@ export class ExtractionOrchestrator {
       // sync would treat it. (`include`-forced paths pass: ScopeIgnore
       // applies the include precedence itself.)
       const scope = this.scopedSyncMatcher();
-      const overrides = loadExtensionOverrides(this.rootDir);
       currentFiles = unique.filter(
         (p) =>
-          isSourceFile(p, overrides) &&
+          isSourceFile(p, extensionOverrides) &&
           !scope.ignores(p) &&
           fs.existsSync(path.join(this.rootDir, p))
       );
@@ -3004,7 +3111,7 @@ export class ExtractionOrchestrator {
       const fullPath = path.join(this.rootDir, filePath);
       const tracked = trackedMap.get(filePath);
       const isHaskell = tracked?.language === 'haskell'
-        || detectLanguage(filePath) === 'haskell';
+        || detectLanguage(filePath, undefined, extensionOverrides) === 'haskell';
       if (isHaskell) haskellSourcePaths.add(filePath);
 
       // Cheap pre-filter: an already-indexed file whose size AND mtime both match
@@ -3071,8 +3178,9 @@ export class ExtractionOrchestrator {
 
     // Load only grammars needed for changed files
     if (filesToIndex.length > 0) {
-      const overrides = loadExtensionOverrides(this.rootDir);
-      const neededLanguages = [...new Set(filesToIndex.map((f) => detectLanguage(f, undefined, overrides)))];
+      const neededLanguages = [...new Set(filesToIndex.map((f) =>
+        detectLanguage(f, undefined, extensionOverrides)
+      ))];
       // .h files default to 'c' but may be C++ — ensure cpp grammar is loaded
       if (neededLanguages.includes('c') && !neededLanguages.includes('cpp')) {
         neededLanguages.push('cpp');
@@ -3113,6 +3221,11 @@ export class ExtractionOrchestrator {
     }
 
     if (haskellTopologyChanged) {
+      if (scopedPaths && scopedPaths.length > 0) {
+        for (const file of this.queries.getAllFiles()) {
+          if (file.language === 'haskell') haskellSourcePaths.add(file.path);
+        }
+      }
       for (const filePath of filesToIndex) {
         for (const node of this.queries.getNodesByFile(filePath)) {
           if (node.kind === 'namespace' && node.language === 'haskell') {
