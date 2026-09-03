@@ -342,7 +342,15 @@ export class QueryBuilder {
 
   /** Run a compound graph mutation atomically. Nested query transactions flatten. */
   transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn)();
+    try {
+      return this.db.transaction(fn)();
+    } catch (error) {
+      // collectNameSegmentRows updates this write-through cache before SQLite
+      // commits. A rollback must forget those entries so a retry repopulates
+      // name_segment_vocab instead of treating rolled-back rows as present.
+      this.segmentedNames.clear();
+      throw error;
+    }
   }
 
   /**
@@ -494,7 +502,7 @@ export class QueryBuilder {
    * Insert multiple nodes in a transaction
    */
   insertNodes(nodes: Node[]): void {
-    this.db.transaction(() => {
+    this.transaction(() => {
       // Bulk path: same semantics as insertNode() per row (validation, cache
       // invalidation, segment vocab), but bound as multi-row INSERTs — the
       // per-.run() call overhead dominates the store phase on full indexes.
@@ -555,7 +563,7 @@ export class QueryBuilder {
         '(?,?)',
         segmentRows
       );
-    })();
+    });
   }
 
   /**
@@ -575,7 +583,7 @@ export class QueryBuilder {
     refs: UnresolvedReference[];
     file: FileRecord;
   }): void {
-    this.db.transaction(() => {
+    this.transaction(() => {
       this.insertNodes(bundle.nodes);
       if (bundle.edges.length > 0) {
         const rows: unknown[][] = [];
@@ -599,7 +607,7 @@ export class QueryBuilder {
       }
       if (bundle.refs.length > 0) this.insertUnresolvedRefsBatch(bundle.refs);
       this.upsertFile(bundle.file);
-    })();
+    });
   }
 
   /**
@@ -747,7 +755,7 @@ export class QueryBuilder {
 
   /** Insert segments for a batch of names in one transaction (vocab heal path). */
   insertNameSegmentsBatch(names: string[]): void {
-    this.db.transaction(() => {
+    this.transaction(() => {
       const rows: unknown[][] = [];
       for (const name of names) this.collectNameSegmentRows(name, rows);
       this.runBatched(
@@ -756,7 +764,7 @@ export class QueryBuilder {
         '(?,?)',
         rows
       );
-    })();
+    });
   }
 
   /**

@@ -45,6 +45,7 @@ describe('Haskell topology-aware sync invalidation', () => {
       getFileByPath(filePath: string): { contentHash: string; haskellTopologyHash?: string; nodeCount: number } | null;
       getMetadata(key: string): string | null;
       setMetadata(key: string, value: string): void;
+      getNamesForSegment(segment: string, limit: number): string[];
       insertNodes(...args: unknown[]): void;
       upsertFile(...args: unknown[]): unknown;
       getUnresolvedReferences(): Array<{
@@ -166,6 +167,36 @@ describe('Haskell topology-aware sync invalidation', () => {
     expect(internals(current).queries.getMetadata('haskell_import_invalidation_pending')).toBe('0');
   });
 
+  it('recovers an interrupted indexAll invalidation on the next indexAll', async () => {
+    const current = await createGraph({
+      'A.hs': 'module A (foo) where\nfoo value = value + 1\n',
+      'B.hs': 'module B (foo) where\nfoo value = value + 2\n',
+      'Lib.hs': 'module Lib (foo) where\nimport A (foo)\n',
+      'Main.hs': 'module Main where\nimport Lib (foo)\nrun = foo 1\n',
+    });
+    const privateState = internals(current);
+    expect(callTarget(current)!.filePath).toBe('A.hs');
+
+    fs.writeFileSync(path.join(tmpDir!, 'Lib.hs'), 'module Lib (foo) where\nimport B (foo)\n');
+    const originalInvalidation = privateState.orchestrator.invalidateHaskellImportEdges;
+    privateState.orchestrator.invalidateHaskellImportEdges = () => {
+      throw new Error('injected indexAll invalidation failure');
+    };
+    try {
+      await expect(current.indexAll()).rejects.toThrow('injected indexAll invalidation failure');
+    } finally {
+      privateState.orchestrator.invalidateHaskellImportEdges = originalInvalidation;
+    }
+
+    expect(privateState.queries.getMetadata('haskell_import_invalidation_pending')).toBe('1');
+    expect(callTarget(current)!.filePath).toBe('A.hs');
+
+    const recovered = await current.indexAll();
+    expect(recovered.success).toBe(true);
+    expect(privateState.queries.getMetadata('haskell_import_invalidation_pending')).toBe('0');
+    expect(callTarget(current)!.filePath).toBe('B.hs');
+  });
+
   it('fails closed when indexFiles removes a still-declared name from a Haskell export list', async () => {
     const current = await createGraph({
       'Lib.hs': 'module Lib (foo) where\nfoo x = x\n',
@@ -210,6 +241,7 @@ describe('Haskell topology-aware sync invalidation', () => {
     expect(result.filesIndexed).toBe(1);
     expect(privateState.queries.getFileByPath('Lib.hs')!.haskellTopologyHash)
       .toBe(before.haskellTopologyHash);
+    expect(privateState.queries.getMetadata('haskell_import_invalidation_pending')).toBe('0');
     expect(callTarget(current)?.id).not.toBe(oldTargetId);
     expect(callTarget(current)?.filePath).toBe('Lib.hs');
     expect(privateState.queries.getUnresolvedReferences()).not.toContainEqual(
@@ -367,6 +399,63 @@ describe('Haskell topology-aware sync invalidation', () => {
     await current.sync({ paths: ['Lib.hs'] });
     expect(callTarget(current)!.filePath).toBe('Lib.hs');
     expect(callTarget(current)!.id).not.toBe(beforeTarget.id);
+    expect(privateState.queries.getNamesForSegment('recovery', 20))
+      .toContain('freshRecoverySymbol');
+  });
+
+  it('recovers a failed indexFiles topology invalidation without another file edit', async () => {
+    const current = await createGraph({
+      'A.hs': 'module A (foo) where\nfoo x = x\n',
+      'B.hs': 'module B (foo) where\nfoo x = x + 1\n',
+      'Lib.hs': 'module Lib (foo) where\nimport A (foo)\n',
+      'Main.hs': 'module Main where\nimport Lib (foo)\nrun = foo 1\n',
+    });
+    const privateState = internals(current);
+    expect(callTarget(current)!.filePath).toBe('A.hs');
+
+    await loadGrammarsForLanguages(['haskell']);
+    fs.writeFileSync(path.join(tmpDir!, 'Lib.hs'), 'module Lib (foo) where\nimport B (foo)\n');
+    const originalInvalidation = privateState.orchestrator.invalidateHaskellImportEdges;
+    privateState.orchestrator.invalidateHaskellImportEdges = () => {
+      throw new Error('injected topology invalidation failure');
+    };
+    try {
+      await expect(current.indexFiles(['Lib.hs']))
+        .rejects.toThrow('injected topology invalidation failure');
+    } finally {
+      privateState.orchestrator.invalidateHaskellImportEdges = originalInvalidation;
+    }
+
+    await current.indexFiles(['Lib.hs']);
+    expect(privateState.queries.getMetadata('haskell_import_invalidation_pending')).toBe('1');
+    expect(callTarget(current)!.filePath).toBe('A.hs');
+
+    const recovered = await current.sync();
+    expect(recovered.haskellImportInvalidationRecovered).toBe(true);
+    expect(privateState.queries.getMetadata('haskell_import_invalidation_pending')).toBe('0');
+    expect(callTarget(current)!.filePath).toBe('B.hs');
+
+    fs.writeFileSync(path.join(tmpDir!, 'Lib.hs'), 'module Lib (foo) where\nimport A (foo)\n');
+    const originalIndexFile = privateState.orchestrator.indexFile;
+    privateState.orchestrator.indexFile = async (filePath: string) => ({
+      ...await originalIndexFile.call(privateState.orchestrator, filePath),
+      errors: [{ message: 'injected returned error', severity: 'error' as const }],
+    });
+    try {
+      const failed = await current.indexFiles(['Lib.hs']);
+      expect(failed.errors).toContainEqual(expect.objectContaining({
+        message: 'injected returned error',
+        severity: 'error',
+      }));
+    } finally {
+      privateState.orchestrator.indexFile = originalIndexFile;
+    }
+
+    expect(privateState.queries.getMetadata('haskell_import_invalidation_pending')).toBe('1');
+    expect(callTarget(current)!.filePath).toBe('B.hs');
+    await current.sync();
+    expect(privateState.queries.getMetadata('haskell_import_invalidation_pending')).toBe('0');
+    expect(callTarget(current)!.filePath).toBe('A.hs');
   });
 
   it('demotes a persisted effect alias when its facade stops re-exporting the canonical type', async () => {

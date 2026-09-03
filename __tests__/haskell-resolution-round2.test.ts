@@ -37,8 +37,11 @@ describe('Haskell resolution round 2', () => {
     return graph;
   };
 
+  const nodeAt = (graph: CodeGraph, name: string, filePath: string) =>
+    graph.getNodesByName(name).find((candidate) => candidate.filePath === filePath)!;
+
   const outgoingTargets = (graph: CodeGraph, owner: string, filePath: string) => {
-    const node = graph.getNodesByName(owner).find((candidate) => candidate.filePath === filePath)!;
+    const node = nodeAt(graph, owner, filePath);
     return graph.getOutgoingEdges(node.id).map((edge) => ({
       edge,
       target: graph.getNode(edge.target)!,
@@ -75,8 +78,7 @@ describe('Haskell resolution round 2', () => {
         'unicodeArrow x y = x --⊕ y',
       ].join('\n'),
     });
-    try {
-      const operator = graph.getNodesByName('(<+>)').find((node) => node.filePath === 'Ops.hs')!;
+      const operator = nodeAt(graph, '(<+>)', 'Ops.hs');
       for (const [owner, filePath] of [
         ['wild', 'Wildcard.hs'],
         ['qualified', 'Qualified.hs'],
@@ -85,16 +87,12 @@ describe('Haskell resolution round 2', () => {
         expect(outgoingTargets(graph, owner, filePath)
           .some(({ edge, target }) => edge.kind === 'calls' && target.id === operator.id)).toBe(true);
       }
-      const arrow = graph.getNodesByName('(-->)').find((node) => node.filePath === 'Ops.hs')!;
+      const arrow = nodeAt(graph, '(-->)', 'Ops.hs');
       expect(outgoingTargets(graph, 'arrow', 'Explicit.hs')
         .some(({ edge, target }) => edge.kind === 'calls' && target.id === arrow.id)).toBe(true);
-      const unicodeArrow = graph.getNodesByName('(--⊕)')
-        .find((node) => node.filePath === 'Ops.hs')!;
+      const unicodeArrow = nodeAt(graph, '(--⊕)', 'Ops.hs');
       expect(outgoingTargets(graph, 'unicodeArrow', 'Explicit.hs')
         .some(({ edge, target }) => edge.kind === 'calls' && target.id === unicodeArrow.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('resolves constructor operators containing the graph hierarchy delimiter', async () => {
@@ -145,8 +143,7 @@ describe('Haskell resolution round 2', () => {
         'control x = (<::>) x x',
       ].join('\n'),
     });
-      const imported = graph.getNodesByName('(<::>)')
-        .find((node) => node.filePath === 'Ops.hs')!;
+      const imported = nodeAt(graph, '(<::>)', 'Ops.hs');
       expect(imported).toBeDefined();
       for (const owner of ['f', 'g']) {
         expect(outgoingTargets(graph, owner, 'Main.hs')
@@ -171,8 +168,7 @@ describe('Haskell resolution round 2', () => {
         'd x = Éclair x',
       ].join('\n'),
     });
-      const constructor = graph.getNodesByName('Éclair')
-        .find((node) => node.filePath === 'Origin.hs')!;
+      const constructor = nodeAt(graph, 'Éclair', 'Origin.hs');
       const edgesToConstructor = (owner: string) => outgoingTargets(graph, owner, 'Consumer.hs')
         .filter(({ target }) => target.id === constructor.id)
         .map(({ edge }) => edge.kind);
@@ -207,8 +203,7 @@ describe('Haskell resolution round 2', () => {
         'runFacade = 函数 1',
       ].join('\n'),
     });
-      const target = graph.getNodesByName('函数')
-        .find((node) => node.filePath === 'Origin.hs')!;
+      const target = nodeAt(graph, '函数', 'Origin.hs');
       expect(target).toBeDefined();
       for (const [owner, filePath] of [
         ['run', 'Consumer.hs'],
@@ -329,7 +324,7 @@ describe('Haskell resolution round 2', () => {
         'unicodePrefix = sommé 1 2',
       ].join('\n'),
     });
-      const foo = graph.getNodesByName('foo').find((node) => node.filePath === 'A.hs')!;
+      const foo = nodeAt(graph, 'foo', 'A.hs');
       expect(foo).toEqual(expect.objectContaining({
         kind: 'function',
         signature: 'foo :: Int -> Int -> Int',
@@ -341,7 +336,7 @@ describe('Haskell resolution round 2', () => {
           ({ edge, target }) => edge.kind === 'calls' && target.id === foo.id,
         )).toHaveLength(1);
       }
-      const unicode = graph.getNodesByName('sommé').find((node) => node.filePath === 'A.hs')!;
+      const unicode = nodeAt(graph, 'sommé', 'A.hs');
       for (const owner of ['unicodeInfix', 'unicodePrefix']) {
         expect(outgoingTargets(graph, owner, 'B.hs').filter(
           ({ edge, target }) => edge.kind === 'calls' && target.id === unicode.id,
@@ -363,10 +358,8 @@ describe('Haskell resolution round 2', () => {
         'viaOperator = 1 É.⊕ 2',
       ].join('\n'),
     });
-      const value = graph.getNodesByName('sommé')
-        .find((node) => node.filePath === 'non-mirrored-source.hs')!;
-      const operator = graph.getNodesByName('(⊕)')
-        .find((node) => node.filePath === 'non-mirrored-source.hs')!;
+      const value = nodeAt(graph, 'sommé', 'non-mirrored-source.hs');
+      const operator = nodeAt(graph, '(⊕)', 'non-mirrored-source.hs');
       expect(value.qualifiedName).toBe('Éclair.Opérateurs::sommé');
       expect(operator.qualifiedName).toBe('Éclair.Opérateurs::(⊕)');
       expect(outgoingTargets(graph, 'viaValue', 'Consumer.hs').some(
@@ -392,7 +385,7 @@ describe('Haskell resolution round 2', () => {
         'run value = foo# value',
       ].join('\n'),
     });
-      const target = graph.getNodesByName('foo#').find((node) => node.filePath === 'A.hs')!;
+      const target = nodeAt(graph, 'foo#', 'A.hs');
       expect(target).toBeDefined();
       expect(outgoingTargets(graph, 'run', 'B.hs').some(
         ({ edge, target: actual }) => edge.kind === 'calls' && actual.id === target.id,
@@ -424,8 +417,7 @@ describe('Haskell resolution round 2', () => {
       const target = (name: string, kind: string) => graph.getNodesByName(name)
         .find((node) => node.filePath === 'A.hs' && node.kind === kind)!;
       const rel = target('Rel', 'trait');
-      const instance = graph.getNodesByName('String `Rel` Bool')
-        .find((node) => node.filePath === 'B.hs')!;
+      const instance = nodeAt(graph, 'String `Rel` Bool', 'B.hs');
       expect(graph.getOutgoingEdges(instance.id).filter((edge) =>
         edge.kind === 'implements' && edge.target === rel.id)).toHaveLength(1);
 
@@ -480,20 +472,14 @@ describe('Haskell resolution round 2', () => {
         'use x = action x',
       ].join('\n'),
     });
-    try {
-      const selector = graph.getNodesByName('action')
-        .find((node) => node.filePath === 'Class.hs')!;
-      const implementation = graph.getNodesByName('action')
-        .find((node) => node.filePath === 'Consumer.hs')!;
+      const selector = nodeAt(graph, 'action', 'Class.hs');
+      const implementation = nodeAt(graph, 'action', 'Consumer.hs');
       expect(outgoingTargets(graph, 'use', 'Consumer.hs')
         .some(({ edge, target }) => edge.kind === 'calls' && target.id === selector.id)).toBe(true);
       expect(outgoingTargets(graph, 'use', 'Consumer.hs')
         .some(({ target }) => target.id === implementation.id)).toBe(false);
       expect(graph.getOutgoingEdges(implementation.id)
         .some((edge) => edge.kind === 'calls' && edge.target === implementation.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('resolves local, imported, and self-qualified record selectors and symbols', async () => {
@@ -513,9 +499,8 @@ describe('Haskell resolution round 2', () => {
         'mapped xs = map personName xs',
       ].join('\n'),
     });
-    try {
-      const field = graph.getNodesByName('personName').find((node) => node.filePath === 'Person.hs')!;
-      const helper = graph.getNodesByName('helper').find((node) => node.filePath === 'Person.hs')!;
+      const field = nodeAt(graph, 'personName', 'Person.hs');
+      const helper = nodeAt(graph, 'helper', 'Person.hs');
       const constructor = graph.getNodesByName('Person')
         .find((node) => node.filePath === 'Person.hs' && node.kind === 'enum_member')!;
       for (const owner of ['local', 'selfField']) {
@@ -528,9 +513,6 @@ describe('Haskell resolution round 2', () => {
         .some(({ target }) => target.id === constructor.id)).toBe(true);
       expect(outgoingTargets(graph, 'mapped', 'Consumer.hs')
         .some(({ edge, target }) => edge.kind === 'references' && target.id === field.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('uses source position to distinguish repeated local helper scopes', async () => {
@@ -546,7 +528,6 @@ describe('Haskell resolution round 2', () => {
         'equations False = helper 2 where helper x = x + 1',
       ].join('\n'),
     });
-    try {
       const assertPositionedCalls = (owner: string, expected: Array<[number, number]>) => {
         const calls = outgoingTargets(graph, owner, 'Main.hs')
           .filter(({ edge, target }) => edge.kind === 'calls' && target.name === 'helper')
@@ -555,9 +536,6 @@ describe('Haskell resolution round 2', () => {
       };
       assertPositionedCalls('run', [[4, 3], [6, 5]]);
       assertPositionedCalls('equations', [[7, 7], [8, 8]]);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('resolves data-family instance constructors through Family(..)', async () => {
@@ -574,14 +552,9 @@ describe('Haskell resolution round 2', () => {
         'run = FamilyInt 1',
       ].join('\n'),
     });
-    try {
-      const constructor = graph.getNodesByName('FamilyInt')
-        .find((node) => node.filePath === 'Family.hs')!;
+      const constructor = nodeAt(graph, 'FamilyInt', 'Family.hs');
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ edge, target }) => edge.kind === 'calls' && target.id === constructor.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('keeps re-export cycle detection local to each alternative branch', async () => {
@@ -596,13 +569,9 @@ describe('Haskell resolution round 2', () => {
       ].join('\n'),
       'Consumer.hs': 'module Consumer where\nimport Facade (foo)\nrun = foo 1\n',
     });
-    try {
-      const foo = graph.getNodesByName('foo').find((node) => node.filePath === 'Origin.hs')!;
+      const foo = nodeAt(graph, 'foo', 'Origin.hs');
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ target }) => target.id === foo.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('follows Haskell re-export chains deeper than eight modules', async () => {
@@ -617,13 +586,9 @@ describe('Haskell resolution round 2', () => {
     }
     files['Consumer.hs'] = 'module Consumer where\nimport M12 (foo)\nrun = foo 1\n';
     const graph = await createGraph(files);
-    try {
-      const foo = graph.getNodesByName('foo').find((node) => node.filePath === 'M0.hs')!;
+      const foo = nodeAt(graph, 'foo', 'M0.hs');
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ target }) => target.id === foo.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('keeps high-fanout Haskell facades compact while resolving a local origin', async () => {
@@ -659,14 +624,12 @@ describe('Haskell resolution round 2', () => {
         'readType value = typeValue value',
       ].join('\n'),
     });
-      const target = graph.getNodesByName('target')
-        .find((node) => node.filePath === 'Origin.hs')!;
+      const target = nodeAt(graph, 'target', 'Origin.hs');
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ edge, target: candidate }) =>
           edge.kind === 'calls' && candidate.id === target.id
         )).toBe(true);
-      const typeValue = graph.getNodesByName('typeValue')
-        .find((node) => node.filePath === 'Origin.hs')!;
+      const typeValue = nodeAt(graph, 'typeValue', 'Origin.hs');
       expect(outgoingTargets(graph, 'readType', 'Consumer.hs')
         .some(({ edge, target: candidate }) =>
           edge.kind === 'calls' && candidate.id === typeValue.id
@@ -701,8 +664,7 @@ describe('Haskell resolution round 2', () => {
         'runQualifiedRestricted = X.target 1',
       ].join('\n'),
     });
-      const localTarget = graph.getNodesByName('target')
-        .find((node) => node.filePath === 'Local.hs')!;
+      const localTarget = nodeAt(graph, 'target', 'Local.hs');
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ target }) => target.id === localTarget.id)).toBe(false);
       expect(outgoingTargets(graph, 'runAmbiguous', 'Ambiguous.hs')
@@ -764,9 +726,8 @@ describe('Haskell resolution round 2', () => {
         'runQualifiedField value = X.field value',
       ].join('\n'),
     });
-      const aFoo = graph.getNodesByName('foo').find((node) => node.filePath === 'A.hs')!;
-      const originFoo = graph.getNodesByName('foo')
-        .find((node) => node.filePath === 'Origin.hs')!;
+      const aFoo = nodeAt(graph, 'foo', 'A.hs');
+      const originFoo = nodeAt(graph, 'foo', 'Origin.hs');
       expect(outgoingTargets(graph, 'runDistinct', 'Distinct.hs')
         .some(({ target }) => target.name === 'foo')).toBe(false);
       expect(outgoingTargets(graph, 'runSame', 'SameOrigin.hs')).toContainEqual(
@@ -822,7 +783,7 @@ describe('Haskell resolution round 2', () => {
         'runSourceQualified = X.foo 1',
       ].join('\n'),
     });
-      const foo = graph.getNodesByName('foo').find((node) => node.filePath === 'Lib/A.hs')!;
+      const foo = nodeAt(graph, 'foo', 'Lib/A.hs');
       for (const [owner, filePath] of [
         ['runLeading', 'Leading.hs'],
         ['runPost', 'Post.hs'],
@@ -832,8 +793,7 @@ describe('Haskell resolution round 2', () => {
           expect.objectContaining({ target: expect.objectContaining({ id: foo.id }) }),
         );
       }
-      const plain = graph.getNodesByName('plain')
-        .find((node) => node.filePath === 'Lib/Plain.hs')!;
+      const plain = nodeAt(graph, 'plain', 'Lib/Plain.hs');
       expect(outgoingTargets(graph, 'runSource', 'Source.hs')).toContainEqual(
         expect.objectContaining({ target: expect.objectContaining({ id: plain.id }) }),
       );
@@ -865,8 +825,7 @@ describe('Haskell resolution round 2', () => {
         'notImported = B.U',
       ].join('\n'),
     });
-      const pattern = graph.getNodesByName('T')
-        .find((node) => node.filePath === 'ValueOnly.hs')!;
+      const pattern = nodeAt(graph, 'T', 'ValueOnly.hs');
       const constructor = graph.getNodesByName('U')
         .find((node) => node.filePath === 'Both.hs' && node.kind === 'enum_member')!;
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')).toContainEqual(
@@ -1057,7 +1016,6 @@ describe('Haskell resolution round 2', () => {
     });
     const targetFile = () => outgoingTargets(graph, 'run', 'Consumer.hs')
       .find(({ edge, target }) => edge.kind === 'calls' && target.name === 'foo')?.target.filePath;
-    try {
       expect(targetFile()).toBe('A.hs');
 
       fs.writeFileSync(path.join(tmpDir!, 'Facade.hs'), [
@@ -1083,9 +1041,6 @@ describe('Haskell resolution round 2', () => {
       ].join('\n'));
       await graph.sync();
       expect(targetFile()).toBe('B.hs');
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('re-resolves imports when a newly added exact module path beats an old candidate', async () => {
@@ -1095,16 +1050,12 @@ describe('Haskell resolution round 2', () => {
     });
     const targetFile = () => outgoingTargets(graph, 'run', 'pkg/app/Consumer.hs')
       .find(({ edge, target }) => edge.kind === 'calls' && target.name === 'target')?.target.filePath;
-    try {
       expect(targetFile()).toBe('pkg/src/Wrong.hs');
       const exactPath = path.join(tmpDir!, 'pkg/src/Foo/Bar.hs');
       fs.mkdirSync(path.dirname(exactPath), { recursive: true });
       fs.writeFileSync(exactPath, 'module Foo.Bar where\ntarget x = x + 1\n');
       await graph.sync();
       expect(targetFile()).toBe('pkg/src/Foo/Bar.hs');
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('resolves pattern synonyms bundled under a type export', async () => {
@@ -1122,13 +1073,9 @@ describe('Haskell resolution round 2', () => {
         'run = P',
       ].join('\n'),
     });
-    try {
-      const pattern = graph.getNodesByName('P').find((node) => node.filePath === 'Patterns.hs')!;
+      const pattern = nodeAt(graph, 'P', 'Patterns.hs');
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ target }) => target.id === pattern.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('resolves record pattern-synonym selectors locally and through explicit imports', async () => {
@@ -1145,16 +1092,11 @@ describe('Haskell resolution round 2', () => {
         'run x = presentValue x',
       ].join('\n'),
     });
-    try {
-      const selector = graph.getNodesByName('presentValue')
-        .find((node) => node.filePath === 'Patterns.hs')!;
+      const selector = nodeAt(graph, 'presentValue', 'Patterns.hs');
       for (const [owner, filePath] of [['local', 'Patterns.hs'], ['run', 'Consumer.hs']] as const) {
         expect(outgoingTargets(graph, owner, filePath)
           .some(({ target }) => target.id === selector.id)).toBe(true);
       }
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('does not reinterpret a multi-segment imported module as a qualified member', async () => {
@@ -1169,7 +1111,6 @@ describe('Haskell resolution round 2', () => {
         'run = limit',
       ].join('\n'),
     });
-    try {
       const consumerModule = graph.getNodesByName('Consumer')
         .find((node) => node.filePath === 'src/Consumer.hs' && node.kind === 'namespace')!;
       expect(graph.getOutgoingEdges(consumerModule.id).some((edge) => {
@@ -1177,9 +1118,6 @@ describe('Haskell resolution round 2', () => {
         return edge.kind === 'imports'
           && target?.filePath === 'src/Legacy/TT/Common/RateLimit.hs';
       })).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('recovers atomically when Haskell import invalidation is interrupted', async () => {
@@ -1191,7 +1129,6 @@ describe('Haskell resolution round 2', () => {
     });
     const targetFile = () => outgoingTargets(graph, 'run', 'Consumer.hs')
       .find(({ edge, target }) => edge.kind === 'calls' && target.name === 'foo')?.target.filePath;
-    try {
       expect(targetFile()).toBe('A.hs');
       fs.writeFileSync(path.join(tmpDir!, 'Facade.hs'), [
         'module Facade (foo) where',
@@ -1220,9 +1157,6 @@ describe('Haskell resolution round 2', () => {
       // driven by the durable invalidation marker, not filesystem change data.
       await graph.sync();
       expect(targetFile()).toBe('B.hs');
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('keeps duplicate local helpers inside their exact equation scope', async () => {
@@ -1237,15 +1171,11 @@ describe('Haskell resolution round 2', () => {
         '  helper x = x + 1',
       ].join('\n'),
     });
-    try {
       const helpers = graph.getNodesByName('helper').sort((a, b) => a.startLine - b.startLine);
       const calls = outgoingTargets(graph, 'equations', 'Main.hs')
         .filter(({ edge, target }) => edge.kind === 'calls' && target.name === 'helper');
       expect(calls.find(({ edge }) => edge.line === 2)?.target.id).toBe(helpers[0]!.id);
       expect(calls.find(({ edge }) => edge.line === 32)?.target.id).toBe(helpers[1]!.id);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('lets a qualified import alias match the current module name when no local symbol exists', async () => {
@@ -1253,12 +1183,8 @@ describe('Haskell resolution round 2', () => {
       'X.hs': 'module X where\nfoo x = x\n',
       'A/B.hs': 'module A.B where\nimport qualified X as A.B\ny = A.B.foo\n',
     });
-    try {
-      const foo = graph.getNodesByName('foo').find((node) => node.filePath === 'X.hs')!;
+      const foo = nodeAt(graph, 'foo', 'X.hs');
       expect(outgoingTargets(graph, 'y', 'A/B.hs').some(({ target }) => target.id === foo.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('resolves ImportQualifiedPost references to self-qualified explicit exports', async () => {
@@ -1275,11 +1201,11 @@ describe('Haskell resolution round 2', () => {
         'operatorRun left right = left Request.<+> right',
       ].join('\n'),
     });
-      const handle = graph.getNodesByName('handle').find((node) => node.filePath === 'A/B.hs')!;
+      const handle = nodeAt(graph, 'handle', 'A/B.hs');
       expect(handle.isExported).toBe(true);
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ edge, target }) => edge.kind === 'calls' && target.id === handle.id)).toBe(true);
-      const operator = graph.getNodesByName('(<+>)').find((node) => node.filePath === 'A/B.hs')!;
+      const operator = nodeAt(graph, '(<+>)', 'A/B.hs');
       expect(operator.isExported).toBe(true);
       expect(outgoingTargets(graph, 'operatorRun', 'Consumer.hs')
         .some(({ edge, target }) => edge.kind === 'calls' && target.id === operator.id)).toBe(true);
@@ -1320,8 +1246,8 @@ describe('Haskell resolution round 2', () => {
         'runCollision = foo',
       ].join('\n'),
     });
-      const originFoo = graph.getNodesByName('foo').find((node) => node.filePath === 'Origin.hs')!;
-      const localFoo = graph.getNodesByName('foo').find((node) => node.filePath === 'Facade.hs')!;
+      const originFoo = nodeAt(graph, 'foo', 'Origin.hs');
+      const localFoo = nodeAt(graph, 'foo', 'Facade.hs');
       expect(localFoo.isExported).toBe(false);
       expect(outgoingTargets(graph, 'run', 'Consumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: originFoo.id }) }));
@@ -1364,7 +1290,7 @@ describe('Haskell resolution round 2', () => {
         'runGrouped = T',
       ].join('\n'),
     });
-      const originFoo = graph.getNodesByName('foo').find((node) => node.filePath === 'Origin.hs')!;
+      const originFoo = nodeAt(graph, 'foo', 'Origin.hs');
       const originOperator = graph.getNodesByName('(<+>)')
         .find((node) => node.filePath === 'Origin.hs' && node.kind === 'function')!;
       const constructor = graph.getNodesByName('T')
@@ -1409,13 +1335,9 @@ describe('Haskell resolution round 2', () => {
         'run = PairIB',
       ].join('\n'),
     });
-    try {
-      const constructor = graph.getNodesByName('PairIB').find((node) => node.filePath === 'Origin.hs')!;
+      const constructor = nodeAt(graph, 'PairIB', 'Origin.hs');
       expect(outgoingTargets(graph, 'run', 'Consumer.hs')
         .some(({ target }) => target.id === constructor.id)).toBe(true);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('preserves DuplicateRecordFields parent identity through imports and re-exports', async () => {
@@ -1442,7 +1364,6 @@ describe('Haskell resolution round 2', () => {
         'getQualified x = O.field x',
       ].join('\n'),
     });
-    try {
       const fields = graph.getNodesByName('field').filter((node) => node.filePath === 'Origin.hs');
       const bField = fields.find((node) => node.qualifiedName.includes('::B::'))!;
       const aField = fields.find((node) => node.qualifiedName.includes('::A::'))!;
@@ -1453,9 +1374,6 @@ describe('Haskell resolution round 2', () => {
         expect(targets).toContain(bField.id);
         expect(targets).not.toContain(aField.id);
       }
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('uses only the immediate type owner when its name matches the module leaf', async () => {
@@ -1534,7 +1452,7 @@ describe('Haskell resolution round 2', () => {
         .map(({ target }) => target.id);
       expect(typeApplicationTargets).not.toContain(constructor.id);
       expect(typeApplicationTargets).not.toContain(alias.id);
-      const consume = graph.getNodesByName('consume').find((node) => node.filePath === 'Api/V0.hs')!;
+      const consume = nodeAt(graph, 'consume', 'Api/V0.hs');
       expect(outgoingTargets(graph, 'typedCall', 'Consumer.hs')
         .some(({ edge, target }) => edge.kind === 'calls' && target.id === consume.id)).toBe(true);
   });
@@ -1646,8 +1564,7 @@ describe('Haskell resolution round 2', () => {
         'ordinary value = T.runtimeTarget value',
       ].join('\n'),
     });
-      const target = (name: string) => graph.getNodesByName(name)
-        .find((node) => node.filePath === 'Targets.hs')!;
+      const target = (name: string) => nodeAt(graph, name, 'Targets.hs');
       const targetsFrom = (owner: string) => outgoingTargets(graph, owner, 'Consumer.hs')
         .map(({ edge, target: candidate }) => ({ kind: edge.kind, id: candidate.id }));
       const runtimeTarget = target('runtimeTarget');
@@ -1700,16 +1617,12 @@ describe('Haskell resolution round 2', () => {
         'getB x = field x',
       ].join('\n'),
     });
-    try {
       const fields = graph.getNodesByName('field').filter((node) => node.filePath === 'Origin.hs');
       const aField = fields.find((node) => node.qualifiedName.includes('::A::'))!;
       const bField = fields.find((node) => node.qualifiedName.includes('::B::'))!;
       const targets = outgoingTargets(graph, 'getB', 'Consumer.hs').map(({ target }) => target.id);
       expect(targets).toContain(bField.id);
       expect(targets).not.toContain(aField.id);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('uses an annotated record-dot receiver and leaves an unknown receiver unresolved', async () => {
@@ -1739,11 +1652,8 @@ describe('Haskell resolution round 2', () => {
         'getQualified value = value.field',
       ].join('\n'),
     });
-    try {
-      const importedField = graph.getNodesByName('field')
-        .find((node) => node.filePath === 'Origin.hs')!;
-      const localField = graph.getNodesByName('field')
-        .find((node) => node.filePath === 'Consumer.hs')!;
+      const importedField = nodeAt(graph, 'field', 'Origin.hs');
+      const localField = nodeAt(graph, 'field', 'Consumer.hs');
       expect(outgoingTargets(graph, 'getB', 'Consumer.hs')
         .some(({ edge, target }) => edge.kind === 'references' && target.id === importedField.id)).toBe(true);
       expect(outgoingTargets(graph, 'getB', 'Consumer.hs')
@@ -1756,9 +1666,6 @@ describe('Haskell resolution round 2', () => {
         .some(({ target }) => target.name === 'field')).toBe(false);
       expect(outgoingTargets(graph, 'getQualified', 'QualifiedDot.hs')
         .some(({ target }) => target.name === 'field')).toBe(false);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('claims Unicode record-dot projections and resolves only an annotated receiver', async () => {
@@ -1817,12 +1724,8 @@ describe('Haskell resolution round 2', () => {
         'use value = field value',
       ].join('\n'),
     });
-    try {
       expect(outgoingTargets(graph, 'use', 'Consumer.hs')
         .some(({ target }) => target.name === 'field')).toBe(false);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('keeps same-line local helper IDs distinct and resolves each call to its own scope', async () => {
@@ -1833,7 +1736,6 @@ describe('Haskell resolution round 2', () => {
         `run b = if b then let helper x = x + 1 in ${filler}helper 1 else let helper x = x + 2 in helper 2`,
       ].join('\n'),
     });
-    try {
       const helpers = graph.getNodesByName('helper')
         .filter((node) => node.filePath === 'Main.hs')
         .sort((a, b) => a.startColumn - b.startColumn);
@@ -1853,9 +1755,6 @@ describe('Haskell resolution round 2', () => {
         .filter((node) => node.filePath === 'Main.hs')
         .sort((a, b) => a.startColumn - b.startColumn)
         .map((helper) => helper.id)).toEqual(originalIds);
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('resolves imported, qualified, and self-alias constants used as values', async () => {
@@ -1865,7 +1764,6 @@ describe('Haskell resolution round 2', () => {
       'Qualified.hs': 'module Qualified where\nimport qualified X as Q\nyq = Q.foo\n',
       'A/B.hs': 'module A.B where\nimport qualified X as A.B\nys = A.B.foo\n',
     });
-    try {
       const foo = graph.getNodesByName('foo')
         .find((node) => node.filePath === 'X.hs' && node.kind === 'constant')!;
       expect(foo).toBeDefined();
@@ -1877,9 +1775,6 @@ describe('Haskell resolution round 2', () => {
         expect(outgoingTargets(graph, owner, filePath)
           .some(({ edge, target }) => edge.kind === 'references' && target.id === foo.id)).toBe(true);
       }
-    } finally {
-      graph.destroy();
-    }
   });
 
   it('turns only computation-returning whole-RHS aliases into call edges', async () => {
@@ -1915,10 +1810,8 @@ describe('Haskell resolution round 2', () => {
         'make = A.Token',
       ].join('\n'),
     });
-      const action = graph.getNodesByName('runAction')
-        .find((node) => node.filePath === 'Actions.hs')!;
-      const transaction = graph.getNodesByName('runTransaction')
-        .find((node) => node.filePath === 'Actions.hs')!;
+      const action = nodeAt(graph, 'runAction', 'Actions.hs');
+      const transaction = nodeAt(graph, 'runTransaction', 'Actions.hs');
       for (const [owner, target] of [
         ['plain', action],
         ['qualified', action],
@@ -1927,10 +1820,8 @@ describe('Haskell resolution round 2', () => {
           .some(({ edge, target: actual }) => edge.kind === 'calls' && actual.id === target.id)).toBe(true);
       }
 
-      const callback = graph.getNodesByName('callback')
-        .find((node) => node.filePath === 'Actions.hs')!;
-      const answer = graph.getNodesByName('answer')
-        .find((node) => node.filePath === 'Actions.hs')!;
+      const callback = nodeAt(graph, 'callback', 'Actions.hs');
+      const answer = nodeAt(graph, 'answer', 'Actions.hs');
       for (const [owner, target] of [
         ['transaction', transaction],
         ['choose', callback],
@@ -1974,12 +1865,10 @@ describe('Haskell resolution round 2', () => {
         'main _ = A.callback',
       ].join('\n'),
     });
-      const main = graph.getNodesByName('main').find((node) => node.filePath === 'Main.hs')!;
-      const alias = graph.getNodesByName('alias').find((node) => node.filePath === 'Library.hs')!;
-      const runAction = graph.getNodesByName('runAction')
-        .find((node) => node.filePath === 'Actions.hs')!;
-      const callback = graph.getNodesByName('callback')
-        .find((node) => node.filePath === 'Actions.hs')!;
+      const main = nodeAt(graph, 'main', 'Main.hs');
+      const alias = nodeAt(graph, 'alias', 'Library.hs');
+      const runAction = nodeAt(graph, 'runAction', 'Actions.hs');
+      const callback = nodeAt(graph, 'callback', 'Actions.hs');
 
       expect(main.kind).toBe('function');
       expect(outgoingTargets(graph, 'main', 'Main.hs')).toContainEqual(expect.objectContaining({
@@ -2022,8 +1911,7 @@ describe('Haskell resolution round 2', () => {
         kind: 'function',
         signature: 'action :: IO ()',
       }));
-      const target = graph.getNodesByName('target')
-        .find((node) => node.filePath === 'ForeignExport.hs')!;
+      const target = nodeAt(graph, 'target', 'ForeignExport.hs');
       expect(outgoingTargets(graph, 'action', 'ForeignExport.hs')).toContainEqual(
         expect.objectContaining({
           edge: expect.objectContaining({
@@ -2157,8 +2045,7 @@ describe('Haskell resolution round 2', () => {
         'customNoImplicitIO = A.runAction',
       ].join('\n'),
     });
-      const action = graph.getNodesByName('runAction')
-        .find((node) => node.filePath === 'Actions.hs')!;
+      const action = nodeAt(graph, 'runAction', 'Actions.hs');
       const canonical = outgoingTargets(graph, 'canonical', 'CanonicalConsumer.hs');
       expect(canonical.some(({ edge, target }) =>
         edge.kind === 'calls'
@@ -2193,8 +2080,7 @@ describe('Haskell resolution round 2', () => {
           edge.kind === 'calls' && target.id === action.id)).toBe(false);
       }
 
-      const callback = graph.getNodesByName('callback')
-        .find((node) => node.filePath === 'Actions.hs')!;
+      const callback = nodeAt(graph, 'callback', 'Actions.hs');
       const callbackOwner = outgoingTargets(graph, 'callbackOwner', 'CanonicalConsumer.hs');
       expect(callbackOwner.some(({ edge, target }) =>
         edge.kind === 'references' && target.id === callback.id)).toBe(true);
@@ -2237,8 +2123,7 @@ describe('Haskell resolution round 2', () => {
         'alias = A.runAction',
       ].join('\n'),
     });
-      const target = graph.getNodesByName('runAction')
-        .find((node) => node.filePath === 'CarrierActions.hs')!;
+      const target = nodeAt(graph, 'runAction', 'CarrierActions.hs');
       const canonical = outgoingTargets(graph, 'alias', 'CanonicalCarrier.hs');
       expect(canonical).toContainEqual(expect.objectContaining({
         edge: expect.objectContaining({
@@ -2309,8 +2194,7 @@ describe('Haskell resolution round 2', () => {
         'externalMixed = External.runAction 1',
       ].join('\n'),
     });
-      const localAction = graph.getNodesByName('runAction')
-        .find((node) => node.filePath === 'Actions.hs')!;
+      const localAction = nodeAt(graph, 'runAction', 'Actions.hs');
       const targetsLocalAction = (owner: string, filePath: string) =>
         outgoingTargets(graph, owner, filePath)
           .some(({ edge, target }) =>
@@ -2387,7 +2271,7 @@ describe('Haskell resolution round 2', () => {
     });
       const haskellTargets = new Set(
         ['encode', 'decode', 'select'].map((name) =>
-          graph.getNodesByName(name).find((node) => node.filePath === 'Targets.hs')!.id
+          nodeAt(graph, name, 'Targets.hs').id
         )
       );
       for (const [owner, filePath] of [
@@ -2401,8 +2285,7 @@ describe('Haskell resolution round 2', () => {
         )).toBe(false);
       }
 
-      const helper = graph.getNodesByName('jsHelper')
-        .find((node) => node.filePath === 'client.js')!;
+      const helper = nodeAt(graph, 'jsHelper', 'client.js');
       expect(outgoingTargets(graph, 'jsSameLanguage', 'client.js').some(({ edge, target }) =>
         edge.kind === 'calls' && target.id === helper.id
       )).toBe(true);
@@ -2438,18 +2321,12 @@ describe('Haskell resolution round 2', () => {
         '}',
       ].join('\n'),
     });
-      const app = graph.getNodesByName('App')
-        .find((node) => node.filePath === 'App.tsx')!;
-      const run = graph.getNodesByName('run')
-        .find((node) => node.filePath === 'Target.hs')!;
-      const haskellTarget = graph.getNodesByName('useHaskellTarget')
-        .find((node) => node.filePath === 'Target.hs')!;
-      const tsxTarget = graph.getNodesByName('useTsxTarget')
-        .find((node) => node.filePath === 'App.tsx')!;
-      const localHook = graph.getNodesByName('useLocalHook')
-        .find((node) => node.filePath === 'App.tsx')!;
-      const hiddenTarget = graph.getNodesByName('useHidden')
-        .find((node) => node.filePath === 'Library.hs')!;
+      const app = nodeAt(graph, 'App', 'App.tsx');
+      const run = nodeAt(graph, 'run', 'Target.hs');
+      const haskellTarget = nodeAt(graph, 'useHaskellTarget', 'Target.hs');
+      const tsxTarget = nodeAt(graph, 'useTsxTarget', 'App.tsx');
+      const localHook = nodeAt(graph, 'useLocalHook', 'App.tsx');
+      const hiddenTarget = nodeAt(graph, 'useHidden', 'Library.hs');
 
       expect(graph.getOutgoingEdges(app.id).some((edge) => edge.target === haskellTarget.id))
         .toBe(false);
@@ -2503,12 +2380,9 @@ describe('Haskell resolution round 2', () => {
         'export function jsCaller(value) { return jsTarget(value); }',
       ].join('\n'),
     });
-      const jsTarget = graph.getNodesByName('jsTarget')
-        .find((node) => node.filePath === 'client.js')!;
-      const jsCaller = graph.getNodesByName('jsCaller')
-        .find((node) => node.filePath === 'client.js')!;
-      const haskellTarget = graph.getNodesByName('handler')
-        .find((node) => node.filePath === 'Target.hs')!;
+      const jsTarget = nodeAt(graph, 'jsTarget', 'client.js');
+      const jsCaller = nodeAt(graph, 'jsCaller', 'client.js');
+      const haskellTarget = nodeAt(graph, 'handler', 'Target.hs');
       const resolver = (graph as unknown as {
         resolver: {
           createEdges(resolved: unknown[]): Array<{ target: string }>;

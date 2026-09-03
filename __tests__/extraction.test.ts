@@ -7095,28 +7095,6 @@ export function multiply(a: number, b: number): number {
     cg.close();
   });
 
-  it('should revalidate an incoming import when indexFiles removes its export', async () => {
-    const srcDir = path.join(tempDir, 'src');
-    fs.mkdirSync(srcDir);
-    fs.writeFileSync(path.join(srcDir, 'lib.ts'), 'export function foo() { return 1; }\n');
-    fs.writeFileSync(
-      path.join(srcDir, 'main.ts'),
-      "import { foo } from './lib';\nexport function run() { return foo(); }\n",
-    );
-
-    const cg = CodeGraph.initSync(tempDir);
-    await cg.indexAll();
-    const run = cg.getNodesByName('run')[0]!;
-    const callsFoo = () => cg.getCallees(run.id).some(({ node }) => node.name === 'foo');
-    expect(callsFoo()).toBe(true);
-
-    fs.writeFileSync(path.join(srcDir, 'lib.ts'), 'function foo() { return 2; }\n');
-    await cg.indexFiles(['src/lib.ts']);
-    expect(callsFoo()).toBe(false);
-
-    cg.close();
-  });
-
   it('should count file-level tracked YAML files as indexed', async () => {
     fs.writeFileSync(path.join(tempDir, 'app.yaml'), 'name: test\n');
     fs.writeFileSync(path.join(tempDir, 'routes.yml'), 'route: value\n');

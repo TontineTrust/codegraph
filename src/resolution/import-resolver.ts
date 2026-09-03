@@ -2153,20 +2153,7 @@ function extractHaskellReExports(content: string): ReExport[] {
   }
   if (close < 0 || !/^\s*where\b/.test(cleaned.slice(close + 1))) return [];
 
-  const items: string[] = [];
-  let item = '';
-  depth = 0;
-  for (const char of cleaned.slice(open + 1, close)) {
-    if (char === '(') depth++;
-    else if (char === ')') depth--;
-    if (char === ',' && depth === 0) {
-      if (item.trim()) items.push(item.trim());
-      item = '';
-    } else {
-      item += char;
-    }
-  }
-  if (item.trim()) items.push(item.trim());
+  const items = splitHaskellList(cleaned.slice(open + 1, close));
 
   const out: ReExport[] = [];
   const imports = extractHaskellImports(content);

@@ -261,8 +261,6 @@ interface HaskellDeclarationHead {
   /** Full applied LHS, useful for instance node display names. */
   displayName: string;
   nameNode: SyntaxNode;
-  patterns: SyntaxNode | null;
-  isInfix: boolean;
 }
 
 /** Extract a declaration's LHS without ever falling through into its RHS. */
@@ -275,8 +273,6 @@ function declarationHead(node: SyntaxNode, source: string): HaskellDeclarationHe
       baseName,
       displayName: collapseWhitespace(`${baseName} ${patterns ? getNodeText(patterns, source) : ''}`),
       nameNode,
-      patterns,
-      isInfix: false,
     };
   }
 
@@ -287,8 +283,6 @@ function declarationHead(node: SyntaxNode, source: string): HaskellDeclarationHe
     baseName: declaredInfixName(getNodeText(operator, source)),
     displayName: collapseWhitespace(getNodeText(infix, source)),
     nameNode: operator,
-    patterns: infix,
-    isInfix: true,
   };
 }
 
@@ -2340,7 +2334,6 @@ export const haskellExtractor: LanguageExtractor = {
   extractBareReference: extractHaskellBareReference,
   isLexicallyBound,
   isPatternPosition: isHaskellPatternPosition,
-  higherOrderFunctionNames: HOF_NAMES,
 
   packageTypes: ['header'],
   extractPackage: (node, source) => {

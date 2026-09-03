@@ -176,15 +176,6 @@ export interface LanguageExtractor {
 
   /** Additional node types to treat as class declarations (e.g. Dart: 'mixin_declaration') */
   extraClassNodeTypes?: string[];
-  /**
-   * Additional field names to walk for call/structural extraction after the
-   * primary `bodyField`. Used by Haskell where a function's `where`-clause
-   * bindings live in a sibling `binds:` field (not inside the `match:` body),
-   * so calls inside `where` would otherwise be silently dropped. Each named
-   * field is fed through `visitFunctionBody` with the same enclosing-function
-   * scope as the primary body.
-   */
-  extraBodyFields?: string[];
   /** Whether methods can be top-level without enclosing class (Go: true) */
   methodsAreTopLevel?: boolean;
   /**
@@ -317,9 +308,6 @@ export interface LanguageExtractor {
 
   /** Return true when an application-shaped AST node is a pattern, not an expression call. */
   isPatternPosition?: (node: SyntaxNode) => boolean;
-
-  /** Function-first combinators whose first argument is semantically called. */
-  higherOrderFunctionNames?: ReadonlySet<string>;
 
   /**
    * Node types representing a file-level package/namespace declaration
