@@ -827,7 +827,13 @@ export class CodeGraph {
           try { return this.queries.isNameSegmentVocabEmpty(); } catch { return false; }
         })();
 
-        const result = await this.orchestrator.sync(options.onProgress, options.paths);
+        // Writer-side backstop for deferred WAL checkpointing (#1539): sync
+        // previously armed the valve but never called backpressure(), so the
+        // hard/file caps were never enforced during daemon catch-up — only
+        // timer-driven PASSIVE checkpoints ran, and a query-pool reader could
+        // pin frames while the WAL grew without a bound.
+        const backpressure = walValve ? () => walValve!.backpressure() : undefined;
+        const result = await this.orchestrator.sync(options.onProgress, options.paths, backpressure);
 
         // Fold the store phase's WAL BEFORE the post-store reads below
         // (resolution reads on the main thread) — same rationale as
@@ -931,7 +937,8 @@ export class CodeGraph {
                   current: done,
                   total: totalPasses,
                 });
-              }
+              },
+              backpressure
             );
           }
         }
@@ -997,7 +1004,8 @@ export class CodeGraph {
                 current: done,
                 total: totalPasses,
               });
-            }
+            },
+            backpressure
           );
         }
 

@@ -36,83 +36,10 @@ import type CodeGraph from '../index';
 import type { Node, Edge } from '../types';
 import { isTestFile } from '../search/query-utils';
 
-const HASKELL_FLOW_ID_CONTINUE_SOURCE = String.raw`[\p{L}\p{Mn}\p{N}_']`;
-// Flow tokenization is shared by every language. `$` is not a Haskell id
-// character, but it is a legal leading/continuing character in JavaScript-like
-// identifiers and was supported here before the Haskell Unicode expansion.
-// Keep the broader spelling out of CONID/module parsing while preserving that
-// cross-language contract.
-const FLOW_IDENTIFIER_CONTINUE_SOURCE = String.raw`[\p{L}\p{M}\p{N}_'$]`;
-const HASKELL_FLOW_IDENTIFIER_SOURCE = String.raw`[\p{Ll}\p{Lo}\p{Lu}\p{Lt}_$]${FLOW_IDENTIFIER_CONTINUE_SOURCE}*#*`;
-const HASKELL_FLOW_CONID_SOURCE = String.raw`(?:[\p{Lu}\p{Lt}]${HASKELL_FLOW_ID_CONTINUE_SOURCE}*)`;
-const HASKELL_FLOW_MODULE_SOURCE = String.raw`${HASKELL_FLOW_CONID_SOURCE}(?:\.${HASKELL_FLOW_CONID_SOURCE})*`;
-const QUALIFIED_OPERATOR_CONTAINER_SOURCE = String.raw`${HASKELL_FLOW_CONID_SOURCE}(?:(?:\.|::)${HASKELL_FLOW_CONID_SOURCE})*`;
-const HASKELL_ASCII_OPERATOR_BODY = /^[-!#$%&*+.\/<=>?@\\^|~:]+$/;
-const HASKELL_UNICODE_SYMBOL_OR_PUNCTUATION = /^[\p{S}\p{P}]$/u;
-const HASKELL_OPERATOR_FORBIDDEN = new Set(['(', ')', '[', ']', '{', '}', ',', ';', '`', '_', '"', "'"]);
+import { lastQualifierPart, matchesSymbol, HASKELL_FLOW_IDENTIFIER_SOURCE, HASKELL_FLOW_MODULE_SOURCE, QUALIFIED_OPERATOR_CONTAINER_SOURCE, isHaskellOperatorBody, qualifiedHaskellOperator, qualifiedHaskellOperatorMatches } from './symbol-lookup';
 
-function isHaskellOperatorBody(value: string): boolean {
-  if (!value) return false;
-  if (HASKELL_ASCII_OPERATOR_BODY.test(value)) return true;
-  return [...value].every((char) =>
-    !HASKELL_OPERATOR_FORBIDDEN.has(char)
-    && (HASKELL_ASCII_OPERATOR_BODY.test(char)
-      || HASKELL_UNICODE_SYMBOL_OR_PUNCTUATION.test(char))
-  );
-}
-
-interface QualifiedHaskellOperator {
-  moduleName: string;
-  operatorBody: string;
-  nodeName: string;
-  canonical: string;
-}
-
-/** Parse `M.<+>`, `(M.<+>)`, `M::<+>`, or canonical `M::(<+>)`. */
-function qualifiedHaskellOperator(symbol: string): QualifiedHaskellOperator | null {
-  let value = symbol.trim();
-  if (value.startsWith('(') && value.endsWith(')')) value = value.slice(1, -1).trim();
-  const canonical = value.match(new RegExp(
-    `^(${QUALIFIED_OPERATOR_CONTAINER_SOURCE})::\\(([^()\\s]+)\\)$`,
-    'u',
-  ));
-  const colonRaw = canonical ? null : value.match(new RegExp(
-    `^(${QUALIFIED_OPERATOR_CONTAINER_SOURCE})::([^()\\s]+)$`,
-    'u',
-  ));
-  const dotted = canonical || colonRaw ? null : value.match(new RegExp(
-    `^(${HASKELL_FLOW_MODULE_SOURCE})\\.([^()\\s]+)$`,
-    'u',
-  ));
-  const match = canonical ?? colonRaw ?? dotted;
-  if (!match || !isHaskellOperatorBody(match[2]!)) return null;
-  const moduleName = match[1]!;
-  const operatorBody = match[2]!;
-  const nodeName = `(${operatorBody})`;
-  return { moduleName, operatorBody, nodeName, canonical: `${moduleName}::${nodeName}` };
-}
-
-function qualifiedHaskellOperatorMatches(node: Node, parsed: QualifiedHaskellOperator): boolean {
-  if (node.language === 'haskell') {
-    if (node.name !== parsed.nodeName) return false;
-    // Without graph context only a module-scope declaration is provable. A
-    // nested local/instance implementation is not addressable as `Module.<+>`.
-    return node.qualifiedName === parsed.canonical;
-  }
-  // `Module.<+>` is also valid in languages such as Scala. The tokenizer uses
-  // the parenthesized Haskell canonical form because it has no project/language
-  // context, so recover the pre-existing non-Haskell lookup explicitly and
-  // exactly instead of dropping those symbols or falling back to fuzzy FTS.
-  if (node.name !== parsed.operatorBody) return false;
-  const containers = new Set([
-    parsed.moduleName,
-    parsed.moduleName.replace(/\./g, '::'),
-  ]);
-  return [...containers].some((container) => {
-    const suffix = `${container}::${parsed.operatorBody}`;
-    return node.qualifiedName === suffix || node.qualifiedName.endsWith(`::${suffix}`);
-  });
-}
+// Preserve the existing imports while sharing the matcher with the CLI and MCP.
+export { RUST_PATH_PREFIXES, lastQualifierPart, matchesSymbol } from './symbol-lookup';
 
 /** Split graph hierarchy separators only when they are outside operator parens. */
 function qualifiedNameSegments(value: string): string[] {
@@ -134,103 +61,14 @@ function qualifiedNameSegments(value: string): string[] {
   return segments.filter(Boolean);
 }
 
-/**
- * Rust path roots that have no file-system equivalent — `crate` is the
- * current crate, `super` is the parent module, `self` is the current
- * module. Used by `matchesSymbol` to strip these before file-path
- * matching so `crate::configurator::stage_apply::run` resolves the
- * same as `configurator::stage_apply::run`.
- */
-export const RUST_PATH_PREFIXES = new Set(['crate', 'super', 'self']);
-
-/**
- * Last `::` / `.` / `/`-separated segment of a qualified symbol. An Erlang
- * arity tail (`mod::fn/3`, `fn/3`) is stripped first — the useful last segment
- * is the function name, never the digits (#1610).
- */
-export function lastQualifierPart(symbol: string): string {
-  const haskellOperator = qualifiedHaskellOperator(symbol);
-  if (haskellOperator) return haskellOperator.nodeName;
-  const bareOperator = /^\(([^()\s]+)\)$/.exec(symbol)?.[1];
-  if (bareOperator && isHaskellOperatorBody(bareOperator)) return symbol;
-  const noArity = symbol.replace(/\/\d{1,3}$/, '') || symbol;
-  const parts = noArity.split(/::|[./]/).filter((p) => p.length > 0);
-  return parts[parts.length - 1] ?? symbol;
-}
-
-/**
- * Check if a node matches a symbol query.
- *
- * Accepts simple names (`run`) and three flavors of qualifier:
- *   - dotted     `Session.request`         (TS/JS/Python)
- *   - colon-pair `stage_apply::run`        (Rust, C++, Ruby)
- *   - slash      `configurator/stage_apply` (path-ish)
- *
- * Multi-level qualifiers compose: `crate::configurator::stage_apply::run`
- * works. Rust path prefixes (`crate`, `super`, `self`) are stripped so
- * the canonical `crate::module::symbol` form resolves.
- *
- * Resolution order, last part must always equal `node.name`:
- *   1. Suffix-match against `qualifiedName` (handles class-scoped methods
- *      where the extractor builds the qualified name from the AST stack)
- *   2. File-path containment (handles file-derived modules in Rust/
- *      Python — `stage_apply::run` matches a `run` in `stage_apply.rs`)
- */
-export function matchesSymbol(node: Node, symbol: string): boolean {
-  const haskellOperator = qualifiedHaskellOperator(symbol);
-  if (haskellOperator) return qualifiedHaskellOperatorMatches(node, haskellOperator);
-  // Erlang arity spelling (`fn/3`, `mod:fn/3` → normalized `mod.fn/3`): when
-  // the node's qualifiedName carries an arity (`mod::fn/3`, #1610), the
-  // written arity must match it exactly; the remaining comparison then runs
-  // on the arity-less spelling. A node with no arity in its qualifiedName
-  // keeps the original symbol (a `/` there means a path-ish name instead).
-  const aritySpelling = /^(.+)\/(\d{1,3})$/.exec(symbol);
-  if (aritySpelling) {
-    const nodeArity = /\/(\d{1,3})$/.exec(node.qualifiedName ?? '')?.[1];
-    if (nodeArity !== undefined) {
-      if (nodeArity !== aritySpelling[2]) return false;
-      symbol = aritySpelling[1]!;
-    }
-  }
-  // Simple name match
-  if (node.name === symbol) return true;
-  // File basename match (e.g., "product-card" matches "product-card.liquid")
-  if (node.kind === 'file' && node.name.replace(/\.[^.]+$/, '') === symbol) return true;
-
-  // Qualified-name lookups: split on any supported separator. `\w` keeps
-  // identifier chars (incl. `_`) intact; everything else is treated as
-  // a separator we tolerate.
-  if (!/[.\/]|::/.test(symbol)) return false;
-  const parts = symbol.split(/::|[./]/).filter((p) => p.length > 0);
-  if (parts.length < 2) return false;
-
-  const lastPart = parts[parts.length - 1]!;
-  if (node.name !== lastPart) return false;
-
-  // Stage 1: qualified-name suffix match. The extractor joins the
-  // semantic hierarchy with `::`, so `Session.request` and
-  // `Session::request` both become `Session::request` here.
-  const colonSuffix = parts.join('::');
-  if (node.qualifiedName.includes(colonSuffix)) return true;
-
-  // Stage 2: file-path containment. Rust modules and Python packages
-  // are not in `qualifiedName` — they're encoded in the file path. So
-  // `stage_apply::run` matches a `run` in any file whose path
-  // contains a `stage_apply` segment (with or without an extension).
-  //
-  // Filter out Rust path prefixes that have no file-system equivalent.
-  const containerHints = parts.slice(0, -1).filter((p) => !RUST_PATH_PREFIXES.has(p));
-  if (containerHints.length === 0) return false;
-
-  const segments = node.filePath.split('/').filter((s) => s.length > 0);
-  return containerHints.every((hint) =>
-    segments.some((seg) => seg === hint || seg.replace(/\.[^.]+$/, '') === hint)
-  );
-}
 
 /**
  * Find ALL symbols matching a name. Used by callers/callees/impact to aggregate
  * results across all matching symbols (e.g., multiple classes with an `execute` method).
+ *
+ * Exact matches only (#1473): a missing / mistyped name must NOT silently
+ * resolve to the top fuzzy FTS hit under the caller's typed label. Closest
+ * hits may appear in `note` as a did-you-mean hint when `nodes` is empty.
  */
 export function findAllSymbols(cg: CodeGraph, symbol: string): { nodes: Node[]; note: string } {
   const qualifiedOperator = qualifiedHaskellOperator(symbol);
@@ -315,42 +153,57 @@ export function findAllSymbols(cg: CodeGraph, symbol: string): { nodes: Node[]; 
     // FTS result for a nearby `(⊕)`.
     return { nodes, note };
   }
-  let results = cg.searchNodes(symbol, { limit: 50 });
 
-  // Mirror the fallback in `findSymbol` for qualified queries — FTS
-  // strips colons, so a module-qualified lookup needs a second pass
-  // by the bare last part.
-  if (results.length === 0 && /[.\/]|::/.test(symbol)) {
-    const tail = lastQualifierPart(symbol);
-    if (tail && tail !== symbol) results = cg.searchNodes(tail, { limit: 50 });
+  const isQualified = /[.\/]|::/.test(symbol);
+  let exactNodes: Node[];
+
+  if (!isQualified) {
+    // Direct index — every exact-name overload, case-sensitive. Avoids FTS
+    // ranking a differently-cased sibling above the real node (#1473 Fetch).
+    exactNodes = cg.getNodesByName(symbol);
+  } else {
+    let results = cg.searchNodes(symbol, { limit: 50 });
+    // Mirror findSymbolMatches — FTS strips colons, so re-search by bare tail.
+    if (results.length === 0) {
+      const tail = lastQualifierPart(symbol);
+      if (tail && tail !== symbol) results = cg.searchNodes(tail, { limit: 50 });
+    }
+    exactNodes = results
+      .filter((r) => matchesSymbol(r.node, symbol))
+      .map((r) => r.node);
   }
 
-  if (results.length === 0) {
-    return { nodes: [], note: '' };
+  if (exactNodes.length === 0) {
+    const fuzzy = cg.searchNodes(symbol, { limit: 5 });
+    const suggestions = [
+      ...new Set(fuzzy.map((r) => r.node.name).filter((n) => n !== symbol)),
+    ].slice(0, 3);
+    const note =
+      suggestions.length > 0
+        ? `\n\n> **Note:** no symbol named "${symbol}". Did you mean: ${suggestions.join(', ')}?`
+        : '';
+    return { nodes: [], note };
   }
 
-  const exactMatches = results.filter(r => matchesSymbol(r.node, symbol));
-
-  if (exactMatches.length <= 1) {
-    const node = exactMatches[0]?.node ?? results[0]!.node;
-    return { nodes: [node], note: '' };
+  if (exactNodes.length === 1) {
+    return { nodes: exactNodes, note: '' };
   }
 
   // Same generated-file down-rank as findSymbol — keeps callers/callees
   // /impact aggregation aligned (a query against "Send" returns the
   // hand-written implementations before the protobuf scaffold).
-  const isGen = cg.generatedFilePredicate(exactMatches.map((r) => r.node.filePath));
-  const ranked = [...exactMatches].sort((a, b) => {
-    const aGen = isGen(a.node.filePath) ? 1 : 0;
-    const bGen = isGen(b.node.filePath) ? 1 : 0;
+  const isGen = cg.generatedFilePredicate(exactNodes.map((n) => n.filePath));
+  const ranked = [...exactNodes].sort((a, b) => {
+    const aGen = isGen(a.filePath) ? 1 : 0;
+    const bGen = isGen(b.filePath) ? 1 : 0;
     return aGen - bGen;
   });
 
-  const locations = ranked.map(r =>
-    `${r.node.kind} at ${r.node.filePath}:${r.node.startLine}`
+  const locations = ranked.map(
+    (n) => `${n.kind} at ${n.filePath}:${n.startLine}`
   );
   const note = `\n\n> **Note:** Aggregated results across ${ranked.length} symbols named "${symbol}": ${locations.join(', ')}`;
-  return { nodes: ranked.map(r => r.node), note };
+  return { nodes: ranked, note };
 }
 
 /** Node kinds that can sit on a call chain. */
