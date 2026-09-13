@@ -3504,6 +3504,36 @@ export class QueryBuilder {
     return out;
   }
 
+  /**
+   * Load only the stamped Haskell edges a module-topology edit can invalidate.
+   * Joining by source avoids materializing every Haskell node and issuing an
+   * outgoing-edge query for each one, including nodes with no import edges.
+   */
+  getHaskellImportResolutionEdges(): Array<Edge & {
+    edgeId: number;
+    sourceFilePath: string;
+    sourceLanguage: Language;
+  }> {
+    const metadata = "CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END";
+    const rows = this.db.prepare(`
+      SELECT e.*, src.file_path AS source_file_path
+        FROM nodes src
+        JOIN edges e ON e.source = src.id
+       WHERE src.language = 'haskell'
+         AND (json_extract(${metadata}, '$.resolvedBy') = 'import'
+           OR json_extract(${metadata}, '$.haskellImportDependent') = 1
+           OR json_extract(${metadata}, '$.refKind') = 'haskell_effect_alias')
+         AND json_type(${metadata}, '$.refName') = 'text'
+         AND length(json_extract(${metadata}, '$.refName')) > 0
+    `).all() as Array<EdgeRow & { source_file_path: string }>;
+    return rows.map((row) => ({
+      ...rowToEdge(row),
+      edgeId: row.id,
+      sourceFilePath: row.source_file_path,
+      sourceLanguage: 'haskell',
+    }));
+  }
+
   /** Delete edges by primary key — the rebind pass's half of a re-resolution. */
   deleteEdgesByIds(edgeIds: number[]): number {
     if (edgeIds.length === 0) return 0;

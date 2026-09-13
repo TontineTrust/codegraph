@@ -26,6 +26,15 @@ export interface ImportInfo {
   handledRefs?: boolean;
 }
 
+/** A semantic reference represented by syntax outside normal call nodes. */
+export interface BareReferenceInfo {
+  name: string;
+  referenceKind: ReferenceKind;
+  node?: SyntaxNode;
+  /** Resolution candidates or language-specific evidence attached by the hook. */
+  candidates?: string[];
+}
+
 /**
  * Information about a single variable within a declaration.
  * Returned by a language's extractVariables hook.
@@ -314,9 +323,7 @@ export interface LanguageExtractor {
     node: SyntaxNode,
     source: string,
     stateOwner?: object,
-  ) => { name: string; referenceKind: ReferenceKind; node?: SyntaxNode }
-    | Array<{ name: string; referenceKind: ReferenceKind; node?: SyntaxNode }>
-    | undefined;
+  ) => BareReferenceInfo | BareReferenceInfo[] | undefined;
 
   /**
    * Return true when a name at this syntax node is introduced by an enclosing

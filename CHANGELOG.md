@@ -253,6 +253,18 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 #### Haskell indexing
 
+- Haskell pattern synonyms now retain calls through local helpers while excluding quoted code that is not executed.
+
+- Haskell calls now respect nested and inline local scopes, keeping helpers from capturing unrelated calls elsewhere in a function.
+
+- Haskell names shared by a module declaration and an import remain unresolved when ambiguous, including after an imported module changes its exports.
+
+- Haskell record fields shared by several constructors resolve as one selector per type, and applied deriving clauses no longer create false class relationships.
+
+- Haskell record construction now links each field to the type named by its constructor, including through qualified imports.
+
+- Incremental Haskell updates refresh affected module imports with fewer database reads while preserving unrelated graph relationships.
+
 - Haskell identifiers written in Chinese, Hangul, Tangut and other Unicode letter scripts now parse and resolve in ordinary, qualified and Template Haskell expressions instead of silently disappearing from the graph.
 
 - External imports in headerless Haskell scripts now stay unresolved instead of incorrectly pointing back to their own import declaration.

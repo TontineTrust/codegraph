@@ -85,6 +85,7 @@ const exportedSymbolMemos = new WeakMap<
   Map<string, ExportedSymbolWalkResult>
 >();
 const HASKELL_WILDCARD_TARGET_MEMO_LIMIT = 50_000;
+const haskellLocalConflictMemos = new WeakMap<ResolutionContext, LRUCache<string, boolean>>();
 type HaskellWildcardTargets = { targetIds: string[]; ambiguous: boolean };
 const haskellWildcardTargetMemos = new WeakMap<
   ResolutionContext,
@@ -278,6 +279,7 @@ export function clearImportResolverMemos(context: ResolutionContext): void {
   importPathMemos.delete(context);
   exportedSymbolMemos.delete(context);
   haskellWildcardTargetMemos.delete(context);
+  haskellLocalConflictMemos.delete(context);
   fileExportIndexes.delete(context);
   haskellModuleIndexes.delete(context);
   luaFileBasenameIndexes.delete(context);
@@ -2886,6 +2888,71 @@ export function resolveViaImport(
   return null;
 }
 
+/** Check import visibility after a record constructor has identified one exact field. */
+export function haskellRecordFieldIsVisible(
+  ref: UnresolvedRef,
+  field: Node,
+  context: ResolutionContext,
+): boolean {
+  const parsed = parseHaskellReferenceName(ref.referenceName);
+  if (field.filePath === ref.filePath) {
+    return parsed.qualifier === null || context.getNodesInFile(ref.filePath).some((node) =>
+      node.language === 'haskell' && node.kind === 'namespace' && node.name === parsed.qualifier
+    );
+  }
+  // DisambiguateRecordFields permits an unqualified label even when its field
+  // is in scope only under a module alias. Every import has a namespace route;
+  // traverse those routes with an exact-entity predicate, preserving export
+  // lists, hiding, parent selections, and package qualification.
+  const imports = context.getImportMappings(ref.filePath, 'haskell');
+  for (const imp of imports) {
+    if (!imp.isNamespace || imp.packageQualifier !== undefined) continue;
+    if (parsed.qualifier !== null && parsed.qualifier !== imp.localName) continue;
+    if (!haskellReExportCouldExposeName(imp, parsed.member, 'value')) continue;
+    const modulePath = resolveImportPath(imp.source, ref.filePath, 'haskell', context);
+    if (!modulePath) continue;
+    const target = findExportedSymbolResult(modulePath, {
+      isDefault: false,
+      isNamespace: false,
+      exportedName: parsed.member,
+      memberName: null,
+      haskellNamespace: 'value',
+      haskellAllows: (node) => node.id === field.id && haskellReExportAllows(imp, parsed.member, node),
+    }, 'haskell', context, new Set());
+    if (target && target !== HASKELL_EXPORT_AMBIGUOUS) return true;
+  }
+  return false;
+}
+
+/** Module-level declarations share the import namespace; only nested locals shadow it. */
+export function haskellImportConflictsWithLocal(
+  ref: UnresolvedRef,
+  localTarget: Node,
+  context: ResolutionContext,
+): boolean {
+  let memo = haskellLocalConflictMemos.get(context);
+  if (!memo) {
+    memo = new LRUCache(HASKELL_WILDCARD_TARGET_MEMO_LIMIT);
+    haskellLocalConflictMemos.set(context, memo);
+  }
+  // Only the namespace, import scope, spelling, and candidate affect this
+  // check; caller identity and source position were handled by lexical scope.
+  const valueContext = ref.referenceKind === 'calls' || ref.referenceKind === 'references'
+    || ref.referenceKind === 'function_ref' || ref.referenceKind === 'haskell_effect_alias';
+  const key = `${ref.filePath}\0${ref.referenceName}\0${valueContext ? 'v' : 't'}\0${localTarget.id}`;
+  const cached = memo.get(key);
+  if (cached !== undefined) return cached;
+  const result = resolveHaskellImportedReference(
+    ref,
+    context.getImportMappings(ref.filePath, 'haskell'),
+    context,
+    localTarget,
+  );
+  const conflicts = result?.targetNodeId !== localTarget.id;
+  memo.set(key, conflicts);
+  return conflicts;
+}
+
 /**
  * Resolve Haskell references through the importing module's import table.
  * Bare names search unqualified imports only; `Alias::member` searches the
@@ -2894,7 +2961,8 @@ export function resolveViaImport(
 function resolveHaskellImportedReference(
   ref: UnresolvedRef,
   imports: ImportMapping[],
-  context: ResolutionContext
+  context: ResolutionContext,
+  localTarget?: Node,
 ): ResolvedRef | null {
   const parsedReference = parseHaskellReferenceName(ref.referenceName);
   const referenceName = parsedReference.normalized;
@@ -3031,7 +3099,7 @@ function resolveHaskellImportedReference(
     const receiver = parsedReference.qualifier;
     const member = parsedReference.member;
     if (!member) return null;
-    const targets: Node[] = [];
+    const targets: Node[] = localTarget ? [localTarget] : [];
     let hasUnindexedCompetitor = false;
     for (const imp of importIndex.namespacesByLocalName.get(receiver) ?? []) {
       if (!haskellReExportCouldExposeName(imp, member, haskellNamespace)) continue;
@@ -3057,8 +3125,8 @@ function resolveHaskellImportedReference(
   // import list does not outrank an unrestricted import: `import A (foo)` plus
   // `import B` is ambiguous when A.foo and B.foo are distinct, but remains
   // valid when both routes denote the same original entity.
-  const explicitTargets: Node[] = [];
-  let hasExplicitImport = false;
+  const explicitTargets: Node[] = localTarget ? [localTarget] : [];
+  let hasExplicitImport = localTarget !== undefined;
   let hasUnresolvedExplicitImport = false;
   for (const imp of importIndex.explicitByLocalName.get(referenceName) ?? []) {
     if (valueContext && imp.haskellTypeOnly === true) continue;

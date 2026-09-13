@@ -120,6 +120,24 @@ data Thing = Thing
       .toEqual(['Eq', 'Read', 'Show']);
   });
 
+  it('keeps deriving class arguments and via carriers out of implements edges', () => {
+    const source = `
+{-# LANGUAGE DeriveAnyClass, DerivingStrategies, DerivingVia, MultiParamTypeClasses #-}
+module Round2 where
+data Thing = Thing
+  deriving anyclass (C Int, A.D (Maybe Bool))
+newtype Wrapped = Wrapped Int
+  deriving (Eq, Ord) via (Identity Int)
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const classesFor = (name: string) => refsFor(result, name)
+      .filter((ref) => ref.referenceKind === 'implements')
+      .map((ref) => ref.referenceName)
+      .sort();
+    expect(classesFor('Thing')).toEqual(['A::D', 'C']);
+    expect(classesFor('Wrapped')).toEqual(['Eq', 'Ord']);
+  });
+
   it('extracts infix type, data, class, instance, and constructor declarations from their LHS', () => {
     const source = `
 {-# LANGUAGE FlexibleInstances, MultiParamTypeClasses, TypeFamilies, TypeOperators #-}
@@ -461,6 +479,35 @@ visibleTypeApplication (Just @helper value) = helper value
       expect(refs(owner), owner).toEqual([
         expect.objectContaining({ referenceKind: 'calls' }),
       ]);
+    }
+  });
+
+  it('does not leak bindings from nested expressions into later statements or qualifiers', () => {
+    const source = `
+module Round2 where
+afterLet = do
+  consume (let action = () in action)
+  action
+afterDo = do
+  if condition then do { action <- acquire; consume action } else pure ()
+  action
+guarded input
+  | check (let action = () in action), action input = input
+comprehended input = [value | check (let action = () in action), action input, value <- input]
+directLet = do
+  let action = pure ()
+  action
+directGuard input
+  | let action = check, action input = input
+directComprehension input = [value | let action = check, action input, value <- input]
+`;
+    const result = extractFromSource('Round2.hs', source);
+    for (const owner of ['afterLet', 'afterDo', 'guarded', 'comprehended']) {
+      expect(refsFor(result, owner).filter((ref) => ref.referenceName === 'action'), owner)
+        .toEqual([expect.objectContaining({ referenceKind: 'calls' })]);
+    }
+    for (const owner of ['directLet', 'directGuard', 'directComprehension']) {
+      expect(refsFor(result, owner).some((ref) => ref.referenceName === 'action'), owner).toBe(false);
     }
   });
 
@@ -1133,6 +1180,33 @@ newtype NewRecord = NewRecord { left, right :: Int }
     expect(fields).not.toEqual(expect.arrayContaining(['a']));
   });
 
+  it('groups shared record selectors within each data type while preserving distinct parents', () => {
+    const source = `
+{-# LANGUAGE DuplicateRecordFields #-}
+module Round2 (Interval(..), Other(..)) where
+data Interval
+  = Daily { hour :: Int }
+  | Weekly { hour :: Int, day :: Int }
+  | Monthly { hour, minute :: Int }
+data Other = Other { hour :: Int }
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const hours = result.nodes.filter((node) => node.kind === 'field' && node.name === 'hour');
+    expect(hours).toHaveLength(2);
+    const intervalHour = hours.find((node) => node.qualifiedName === 'Round2::Interval::hour')!;
+    expect(intervalHour).toEqual(expect.objectContaining({
+      isExported: true,
+      startLine: 5,
+      endLine: 7,
+    }));
+    expect(result.nodes.filter((node) => node.kind === 'field').map((node) => node.name).sort())
+      .toEqual(['day', 'hour', 'hour', 'minute']);
+    const interval = result.nodes.find((node) => node.kind === 'enum' && node.name === 'Interval')!;
+    expect(result.edges.filter((edge) => edge.kind === 'contains'
+      && edge.source === interval.id && edge.target === intervalHour.id))
+      .toHaveLength(1);
+  });
+
   it('materializes record pattern-synonym selectors as module bindings', () => {
     const source = `
 {-# LANGUAGE PatternSynonyms #-}
@@ -1231,6 +1305,34 @@ nested r = r { user.name = "x" }
       .toEqual(expect.arrayContaining(['user', 'name']));
   });
 
+  it('preserves the constructor proof and qualifier of record construction labels', () => {
+    const source = `
+module Round2 where
+construct = V1 { asset = load }
+qualified = (Assets.V1) { Assets.asset = load }
+pun = V1 { asset }
+update value = value { asset = load }
+nested = V1 { asset.name = load }
+`;
+    const result = extractFromSource('Round2.hs', source);
+    for (const [owner, referenceName, constructor] of [
+      ['construct', 'asset', 'V1'],
+      ['qualified', 'Assets::asset', 'Assets::V1'],
+      ['pun', 'asset', 'V1'],
+    ]) {
+      expect(refsFor(result, owner!).filter((ref) => ref.referenceName === referenceName))
+        .toEqual([expect.objectContaining({
+          referenceKind: 'references',
+          candidates: [`haskell-record-constructor:${constructor}`],
+        })]);
+    }
+    for (const owner of ['update', 'nested']) {
+      const labels = refsFor(result, owner).filter((ref) => ['asset', 'name'].includes(ref.referenceName));
+      expect(labels.length).toBeGreaterThan(0);
+      expect(labels.every((ref) => ref.candidates === undefined)).toBe(true);
+    }
+  });
+
   it('walks matcher and builder expressions owned by pattern synonyms', () => {
     const source = `
 {-# LANGUAGE PatternSynonyms, ViewPatterns #-}
@@ -1252,6 +1354,47 @@ pattern Q x <- (Views.view config -> Outer (Inner x)) where
       expect.objectContaining({ referenceKind: 'calls', referenceName: 'make' }),
     ]));
     expect(qRefs.some((ref) => ref.referenceName === 'x')).toBe(false);
+  });
+
+  it('materializes local functions in pattern-synonym builders and attributes their calls', () => {
+    const source = `
+{-# LANGUAGE PatternSynonyms #-}
+module Round2 where
+pattern Built x <- Just x where
+  Built x = let build y = Just (prepare y) in build x
+`;
+    const result = extractFromSource('Round2.hs', source);
+    expect(result.nodes.find((node) => node.name === 'build')).toEqual(expect.objectContaining({
+      kind: 'function',
+      qualifiedName: 'Round2::Built::build',
+      isExported: false,
+    }));
+    const builderRefs = refsFor(result, 'Built');
+    expect(builderRefs).toContainEqual(expect.objectContaining({
+      referenceKind: 'calls', referenceName: 'build',
+    }));
+    expect(builderRefs.some((ref) => ref.referenceName === 'prepare')).toBe(false);
+    expect(refsFor(result, 'build')).toContainEqual(expect.objectContaining({
+      referenceKind: 'calls', referenceName: 'prepare',
+    }));
+  });
+
+  it('honors quotation staging in pattern-synonym matchers and builders', () => {
+    const source = `
+{-# LANGUAGE PatternSynonyms, TemplateHaskell, ViewPatterns #-}
+module Round2 where
+pattern Quoted x <- (view [| quotedTarget $(makeSyntax 1) |] -> Just x) where
+  Quoted x = Just [| quotedTarget $(makeSyntax 2) |]
+`;
+    const refs = refsFrom(source, 'Quoted').refs;
+    expect(refs.some((ref) => ref.referenceName === 'quotedTarget')).toBe(false);
+    expect(refs.filter((ref) => ref.referenceName === 'makeSyntax')).toEqual([
+      expect.objectContaining({ referenceKind: 'calls', line: 4 }),
+      expect.objectContaining({ referenceKind: 'calls', line: 5 }),
+    ]);
+    expect(refs).toContainEqual(expect.objectContaining({
+      referenceKind: 'calls', referenceName: 'view',
+    }));
   });
 
   it('preserves dots that belong to symbolic operator names', () => {

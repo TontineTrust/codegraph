@@ -538,6 +538,260 @@ describe('Haskell resolution round 2', () => {
       assertPositionedCalls('equations', [[7, 7], [8, 8]]);
   });
 
+  it('keeps module declarations ambiguous with competing imports while nested bindings shadow them', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nhelper x = x + 10\n',
+      'Explicit.hs': [
+        'module Explicit where',
+        'import Origin (helper)',
+        'helper x = helper x',
+        'run = helper 1',
+        'local x = helper x where helper y = y',
+        'self = Explicit.helper 1',
+      ].join('\n'),
+      'Wildcard.hs': [
+        'module Wildcard where',
+        'import Origin',
+        'helper x = x',
+        'run = helper 1',
+      ].join('\n'),
+      'Qualified.hs': [
+        'module Qualified where',
+        'import qualified Origin as Qualified',
+        'helper x = x',
+        'run = Qualified.helper 1',
+        'local = helper 1',
+      ].join('\n'),
+      'Hidden.hs': [
+        'module Hidden where',
+        'import Origin hiding (helper)',
+        'helper x = x',
+        'run = helper 1',
+      ].join('\n'),
+    });
+    for (const [owner, filePath] of [
+      ['helper', 'Explicit.hs'], ['run', 'Explicit.hs'],
+      ['run', 'Wildcard.hs'], ['run', 'Qualified.hs'],
+    ] as const) {
+      expect(outgoingTargets(graph, owner, filePath)
+        .filter(({ target }) => target.name === 'helper')).toEqual([]);
+    }
+    for (const [owner, filePath] of [
+      ['local', 'Explicit.hs'], ['self', 'Explicit.hs'],
+      ['local', 'Qualified.hs'], ['run', 'Hidden.hs'],
+    ] as const) {
+      expect(outgoingTargets(graph, owner, filePath)
+        .filter(({ edge, target }) => edge.kind === 'calls'
+          && target.name === 'helper' && target.filePath === filePath))
+        .toHaveLength(1);
+    }
+  });
+
+  it('does not let a local helper escape its let or equation scope', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nhelper x = x + 10\n',
+      'Consumer.hs': [
+        'module Consumer where',
+        'import Origin (helper)',
+        'branch b = if b',
+        '  then let helper x = x',
+        '       in helper 1',
+        '  else helper 2',
+        'inline b = if b then let helper x = x in helper 1 else helper 2',
+        'equations True = helper 1 where helper x = x',
+        'equations False = helper 2',
+      ].join('\n'),
+    });
+    const external = nodeAt(graph, 'helper', 'Origin.hs');
+    for (const owner of ['branch', 'inline', 'equations']) {
+      const calls = outgoingTargets(graph, owner, 'Consumer.hs')
+        .filter(({ edge, target }) => edge.kind === 'calls' && target.name === 'helper');
+      expect(calls).toHaveLength(2);
+      expect(calls.filter(({ target }) => target.id === external.id)).toHaveLength(1);
+      expect(calls.filter(({ target }) => target.filePath === 'Consumer.hs')).toHaveLength(1);
+    }
+  });
+
+  it('prefers the innermost recursive let scope over the nearest declaration', async () => {
+    const graph = await createGraph({
+      'Nested.hs': [
+        'module Nested where',
+        'run =',
+        '  let helper x = x',
+        '  in let result = helper 1',
+        '         unused = 0',
+        '         spacer = 0',
+        '         helper x = x + 1',
+        '     in result',
+      ].join('\n'),
+    });
+    const run = nodeAt(graph, 'run', 'Nested.hs');
+    expect(graph.getOutgoingEdges(run.id)
+      .filter((edge) => edge.kind === 'calls')
+      .map((edge) => graph.getNode(edge.target))
+      .filter((node) => node?.name === 'helper')
+      .map((node) => node?.startLine)).toEqual([7]);
+  });
+
+  it.each(['helper (let x = 1 in x)', 'helper "let"'])(
+    'keeps the recursive inner binding when an inline argument contains let: %s',
+    async (call) => {
+      const graph = await createGraph({
+        'Nested.hs': [
+          'module Nested where',
+          `run = let helper _ = 1 in let result = ${call}; helper _ = 2 in result`,
+        ].join('\n'),
+      });
+      const helpers = graph.getNodesByName('helper')
+        .filter((node) => node.filePath === 'Nested.hs')
+        .sort((left, right) => left.startColumn - right.startColumn);
+      expect(helpers).toHaveLength(2);
+      expect(outgoingTargets(graph, 'run', 'Nested.hs')
+        .filter(({ edge, target }) => edge.kind === 'calls' && target.name === 'helper')
+        .map(({ target }) => target.id)).toEqual([helpers[1]!.id]);
+    },
+  );
+
+  it('resolves one selector shared by multiple constructors without merging unrelated parents', async () => {
+    const graph = await createGraph({
+      'Records.hs': [
+        '{-# LANGUAGE DuplicateRecordFields #-}',
+        'module Records where',
+        'data Event = Created { payload :: Int } | Changed { payload :: Int }',
+        'data Other = Other { payload :: Int }',
+      ].join('\n'),
+      'Consumer.hs': [
+        'module Consumer where',
+        'import Records (Event(payload))',
+        'readPayload event = payload event',
+      ].join('\n'),
+    });
+    const fields = graph.getNodesByName('payload')
+      .filter((node) => node.kind === 'field' && node.filePath === 'Records.hs');
+    expect(fields).toHaveLength(2);
+    const eventField = fields.find((node) => node.qualifiedName === 'Records::Event::payload')!;
+    expect(outgoingTargets(graph, 'readPayload', 'Consumer.hs')
+      .filter(({ edge }) => edge.kind === 'calls')
+      .map(({ target }) => target.id)).toEqual([eventField.id]);
+  });
+
+  it('uses explicit record constructors to distinguish local and imported field labels', async () => {
+    const graph = await createGraph({
+      'Origin.hs': [
+        'module Origin (Original(..)) where',
+        'data Original = Original { payload :: Int }',
+      ].join('\n'),
+      'Consumer.hs': [
+        '{-# LANGUAGE DuplicateRecordFields #-}',
+        'module Consumer where',
+        'import Origin (Original(..))',
+        'import qualified Origin as O',
+        'import qualified External as E',
+        'data Local = Local { payload :: Int }',
+        'local = Local { payload = 1 }',
+        'imported = Original { payload = 1 }',
+        'qualified = O.Original { payload = 1 }',
+        'qualifiedField = O.Original { O.payload = 1 }',
+        'twice = (O.Original { payload = 1 },',
+        '         O.Original { payload = 2 })',
+        'again = O.Original { payload = 3 }',
+        'external = E.Unknown { payload = 1 }',
+      ].join('\n'),
+      'Hidden.hs': [
+        'module Hidden where',
+        'import Origin (Original(Original))',
+        'hidden = Original { payload = 1 }',
+      ].join('\n'),
+    });
+    const localField = nodeAt(graph, 'payload', 'Consumer.hs');
+    const importedField = nodeAt(graph, 'payload', 'Origin.hs');
+    for (const [owner, target] of [
+      ['local', localField], ['imported', importedField],
+      ['qualified', importedField], ['qualifiedField', importedField],
+    ] as const) {
+      expect(outgoingTargets(graph, owner, 'Consumer.hs')
+        .filter(({ edge, target: node }) => edge.kind === 'references' && node.kind === 'field')
+        .map(({ target: node }) => node.id)).toEqual([target.id]);
+    }
+    const twice = nodeAt(graph, 'twice', 'Consumer.hs');
+    expect(outgoingTargets(graph, 'twice', 'Consumer.hs')
+      .filter(({ target }) => target.kind === 'field')
+      .map(({ edge }) => edge.line)).toEqual([twice.startLine, twice.startLine + 1]);
+    expect(outgoingTargets(graph, 'again', 'Consumer.hs')
+      .filter(({ target }) => target.kind === 'field')
+      .map(({ edge }) => edge.source)).toEqual([nodeAt(graph, 'again', 'Consumer.hs').id]);
+    for (const [owner, filePath] of [['external', 'Consumer.hs'], ['hidden', 'Hidden.hs']] as const) {
+      expect(outgoingTargets(graph, owner, filePath)
+        .filter(({ target }) => target.kind === 'field')).toEqual([]);
+    }
+
+    // Replay the constructor proof when an unchanged consumer loses and then
+    // regains an imported field through an export-list edit.
+    fs.writeFileSync(path.join(tmpDir!, 'Origin.hs'), [
+      'module Origin (Original(Original)) where',
+      'data Original = Original { payload :: Int }',
+    ].join('\n'));
+    await graph.sync();
+    for (const owner of ['imported', 'qualified', 'qualifiedField']) {
+      expect(outgoingTargets(graph, owner, 'Consumer.hs')
+        .filter(({ target }) => target.kind === 'field')).toEqual([]);
+    }
+    expect(outgoingTargets(graph, 'local', 'Consumer.hs')
+      .filter(({ target }) => target.kind === 'field').map(({ target }) => target.id))
+      .toEqual([localField.id]);
+    fs.writeFileSync(path.join(tmpDir!, 'Origin.hs'), [
+      'module Origin (Original(..)) where',
+      'data Original = Original { payload :: Int }',
+    ].join('\n'));
+    await graph.sync();
+    for (const owner of ['imported', 'qualified', 'qualifiedField']) {
+      const fields = outgoingTargets(graph, owner, 'Consumer.hs')
+        .filter(({ target }) => target.kind === 'field');
+      expect(fields.map(({ target }) => target.id)).toEqual([importedField.id]);
+      expect(fields[0]!.edge.metadata?.refCandidates).toEqual([
+        `haskell-record-constructor:${owner === 'imported' ? 'Original' : 'O::Original'}`,
+      ]);
+    }
+  });
+
+  it('starts an ordinary do-let scope at its declaration and keeps mdo recursive', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nhelper x = pure x\n',
+      'Consumer.hs': [
+        '{-# LANGUAGE RecursiveDo #-}',
+        'module Consumer where',
+        'import Origin (helper)',
+        'ordinary = do',
+        '  helper 1',
+        '  let helper x = pure x',
+        '  helper 2',
+        'recursive = mdo',
+        '  helper 1',
+        '  let helper x = pure x',
+        '  helper 2',
+        'recursiveBlock = do',
+        '  rec',
+        '    helper 1',
+        '    let helper x = pure x',
+        '  helper 2',
+      ].join('\n'),
+    });
+    const external = nodeAt(graph, 'helper', 'Origin.hs');
+    const ordinary = outgoingTargets(graph, 'ordinary', 'Consumer.hs')
+      .filter(({ edge, target }) => edge.kind === 'calls' && target.name === 'helper');
+    expect(ordinary).toHaveLength(2);
+    expect(ordinary.find(({ edge }) => edge.line === 5)?.target.id).toBe(external.id);
+    expect(ordinary.find(({ edge }) => edge.line === 7)?.target.filePath).toBe('Consumer.hs');
+    const recursive = outgoingTargets(graph, 'recursive', 'Consumer.hs')
+      .filter(({ edge, target }) => edge.kind === 'calls' && target.name === 'helper');
+    expect(recursive).toHaveLength(2);
+    expect(recursive.every(({ target }) => target.filePath === 'Consumer.hs')).toBe(true);
+    const recursiveBlock = outgoingTargets(graph, 'recursiveBlock', 'Consumer.hs')
+      .filter(({ edge, target }) => edge.kind === 'calls' && target.name === 'helper');
+    expect(recursiveBlock).toHaveLength(2);
+    expect(recursiveBlock.every(({ target }) => target.filePath === 'Consumer.hs')).toBe(true);
+  });
+
   it('resolves data-family instance constructors through Family(..)', async () => {
     const graph = await createGraph({
       'Family.hs': [
@@ -1137,16 +1391,17 @@ describe('Haskell resolution round 2', () => {
       ].join('\n'));
 
       const queries = (graph as unknown as {
-        queries: { deleteEdgesBySource(nodeId: string): void };
+        queries: { deleteEdgesByIds(edgeIds: number[]): number };
       }).queries;
-      const originalDelete = queries.deleteEdgesBySource.bind(queries);
+      const originalDelete = queries.deleteEdgesByIds.bind(queries);
       let injected = false;
-      queries.deleteEdgesBySource = (nodeId: string) => {
-        originalDelete(nodeId);
+      queries.deleteEdgesByIds = (edgeIds: number[]) => {
+        const deleted = originalDelete(edgeIds);
         if (!injected) {
           injected = true;
           throw new Error('injected Haskell invalidation interruption');
         }
+        return deleted;
       };
       await expect(graph.sync()).rejects.toThrow('injected Haskell invalidation interruption');
 

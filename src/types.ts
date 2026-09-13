@@ -347,6 +347,8 @@ export type ReferenceKind = EdgeKind | 'function_ref' | 'haskell_effect_alias';
 
 /** Internal payload tag stored in `UnresolvedReference.candidates`. */
 export const HASKELL_EFFECT_ALIAS_HEAD_PREFIX = 'haskell-effect-head:';
+/** Constructor proof for a record-construction field label. */
+export const HASKELL_RECORD_CONSTRUCTOR_PREFIX = 'haskell-record-constructor:';
 
 /**
  * A reference that couldn't be resolved during extraction

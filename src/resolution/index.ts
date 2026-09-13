@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX } from '../types';
+import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX } from '../types';
 import { QueryBuilder } from '../db/queries';
 import {
   UnresolvedRef,
@@ -20,7 +20,7 @@ import {
   isImportableKind,
 } from './types';
 import { isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesKnownFamily, dumpNameMatcherProfile, clearNameMatcherMemos } from './name-matcher';
-import { resolveViaImport, resolvePhpImportedStaticCall, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
+import { resolveViaImport, resolvePhpImportedStaticCall, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
 import { ResolverPool, minRefsForPool } from './resolver-pool';
 import { resolveAliasBinding } from './alias-binding';
 import { detectFrameworks } from './frameworks';
@@ -238,6 +238,10 @@ export class ReferenceResolver {
   private lowerNameCache: LRUCache<string, Node[]>; // lower(name) → nodes cache
   private qualifiedNameCache: LRUCache<string, Node[]>; // qualified_name → nodes cache
   private fileLinesCache: LRUCache<string, string[] | null>; // file → split lines cache
+  private haskellNodeByIdCache: LRUCache<string, Node | null>;
+  private haskellParentCache: LRUCache<string, Node | null>;
+  private haskellRecordMembersCache: LRUCache<string, Map<string, Node[]>>;
+  private haskellRecordFieldCache: LRUCache<string, Omit<ResolvedRef, 'original'> | null>;
   private methodMatchCache: LRUCache<string, Node[]>; // lang\0Type::method → matching method nodes
   // Per-(language, methodName) owner index for getMethodMatches: buckets a
   // method name's candidates by their qualifiedName's last two segments so a
@@ -305,6 +309,10 @@ export class ReferenceResolver {
     // file-ordered, so a small cache still hits nearly always.
     this.fileLinesCache = new LRUCache(contentLimit);
     this.methodMatchCache = new LRUCache(limit);
+    this.haskellNodeByIdCache = new LRUCache(limit);
+    this.haskellParentCache = new LRUCache(limit);
+    this.haskellRecordFieldCache = new LRUCache(limit);
+    this.haskellRecordMembersCache = new LRUCache(limit);
 
     this.context = this.createContext();
   }
@@ -401,6 +409,10 @@ export class ReferenceResolver {
     this.qualifiedNameCache.clear();
     this.fileLinesCache.clear();
     this.methodMatchCache.clear();
+    this.haskellNodeByIdCache.clear();
+    this.haskellParentCache.clear();
+    this.haskellRecordFieldCache.clear();
+    this.haskellRecordMembersCache.clear();
     this.methodOwnerIndexCache.clear();
     this.supertypeMemo.clear();
     this.supertypeGen++;
@@ -882,6 +894,95 @@ export class ReferenceResolver {
     return false;
   }
 
+  // Haskell containment comes from extraction and stays fixed throughout a
+  // resolution pass. Repeated refs in one equation reuse the same node/scope
+  // chain; clearCaches drops these bounded snapshots before any source replay.
+  private getHaskellNodeById(id: string): Node | null {
+    const cached = this.haskellNodeByIdCache.get(id);
+    if (cached !== undefined) return cached;
+    const node = this.queries.getNodeById(id);
+    this.haskellNodeByIdCache.set(id, node);
+    return node;
+  }
+
+  private getHaskellContainingNode(id: string): Node | null {
+    const cached = this.haskellParentCache.get(id);
+    if (cached !== undefined) return cached;
+    const parentId = this.queries.getIncomingEdges(id, ['contains'])[0]?.source;
+    const parent = parentId ? this.getHaskellNodeById(parentId) : null;
+    this.haskellParentCache.set(id, parent);
+    return parent;
+  }
+
+  private getHaskellRecordFields(constructorId: string): Map<string, Node[]> {
+    const cached = this.haskellRecordMembersCache.get(constructorId);
+    if (cached !== undefined) return cached;
+    const fields = new Map<string, Node[]>();
+    const owner = this.getHaskellContainingNode(constructorId)?.id;
+    if (owner) {
+      for (const edge of this.queries.getOutgoingEdges(owner, ['contains'])) {
+        const node = this.getHaskellNodeById(edge.target);
+        if (node?.kind !== 'field') continue;
+        const named = fields.get(node.name) ?? [];
+        named.push(node);
+        fields.set(node.name, named);
+      }
+    }
+    this.haskellRecordMembersCache.set(constructorId, fields);
+    return fields;
+  }
+
+  /** A construction label is selected by its exact constructor, not the bare value namespace. */
+  private resolveHaskellRecordField(ref: UnresolvedRef): {
+    claimed: boolean;
+    result: ResolvedRef | null;
+  } {
+    const marker = ref.language === 'haskell' && ref.referenceKind === 'references'
+      ? ref.candidates?.find((candidate) => candidate.startsWith(HASKELL_RECORD_CONSTRUCTOR_PREFIX))
+      : undefined;
+    if (!marker) return { claimed: false, result: null };
+    const key = `${ref.filePath}\0${ref.referenceName}\0${marker}`;
+    const cached = this.haskellRecordFieldCache.get(key);
+    if (cached !== undefined) {
+      return { claimed: true, result: cached ? { ...cached, original: ref } : null };
+    }
+    const result = this.resolveHaskellRecordFieldUncached(ref, marker);
+    this.haskellRecordFieldCache.set(key, result ? {
+      targetNodeId: result.targetNodeId,
+      confidence: result.confidence,
+      resolvedBy: result.resolvedBy,
+      metadata: result.metadata,
+    } : null);
+    return { claimed: true, result };
+  }
+
+  private resolveHaskellRecordFieldUncached(ref: UnresolvedRef, marker: string): ResolvedRef | null {
+    const constructorRef: UnresolvedRef = {
+      ...ref,
+      referenceName: marker.slice(HASKELL_RECORD_CONSTRUCTOR_PREFIX.length),
+      candidates: undefined,
+    };
+    const lexical = this.resolveHaskellLexical(constructorRef);
+    const resolvedConstructor = lexical.claimed
+      ? lexical.result
+      : resolveViaImport(constructorRef, this.context);
+    if (!resolvedConstructor) return null;
+    const constructor = this.getHaskellNodeById(resolvedConstructor.targetNodeId);
+    if (constructor?.kind !== 'enum_member') return null;
+    const fieldName = parseHaskellReferenceName(ref.referenceName).member;
+    const fields = this.getHaskellRecordFields(constructor.id).get(fieldName) ?? [];
+    if (fields.length !== 1 || !haskellRecordFieldIsVisible(ref, fields[0]!, this.context)) {
+      return null;
+    }
+    return {
+      original: ref,
+      targetNodeId: fields[0]!.id,
+      confidence: 0.99,
+      resolvedBy: resolvedConstructor.resolvedBy,
+      metadata: { haskellImportDependent: true },
+    };
+  }
+
   /**
    * Recognize a simple OverloadedRecordDot projection at the unresolved ref's
    * source position. `undefined` means this is not projection syntax; `null`
@@ -1019,7 +1120,7 @@ export class ReferenceResolver {
     const receiver = this.getHaskellProjectionReceiver(ref);
     if (receiver === undefined) return { claimed: false, result: null };
     if (receiver === null) return { claimed: true, result: null };
-    const from = this.queries.getNodeById(ref.fromNodeId);
+    const from = this.getHaskellNodeById(ref.fromNodeId);
     if (!from) return { claimed: true, result: null };
     const parent = this.inferHaskellProjectionParent(ref, from, receiver);
     if (!parent) return { claimed: true, result: null };
@@ -1034,7 +1135,7 @@ export class ReferenceResolver {
         && ownedByParent(node));
     const imported = this.gateLanguage(resolveViaImport(ref, this.context), ref);
     if (imported) {
-      const target = this.queries.getNodeById(imported.targetNodeId);
+      const target = this.getHaskellNodeById(imported.targetNodeId);
       if (target?.kind === 'field' && ownedByParent(target)) targets.push(target);
     }
     const unique = [...new Map(targets.map((node) => [node.id, node])).values()];
@@ -1051,9 +1152,9 @@ export class ReferenceResolver {
   }
 
   /**
-   * Resolve Haskell's lexical/module scope before imports. Local declarations
-   * shadow imports, and nested helpers are visible only from their owner,
-   * siblings, and descendants — a same-file global name match is not enough.
+   * Resolve Haskell's lexical/module scope before imports. Nested helpers
+   * shadow imports only inside their lexical range; module-level declarations
+   * must remain unambiguous with the names contributed by imports.
    */
   private resolveHaskellLexical(ref: UnresolvedRef): {
     claimed: boolean;
@@ -1068,7 +1169,7 @@ export class ReferenceResolver {
         && ref.referenceKind !== 'implements')
     ) return { claimed: false, result: null };
 
-    const from = this.queries.getNodeById(ref.fromNodeId);
+    const from = this.getHaskellNodeById(ref.fromNodeId);
     if (!from) return { claimed: false, result: null };
     const moduleNode = this.context.getNodesInFile(ref.filePath)
       .find((node) => node.kind === 'namespace' && node.language === 'haskell');
@@ -1115,6 +1216,9 @@ export class ReferenceResolver {
           result: null,
         };
       }
+      if (haskellImportConflictsWithLocal(ref, typeCandidates[0]!, this.context)) {
+        return { claimed: true, result: null };
+      }
       return {
         claimed: true,
         result: {
@@ -1122,6 +1226,7 @@ export class ReferenceResolver {
           targetNodeId: typeCandidates[0]!.id,
           confidence: 0.99,
           resolvedBy: 'qualified-name',
+          metadata: { haskellImportDependent: true },
         },
       };
     }
@@ -1141,9 +1246,7 @@ export class ReferenceResolver {
       visitedScopes.add(scopeNode.id);
       visibleFunctionParents.set(scopeNode.qualifiedName, rank--);
       if (scopeNode.qualifiedName === moduleScope) break;
-      const containmentEdge: Edge | undefined = this.queries
-        .getIncomingEdges(scopeNode.id, ['contains'])[0];
-      scopeNode = containmentEdge ? this.queries.getNodeById(containmentEdge.source) : null;
+      scopeNode = this.getHaskellContainingNode(scopeNode.id);
     }
     if (moduleScope && !visibleFunctionParents.has(moduleScope)) {
       visibleFunctionParents.set(moduleScope, 1);
@@ -1154,8 +1257,24 @@ export class ReferenceResolver {
       // the same qualified spelling. Follow THIS method's containment edge;
       // looking up every owner by qualifiedName misclassifies the selector as
       // an instance implementation and erases otherwise valid calls.
-      return this.queries.getIncomingEdges(node.id, ['contains']).some((edge) =>
-        this.queries.getNodeById(edge.source)?.decorators?.includes('haskell-instance') === true
+      return this.getHaskellContainingNode(node.id)?.decorators?.includes('haskell-instance') === true;
+    };
+
+    const lexicalRange = (node: Node): [number, number, number, number] | null => {
+      const decorator = node.decorators?.find((value) => value.startsWith('haskell-lexical-range:'));
+      const match = decorator?.match(/^haskell-lexical-range:(\d+):(\d+)(?::(\d+):(\d+))?$/);
+      if (!match) return null;
+      // Retain compatibility with indexes containing the original line-only
+      // range. New extraction includes columns to separate inline branches.
+      return match[3] === undefined
+        ? [Number(match[1]), 0, Number(match[2]), Number.POSITIVE_INFINITY]
+        : [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4])];
+    };
+    const withinLexicalRange = (node: Node): boolean => {
+      const range = lexicalRange(node);
+      return range === null || (
+        (ref.line > range[0] || (ref.line === range[0] && ref.column >= range[1]))
+        && (ref.line < range[2] || (ref.line === range[2] && ref.column < range[3]))
       );
     };
 
@@ -1167,6 +1286,11 @@ export class ReferenceResolver {
           // let/where helper that happens to share the same leaf name.
           return parent === moduleScope ? [{ node, rank: 300 }] : [];
         }
+        // A graph owner is broader than a Haskell scope: the same equation
+        // node contains both branches and every merged function equation.
+        // Filter even a sole helper so a let/where binding cannot leak into
+        // another branch/equation and capture an otherwise imported name.
+        if (parent !== moduleScope && !withinLexicalRange(node)) return [];
         const lexicalRank = visibleFunctionParents.get(parent);
         return lexicalRank === undefined ? [] : [{ node, rank: 200 + lexicalRank }];
       }
@@ -1214,26 +1338,35 @@ export class ReferenceResolver {
       if (sameQualifiedLocal) {
         const sourceLine = this.context.getFileLines?.(ref.filePath)?.[ref.line - 1];
         if (sourceLine) {
-          const visible = best.filter(({ node }) => !(
-            node.startLine === ref.line
-            && node.startColumn > ref.column
-            // A later sibling/nested `let` is outside this call's scope. Keep
-            // ordinary forward references within the same recursive let group:
-            // their shared `let` keyword precedes the reference, not the node.
-            && /\blet\b/.test(sourceLine.slice(ref.column, node.startColumn))
-          ));
+          const visible = best.filter(({ node }) => {
+            const range = lexicalRange(node);
+            // Precise ranges already establish visibility. An intervening
+            // `let` may belong to an argument or string literal, so retain
+            // this positional fallback only for older indexes.
+            if (range && Number.isFinite(range[3])) return true;
+            return !(
+              node.startLine === ref.line
+              && node.startColumn > ref.column
+              && /\blet\b/.test(sourceLine.slice(ref.column, node.startColumn))
+            );
+          });
           if (visible.length > 0) best = visible;
         }
-        const lexicalRange = (node: Node): [number, number] | null => {
-          const decorator = node.decorators?.find((value) => value.startsWith('haskell-lexical-range:'));
-          const match = decorator?.match(/^haskell-lexical-range:(\d+):(\d+)$/);
-          return match ? [Number(match[1]), Number(match[2])] : null;
-        };
-        const containing = best.filter(({ node }) => {
-          const range = lexicalRange(node);
-          return range !== null && ref.line >= range[0] && ref.line <= range[1];
+        // Every binding in a let group is recursive. A nested group's helper
+        // therefore shadows the outer one even when its declaration is farther
+        // away from this reference. Keep the innermost containing ranges before
+        // the positional fallback used for older indexes.
+        best = best.filter(({ node }) => {
+          const outer = lexicalRange(node);
+          if (!outer) return true;
+          return !best.some(({ node: other }) => {
+            const inner = lexicalRange(other);
+            if (!inner) return false;
+            const start = inner[0] - outer[0] || inner[1] - outer[1];
+            const end = inner[2] - outer[2] || inner[3] - outer[3];
+            return start >= 0 && end <= 0 && (start > 0 || end < 0);
+          });
         });
-        if (containing.length > 0) best = containing;
 
         const distance = (node: Node): [number, number] => {
           const lineDistance = ref.line < node.startLine
@@ -1271,13 +1404,24 @@ export class ReferenceResolver {
       }
     }
     if (best.length !== 1) return { claimed: true, result: null };
+    const target = best[0]!.node;
+    const moduleLevel = selfQualified
+      || ((target.kind === 'function' || target.kind === 'constant')
+        ? qualifiedOwner(target) === moduleScope
+        : target.kind !== 'method' || !methodOwnerIsInstance(target));
+    if (moduleLevel && haskellImportConflictsWithLocal(ref, target, this.context)) {
+      return { claimed: true, result: null };
+    }
     return {
       claimed: true,
       result: {
         original: ref,
-        targetNodeId: best[0]!.node.id,
+        targetNodeId: target.id,
         confidence: 0.99,
         resolvedBy: 'qualified-name',
+        // A new export in an imported module can make a previously unique
+        // module-level name ambiguous without changing this source file.
+        ...(moduleLevel ? { metadata: { haskellImportDependent: true } } : {}),
       },
     };
   }
@@ -1297,7 +1441,7 @@ export class ReferenceResolver {
       : this.gateLanguage(resolveViaImport(valueRef, this.context), valueRef);
     if (!resolved) return null;
 
-    const target = this.queries.getNodeById(resolved.targetNodeId);
+    const target = this.getHaskellNodeById(resolved.targetNodeId);
     if (!target || !(
       target.kind === 'function'
       || target.kind === 'method'
@@ -1365,6 +1509,9 @@ export class ReferenceResolver {
     if (ref.referenceKind === 'haskell_effect_alias') {
       return this.resolveHaskellEffectAlias(ref);
     }
+
+    const haskellRecordField = this.resolveHaskellRecordField(ref);
+    if (haskellRecordField.claimed) return haskellRecordField.result;
 
     const haskellProjection = this.resolveHaskellProjection(ref);
     if (haskellProjection.claimed) return haskellProjection.result;
@@ -1697,7 +1844,8 @@ export class ReferenceResolver {
           // deliberately NOT resurrected for the same reason.
           refName: ref.original.referenceName,
           ...(ref.original.referenceKind !== kind ? { refKind: ref.original.referenceKind } : {}),
-          ...(ref.original.referenceKind === 'haskell_effect_alias'
+          ...((ref.original.referenceKind === 'haskell_effect_alias'
+            || (ref.original.language === 'haskell' && ref.original.referenceKind === 'references'))
             && ref.original.candidates
             ? { refCandidates: ref.original.candidates }
             : {}),

@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getChildByField, getNodeText, getPrecedingDocstring } from '../tree-sitter-helpers';
-import type { ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
-import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX } from '../../types';
+import type { BareReferenceInfo, ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
+import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX } from '../../types';
 
 // tree-sitter-haskell emits signatures, default signatures, and equations as
 // separate syntax nodes. Keep them under one graph node per lexical declaration.
@@ -565,11 +565,28 @@ function declarationGroupKey(
   return `${ctx.filePath}:${kind}:${scopeId}:${containerSpan}:${name}`;
 }
 
+function isRecursiveDo(node: SyntaxNode): boolean {
+  const keyword = node.child(0);
+  // QualifiedDo wraps the keyword in do_module (`M.mdo`). Inspect that token
+  // once instead of allocating and scanning the entire do block per reference.
+  return keyword?.type === 'mdo'
+    || (keyword?.type === 'do_module' && keyword.lastChild?.type === 'mdo');
+}
+
 function lexicalRangeDecorator(node: SyntaxNode): string | null {
   let ancestor = node.parent;
+  let bindingStatement: SyntaxNode | null = null;
   while (ancestor) {
+    if (ancestor.type === 'let' || ancestor.type === 'rec') bindingStatement = ancestor;
     if (['let_in', 'alternative', 'function', 'do', 'list_comprehension'].includes(ancestor.type)) {
-      return `haskell-lexical-range:${ancestor.startPosition.row + 1}:${ancestor.endPosition.row + 1}`;
+      // A do-let declaration scopes over its own RHS and later statements,
+      // including its enclosing recursive group when present. An mdo keeps
+      // every declaration recursive across the whole block.
+      const start = ancestor.type === 'do' && bindingStatement && !isRecursiveDo(ancestor)
+        ? bindingStatement.startPosition
+        : ancestor.startPosition;
+      const end = ancestor.endPosition;
+      return `haskell-lexical-range:${start.row + 1}:${start.column}:${end.row + 1}:${end.column}`;
     }
     ancestor = ancestor.parent;
   }
@@ -1099,7 +1116,12 @@ function declarationBindings(
       }
       continue;
     }
-    stack.push(...current.namedChildren);
+    // Only these containers introduce bindings into the surrounding scope.
+    // Descending into an arbitrary expression leaks nested let/do declarations
+    // into later statements, guards, or comprehension qualifiers.
+    if (current.type === 'let' || current.type === 'local_binds' || current.type === 'rec') {
+      stack.push(...current.namedChildren);
+    }
   }
   return bindings;
 }
@@ -1217,15 +1239,11 @@ function isLexicallyBound(
       if (binding && !binding.materializedNode) return true;
     }
     if (ancestor.type === 'do') {
-      const recursiveDo = new RegExp(
-        `^\\s*(?:${HASKELL_MODULE_NAME_SOURCE}\\.)?mdo\\b`,
-        'u',
-      ).test(getNodeText(ancestor, source));
       const binding = bindingAt(
         ancestor,
         name,
         source,
-        recursiveDo ? null : branch.startIndex,
+        isRecursiveDo(ancestor) ? null : branch.startIndex,
         stateOwner,
       );
       if (binding && !binding.materializedNode) return true;
@@ -1549,9 +1567,7 @@ function extractHaskellBareReference(
   node: SyntaxNode,
   source: string,
   stateOwner?: object,
-): { name: string; referenceKind: 'references' | 'function_ref'; node?: SyntaxNode }
-  | Array<{ name: string; referenceKind: 'references' | 'function_ref'; node?: SyntaxNode }>
-  | undefined {
+): BareReferenceInfo | BareReferenceInfo[] | undefined {
   if (node.type === 'left_section' || node.type === 'right_section') {
     const operator = getChildByField(node, 'operator')
       ?? node.namedChildren.find((child) => [
@@ -1592,10 +1608,30 @@ function extractHaskellBareReference(
       stack.push(...current.namedChildren);
     }
     fields.sort((left, right) => left.startIndex - right.startIndex);
+    const recordExpression = node.parent?.type === 'record'
+      ? getChildByField(node.parent, 'expression')
+      : null;
+    const recordConstructor = recordExpression
+      ? normalizedSimpleReference(recordExpression, source)
+      : null;
+    const constructorMember = recordConstructor
+      ? haskellReferenceParts(recordConstructor.name).member
+      : '';
+    // Construction identifies the selector's owner even with DuplicateRecordFields.
+    // Value updates and nested field paths need receiver types, so leave them
+    // without this proof instead of treating a variable as a constructor.
+    const constructorProof = fields.length === 1
+      && recordConstructor
+      && (HASKELL_CONID_START_RE.test(constructorMember) || constructorMember.startsWith(':'))
+      ? [`${HASKELL_RECORD_CONSTRUCTOR_PREFIX}${recordConstructor.name}`]
+      : undefined;
     return fields.map((field) => ({
-      name: getNodeText(field, source).trim(),
+      name: fieldRoot.type === 'qualified'
+        ? normalizeReferenceText(getNodeText(fieldRoot, source))
+        : getNodeText(field, source).trim(),
       referenceKind: 'references' as const,
       node: field,
+      ...(constructorProof ? { candidates: constructorProof } : {}),
     })).filter((reference) => reference.name.length > 0);
   }
 
@@ -1723,17 +1759,10 @@ function derivedClassNames(node: SyntaxNode, source: string): Array<{ name: stri
   if (derivingClauses.length === 0) return [];
   const result: Array<{ name: string; node: SyntaxNode }> = [];
   for (const deriving of derivingClauses) {
-    const classes = getChildByField(deriving, 'classes') ?? deriving;
-    const stack = [classes];
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      if (current.type === 'qualified' || current.type === 'name' || current.type === 'prefix_id') {
-        const reference = normalizedSimpleReference(current, source);
-        if (reference) result.push(reference);
-      } else {
-        stack.push(...current.namedChildren);
-      }
-    }
+    // Deriving accepts applied classes (`C Int`) as well as bare names. Reuse
+    // the superclass head traversal so arguments and deriving-via carriers
+    // cannot become fabricated implemented classes.
+    result.push(...constraintHeads(getChildByField(deriving, 'classes'), source));
   }
   return result;
 }
@@ -1887,6 +1916,7 @@ function handleDataDeclaration(
   if (!typeNode) return true;
 
   ctx.pushScope(typeNode.id);
+  const recordSelectors = new Map<string, ExtractedNode>();
   const walk = (current: SyntaxNode): void => {
     if (CONSTRUCTOR_DECLARATIONS.has(current.type)) {
       const constructorShape = getChildByField(current, 'constructor');
@@ -1924,7 +1954,15 @@ function handleDataDeclaration(
       // selectors (`{ x, y :: Int }`) repeat that field and must all be emitted.
       for (const fieldName of current.childrenForFieldName('name')) {
         const field = getNodeText(fieldName, ctx.source).trim();
-        ctx.createNode('field', field, current, {
+        // Constructors of one data type share a single selector when they
+        // repeat a field name. Keep the grouping local to this type so
+        // DuplicateRecordFields still creates distinct selectors per parent.
+        const existing = recordSelectors.get(field);
+        if (existing) {
+          extendGroupedNode(current, existing);
+          continue;
+        }
+        const selector = ctx.createNode('field', field, current, {
           isExported: isNameExported(
             current,
             ctx.source,
@@ -1936,6 +1974,7 @@ function handleDataDeclaration(
             ? [`haskell-export-parent:${options.exportParentName}`]
             : undefined,
         });
+        if (selector) recordSelectors.set(field, selector);
       }
     }
     for (let i = 0; i < current.namedChildCount; i++) {
@@ -2044,19 +2083,20 @@ function handlePatternSynonym(node: SyntaxNode, ctx: ExtractorContext): boolean 
   }
   if (patternNode) {
     // Pattern synonyms contain pattern-position constructors plus ordinary
-    // matcher/builder expressions. Reuse the normal semantic walker so view
-    // helpers and builder functions are calls while synonym arguments remain
-    // lexical and constructors keep their expression/pattern edge kinds.
+    // matcher/builder expressions. Use the full visitor so local declarations
+    // and Template Haskell staging keep the same semantics as ordinary bodies.
+    // Synonym arguments remain lexical and constructors keep their
+    // expression/pattern edge kinds.
     ctx.pushScope(patternNode.id);
     const matcher = getChildByField(equation, 'pattern');
-    if (matcher) ctx.visitFunctionBody(matcher, patternNode.id);
+    if (matcher) ctx.visitNode(matcher);
     const builderStack = [...node.namedChildren];
     while (builderStack.length > 0) {
       const current = builderStack.pop()!;
       if (current.type === 'constructor_synonym') {
         const match = getChildByField(current, 'match');
         const expression = match ? getChildByField(match, 'expression') : null;
-        if (expression) ctx.visitFunctionBody(expression, patternNode.id);
+        if (expression) ctx.visitNode(expression);
         continue;
       }
       builderStack.push(...current.namedChildren);

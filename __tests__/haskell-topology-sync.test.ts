@@ -40,7 +40,10 @@ describe('Haskell topology-aware sync invalidation', () => {
       reattachCrossFileEdges(...args: unknown[]): void;
       indexFile(filePath: string): Promise<{ nodes: unknown[] }>;
     };
-    db: { getDb(): { prepare(sql: string): { run(...params: unknown[]): unknown } } };
+    db: { getDb(): { prepare(sql: string): {
+      run(...params: unknown[]): unknown;
+      all(...params: unknown[]): unknown[];
+    } } };
     queries: {
       getFileByPath(filePath: string): { contentHash: string; haskellTopologyHash?: string; nodeCount: number } | null;
       getMetadata(key: string): string | null;
@@ -145,6 +148,92 @@ describe('Haskell topology-aware sync invalidation', () => {
       .not.toBe(before.haskellTopologyHash);
     expect(broadReplays).toBe(1);
     expect(callTarget(current)!.filePath).toBe('B.hs');
+  });
+
+  it('replays only stamped import edges in the requested Haskell files', async () => {
+    const current = await createGraph({
+      'Lib.hs': 'module Lib (foo) where\nfoo x = x\n',
+      'Main.hs': 'module Main where\nimport Lib (foo)\nrun = foo 1 + local 2 where local x = x\n',
+      'Other.hs': 'module Other where\nimport Lib (foo)\nother = foo 3\n',
+    });
+    const privateState = internals(current);
+    const run = current.getNodesByName('run')[0]!;
+    const local = current.getNodesByName('local')[0]!;
+    const other = current.getNodesByName('other')[0]!;
+    const db = privateState.db.getDb();
+    // Old or damaged metadata must never cause an edge to be deleted when its
+    // original reference cannot be reconstructed. Keep a synthesis edge too.
+    for (const [line, metadata, provenance] of [
+      [50, '{malformed', 'static'],
+      [51, JSON.stringify({ resolvedBy: 'import', refName: '' }), 'static'],
+      [52, JSON.stringify({ resolvedBy: 'import', refName: 123 }), 'static'],
+      [53, JSON.stringify({ synthesizedBy: 'test' }), 'heuristic'],
+    ]) {
+      db.prepare(
+        'INSERT INTO edges (source, target, kind, line, col, metadata, provenance) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).run(run.id, local.id, 'references', line, 0, metadata, provenance);
+    }
+    const preservedRows = () => db.prepare(
+      'SELECT * FROM edges WHERE (source = ? AND target = ?) OR source = ? ORDER BY id',
+    ).all(run.id, local.id, other.id);
+    const before = preservedRows();
+    expect(callTarget(current)?.filePath).toBe('Lib.hs');
+
+    expect(privateState.orchestrator.invalidateHaskellImportEdges(
+      ['Main.hs'], new Set<string>(),
+    )).toBeGreaterThan(0);
+
+    expect(callTarget(current)).toBeUndefined();
+    expect(preservedRows()).toEqual(before);
+    expect(privateState.queries.getUnresolvedReferences()).toContainEqual(
+      expect.objectContaining({
+        filePath: 'Main.hs', referenceName: 'foo', referenceKind: 'calls',
+      }),
+    );
+    await current.sync();
+    expect(callTarget(current)?.filePath).toBe('Lib.hs');
+  });
+
+  it('rechecks module-local calls when a competing import appears or disappears', async () => {
+    const current = await createGraph({
+      'Origin.hs': 'module Origin () where\nfoo x = x + 10\n',
+      'Main.hs': [
+        'module Main where',
+        'import Origin',
+        'foo x = x',
+        'run = foo 1',
+        'nested x = foo x where foo y = y',
+      ].join('\n'),
+    });
+    const privateState = internals(current);
+    const run = current.getNodesByName('run')[0]!;
+    const nested = current.getNodesByName('nested')[0]!;
+    const nestedRows = () => privateState.db.getDb().prepare(
+      'SELECT * FROM edges WHERE source = ? ORDER BY id',
+    ).all(nested.id);
+    const beforeNestedRows = nestedRows();
+    expect(callTarget(current)?.qualifiedName).toBe('Main::foo');
+    expect(current.getOutgoingEdges(run.id)).toContainEqual(expect.objectContaining({
+      kind: 'calls',
+      metadata: expect.objectContaining({ haskellImportDependent: true }),
+    }));
+    expect(current.getOutgoingEdges(nested.id).every(
+      (edge) => edge.metadata?.haskellImportDependent !== true,
+    )).toBe(true);
+
+    fs.writeFileSync(path.join(tmpDir!, 'Origin.hs'), 'module Origin (foo) where\nfoo x = x + 10\n');
+    await current.sync({ paths: ['Origin.hs'] });
+
+    // The local declaration still exists, but the unqualified name is now
+    // ambiguous. A nested where binding retains its independent lexical scope.
+    expect(callTarget(current)).toBeUndefined();
+    expect(nestedRows()).toEqual(beforeNestedRows);
+
+    fs.writeFileSync(path.join(tmpDir!, 'Origin.hs'), 'module Origin () where\nfoo x = x + 10\n');
+    await current.sync({ paths: ['Origin.hs'] });
+
+    expect(callTarget(current)?.qualifiedName).toBe('Main::foo');
+    expect(nestedRows()).toEqual(beforeNestedRows);
   });
 
   it('rebinds unchanged consumers when indexAll changes a re-export facade', async () => {

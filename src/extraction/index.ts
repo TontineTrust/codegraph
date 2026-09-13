@@ -1691,7 +1691,8 @@ function resurrectRefFromDroppedEdge(
     column: e.column ?? 0,
     filePath: e.sourceFilePath,
     language: e.sourceLanguage,
-    ...(refKind === 'haskell_effect_alias'
+    ...(e.sourceLanguage === 'haskell'
+      && (refKind === 'haskell_effect_alias' || refKind === 'references')
       && Array.isArray(refCandidates)
       && refCandidates.every((candidate) => typeof candidate === 'string')
       ? { candidates: refCandidates as string[] }
@@ -3058,7 +3059,8 @@ export class ExtractionOrchestrator {
    * duplicate module is visible from that target edge. Until the edge stores
    * its complete module provenance, correctness requires invalidating every
    * Haskell edge produced by import resolution whenever the Haskell module
-   * topology changes.
+   * topology changes. Module-level local references are included when their
+   * uniqueness depends on that same import namespace.
    *
    * Preserve extraction/synthesis edges from each affected source node, and
    * resurrect only faithfully stamped import edges as their original refs. The
@@ -3071,41 +3073,24 @@ export class ExtractionOrchestrator {
     retryAllHaskellFiles = false,
   ): number {
     return this.queries.transaction(() => {
-      const sourceFiles = [...sourceFilePaths];
+      const sourceFiles = new Set(sourceFilePaths);
       const resurrected: UnresolvedReference[] = [];
       // Recovery after an interrupted topology sync no longer has the old/new
       // module-name delta. Retrying known-name failures from every Haskell file
       // is rare, bounded, and restores the same result as a full fresh index.
       const touchedSourceFiles = new Set(retryAllHaskellFiles ? sourceFiles : []);
-      let invalidated = 0;
-      for (const filePath of sourceFiles) {
-        for (const node of this.queries.getNodesByFile(filePath)) {
-          if (node.language !== 'haskell') continue;
-          const outgoing = this.queries.getOutgoingEdges(node.id);
-          const invalid = outgoing.filter((edge) =>
-            (edge.metadata?.resolvedBy === 'import'
-              || edge.metadata?.refKind === 'haskell_effect_alias')
-            && typeof edge.metadata?.refName === 'string'
-            && edge.metadata.refName.length > 0
-          );
-          if (invalid.length === 0) continue;
-          touchedSourceFiles.add(node.filePath);
-
-          const invalidSet = new Set(invalid);
-          const preserved = outgoing.filter((edge) => !invalidSet.has(edge));
-          for (const edge of invalid) {
-            const ref = resurrectRefFromDroppedEdge({
-              ...edge,
-              sourceFilePath: node.filePath,
-              sourceLanguage: 'haskell',
-            });
-            if (ref) resurrected.push(ref);
-          }
-          this.queries.deleteEdgesBySource(node.id);
-          if (preserved.length > 0) this.queries.insertEdges(preserved);
-          invalidated += invalid.length;
-        }
+      const edgeIds: number[] = [];
+      for (const edge of this.queries.getHaskellImportResolutionEdges()) {
+        if (!sourceFiles.has(edge.sourceFilePath)) continue;
+        const ref = resurrectRefFromDroppedEdge(edge);
+        if (!ref) continue;
+        touchedSourceFiles.add(edge.sourceFilePath);
+        resurrected.push(ref);
+        edgeIds.push(edge.edgeId);
       }
+      // Delete only the rows being replayed. Nested lexical, extraction, and
+      // synthesis edges retain their row ids and metadata.
+      this.queries.deleteEdgesByIds(edgeIds);
 
       // A facade that was absent during the previous sync has no surviving edge
       // to invalidate when it reappears. Its failed module-import ref still tells
@@ -3141,7 +3126,7 @@ export class ExtractionOrchestrator {
       // Clearing the durable marker in the same transaction as edge→ref
       // conversion makes an interruption either fully committed or replayable.
       this.queries.setMetadata(HASKELL_IMPORT_INVALIDATION_PENDING, '0');
-      return invalidated;
+      return edgeIds.length;
     });
   }
 

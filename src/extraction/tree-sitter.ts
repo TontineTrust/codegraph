@@ -4023,6 +4023,7 @@ export class TreeSitterExtractor {
           referenceKind: reference.referenceKind,
           line: positionNode.startPosition.row + 1,
           column: positionNode.startPosition.column,
+          ...(reference.candidates ? { candidates: reference.candidates } : {}),
         });
       }
       return;
