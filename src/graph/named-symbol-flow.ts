@@ -229,6 +229,18 @@ export const FLOW_EDGE_KINDS: ReadonlySet<string> = new Set(['calls', 'navigates
  */
 const DYN_KINDS: ReadonlySet<string> = new Set(['constant', 'variable', 'field', 'property']);
 
+/**
+ * Edge kinds that admit a non-callable node as a synthesized endpoint: the
+ * kinds the Traverser can actually walk, so a node joined to the graph by
+ * containment alone never qualifies. Same two indexed edge reads per
+ * candidate as the old version (outgoing + incoming, no opposite-node
+ * hydration); self-loops don't count. Semantic change from the old check:
+ * heuristic `contains`/`extends`/… edges previously admitted endpoints too.
+ */
+const TRAVERSABLE_EDGE_KINDS: ReadonlySet<string> = new Set([
+  'calls', 'references', 'imports', 'instantiates', 'navigates',
+]);
+
 /** Only a REAL file extension is stripped from a token — `Class.method` is kept. */
 const FILE_EXT =
   /\.(?:java|kt|kts|ts|tsx|js|jsx|mjs|cjs|cs|py|go|rb|php|swift|rs|cpp|cc|cxx|c|h|hpp|scala|lua|dart|vue|svelte|astro|erl|hrl|hs)$/i;
@@ -551,15 +563,11 @@ export function resolveNamedTokens(
     for (const segment of qualifiedNameSegments(t.toLowerCase())) segPool.add(segment);
   }
 
-  // Match the edge kinds getCallers/getCallees historically considered here,
-  // but inspect raw edges so endpoint admission needs two indexed edge reads and
-  // no opposite-node hydration instead of four traversals plus node lookups.
-  const traversableEdgeKinds = new Set(['calls', 'references', 'imports', 'instantiates', 'navigates']);
   const hasHeuristicEdge = (id: string): boolean => {
     const incident = [...cg.getOutgoingEdges(id), ...cg.getIncomingEdges(id)];
     return incident.some((edge) =>
       edge.provenance === 'heuristic'
-      && traversableEdgeKinds.has(edge.kind)
+      && TRAVERSABLE_EDGE_KINDS.has(edge.kind)
       && edge.source !== edge.target);
   };
 
