@@ -1305,6 +1305,92 @@ function isHaskellPatternPosition(node: SyntaxNode): boolean {
   return false;
 }
 
+/** Containers whose subtrees are declaration heads/types, never runtime code. */
+const NON_RUNTIME_CONTAINERS = new Set([
+  'header', 'import', 'data_type', 'newtype', 'type_synomym',
+  'type_family', 'type_instance', 'data_family', 'class', 'instance',
+]);
+
+/**
+ * Whether a node sits in a runtime expression rather than a type, signature,
+ * import/export list, or declaration head. The walk terminates at the nearest
+ * expression-bearing ancestor (a match/bind RHS, guard, view-pattern
+ * expression, annotated expression, or constructor-synonym builder); a
+ * declaration-signature `signature` node has no `expression` field, so its
+ * type subtree classifies as non-runtime. Shared by the bare-constructor
+ * walker and the bare-variable data-position walker so both classify
+ * positions identically.
+ */
+function isRuntimeExpressionPosition(node: SyntaxNode): boolean {
+  let branch = node;
+  let ancestor: SyntaxNode | null = node.parent;
+  while (ancestor) {
+    if (ancestor.type === 'view_pattern') {
+      return nodeContains(getChildByField(ancestor, 'expression'), branch);
+    }
+    if (ancestor.type === 'guards') return true;
+    if (ancestor.type === 'match' || ancestor.type === 'bind') {
+      return nodeContains(getChildByField(ancestor, 'expression'), branch)
+        || nodeContains(getChildByField(ancestor, 'guards'), branch);
+    }
+    if (ancestor.type === 'constructor_synonym') {
+      return nodeContains(getChildByField(ancestor, 'match'), branch);
+    }
+    if (ancestor.type === 'signature') {
+      // An expression annotation (`value :: Type`) shares the same grammar
+      // node as a declaration signature. Its expression remains runtime
+      // code, but the annotation type does not.
+      return nodeContains(getChildByField(ancestor, 'expression'), branch);
+    }
+    if (ancestor.type === 'type_application') {
+      // Visible type applications (`callee @Type`) place their type in an
+      // expression tree, but names below this node still belong to the type
+      // namespace. The runtime callee is a sibling of the type_application
+      // node, so it continues through the normal call walk.
+      return false;
+    }
+    if (NON_RUNTIME_CONTAINERS.has(ancestor.type)) return false;
+    branch = ancestor;
+    ancestor = ancestor.parent;
+  }
+  return false;
+}
+
+/**
+ * A bare lowercase name stored in a pure-data position — a tuple/list literal
+ * element or a record field's value expression — is a value dependency on the
+ * named function: `pair = (helper, helper)`, `handlers = [onSave, onLoad]`,
+ * `T { cb = onClick }`. The call walker only visits application spines, so
+ * without this branch these positions produced no reference at all. Redundant
+ * parentheses around the element are classified by the nearest significant
+ * parent. Pattern positions are excluded, and the strict `function_ref`
+ * matcher (exact name, callable targets only) keeps a data-shaped value that
+ * happens to share a name with a constant from fabricating an edge.
+ */
+function extractHaskellDataPositionReference(
+  node: SyntaxNode,
+  source: string,
+  stateOwner: object,
+): BareReferenceInfo | undefined {
+  if (node.type !== 'variable') return undefined;
+  let container: SyntaxNode | null = node.parent;
+  while (container?.type === 'parens' && container.namedChildCount === 1) {
+    container = container.parent;
+  }
+  if (!container) return undefined;
+  let inDataPosition = container.type === 'tuple' || container.type === 'list';
+  if (container.type === 'field_update') {
+    // The updated label lives under the `field` child; a variable reached
+    // here (paren-hoisted) occupies the value slot instead.
+    inDataPosition = !nodeContains(getChildByField(container, 'field'), node);
+  }
+  if (!inDataPosition) return undefined;
+  if (isHaskellPatternPosition(node) || !isRuntimeExpressionPosition(node)) return undefined;
+  const name = getNodeText(node, source).trim();
+  if (!name || isLexicallyBound(name, node, source, stateOwner)) return undefined;
+  return { name, referenceKind: 'function_ref', node };
+}
+
 function normalizedSimpleReference(node: SyntaxNode, source: string): { name: string; node: SyntaxNode } | null {
   let current: SyntaxNode | null = node;
   // Visible type applications specialize a value but do not apply a term:
@@ -1568,6 +1654,9 @@ function extractHaskellBareReference(
   source: string,
   stateOwner?: object,
 ): BareReferenceInfo | BareReferenceInfo[] | undefined {
+  const dataPosition = extractHaskellDataPositionReference(node, source, stateOwner);
+  if (dataPosition) return dataPosition;
+
   if (node.type === 'left_section' || node.type === 'right_section') {
     const operator = getChildByField(node, 'operator')
       ?? node.namedChildren.find((child) => [
@@ -1704,49 +1793,7 @@ function extractHaskellBareReference(
 
     // Bare constructor values are semantic references only in expressions,
     // never in signatures, type heads, imports, or export lists.
-    let branch = node;
-    let ancestor: SyntaxNode | null = node.parent;
-    let expressionPosition = false;
-    while (ancestor) {
-      if (ancestor.type === 'view_pattern') {
-        expressionPosition = nodeContains(getChildByField(ancestor, 'expression'), branch);
-        break;
-      }
-      if (ancestor.type === 'guards') {
-        expressionPosition = true;
-        break;
-      }
-      if (ancestor.type === 'match' || ancestor.type === 'bind') {
-        expressionPosition = nodeContains(getChildByField(ancestor, 'expression'), branch)
-          || nodeContains(getChildByField(ancestor, 'guards'), branch);
-        break;
-      }
-      if (ancestor.type === 'constructor_synonym') {
-        expressionPosition = nodeContains(getChildByField(ancestor, 'match'), branch);
-        break;
-      }
-      if (ancestor.type === 'signature') {
-        // An expression annotation (`value :: Type`) shares the same grammar
-        // node as a declaration signature. Its expression remains runtime
-        // code, but the annotation type does not.
-        expressionPosition = nodeContains(getChildByField(ancestor, 'expression'), branch);
-        break;
-      }
-      if (ancestor.type === 'type_application') {
-        // Visible type applications (`callee @Type`) place their type in an
-        // expression tree, but constructor-shaped names below this node still
-        // belong to the type namespace. The runtime callee is a sibling of the
-        // type_application node, so it continues through the normal call walk.
-        break;
-      }
-      if (['header', 'import', 'data_type', 'newtype', 'type_synomym',
-        'type_family', 'type_instance', 'data_family', 'class', 'instance'].includes(ancestor.type)) {
-        break;
-      }
-      branch = ancestor;
-      ancestor = ancestor.parent;
-    }
-    if (!expressionPosition) return undefined;
+    if (!isRuntimeExpressionPosition(node)) return undefined;
   }
   return { name: reference.name, referenceKind: 'references' };
 }

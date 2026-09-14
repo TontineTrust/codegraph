@@ -834,6 +834,41 @@ pattern Present x = Just x
     expect(new Set(mappings.map((mapping) => mapping.source))).toEqual(new Set(['A']));
   });
 
+  it('resolves bare names in tuple, list, and record-value positions across files', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-haskell-data-positions-'));
+    fs.writeFileSync(path.join(tmpDir, 'Lib.hs'), [
+      'module Lib (helper, onSave, onLoad, onClick) where',
+      'helper x = x',
+      'onSave x = x',
+      'onLoad x = x',
+      'onClick x = x',
+    ].join('\n'));
+    fs.writeFileSync(path.join(tmpDir, 'Main.hs'), [
+      'module Main where',
+      'import Lib (helper, onSave, onLoad, onClick)',
+      'pair = (helper, helper)',
+      'handlers = [onSave, onLoad]',
+      'record = T { cb = onClick }',
+    ].join('\n'));
+
+    const graph = CodeGraph.initSync(tmpDir);
+    try {
+      await graph.indexAll();
+      const reaches = (owner: string, target: string): boolean => {
+        const from = graph.getNodesByName(owner).find((node) => node.filePath === 'Main.hs')!;
+        const to = graph.getNodesByName(target).find((node) => node.filePath === 'Lib.hs')!;
+        return graph.getOutgoingEdges(from.id)
+          .some((edge) => edge.target === to.id && edge.kind === 'references');
+      };
+      expect(reaches('pair', 'helper')).toBe(true);
+      expect(reaches('handlers', 'onSave')).toBe(true);
+      expect(reaches('handlers', 'onLoad')).toBe(true);
+      expect(reaches('record', 'onClick')).toBe(true);
+    } finally {
+      graph.destroy();
+    }
+  });
+
   it('indexes long do blocks without quadratic lexical rescans', () => {
     const statements = Array.from({ length: 2000 }, (_, index) => `  value${index} <- action`);
     const result = extractFromSource('Generated.hs', [

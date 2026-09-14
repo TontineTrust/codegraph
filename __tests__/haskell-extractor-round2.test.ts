@@ -1473,6 +1473,69 @@ infixEq x === y = x
     }
   });
 
+  it('emits function references for bare names in tuple, list, and record-value positions', () => {
+    const source = `
+module Round2 where
+helper x = x
+onSave x = x
+onLoad x = x
+onClick x = x
+pair = (helper, helper)
+handlers = [onSave, onLoad]
+record = T { cb = onClick }
+mixed = (helper, 1, onSave)
+nested = [(helper, onLoad)]
+deep = T { cb = U { inner = onClick } }
+parenRecord = T { cb = (onClick) }
+parenTuple = ((helper), onSave)
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const fnRefs = (owner: string, name: string) => refsFor(result, owner)
+      .filter((ref) => ref.referenceName === name && ref.referenceKind === 'function_ref');
+    expect(fnRefs('pair', 'helper')).toHaveLength(2);
+    expect(fnRefs('handlers', 'onSave')).toHaveLength(1);
+    expect(fnRefs('handlers', 'onLoad')).toHaveLength(1);
+    expect(fnRefs('record', 'onClick')).toHaveLength(1);
+    expect(fnRefs('mixed', 'helper')).toHaveLength(1);
+    expect(fnRefs('nested', 'helper')).toHaveLength(1);
+    expect(fnRefs('nested', 'onLoad')).toHaveLength(1);
+    expect(fnRefs('deep', 'onClick')).toHaveLength(1);
+    expect(fnRefs('parenRecord', 'onClick')).toHaveLength(1);
+    expect(fnRefs('parenTuple', 'helper')).toHaveLength(1);
+    expect(fnRefs('parenTuple', 'onSave')).toHaveLength(1);
+  });
+
+  it('keeps lexically bound names out of data-position function references', () => {
+    const source = `
+module Round2 where
+paramTuple f x = (f, x)
+letBound = let helper = 1 in (helper, helper)
+whereBound = (local, local) where local = 2
+letFn = let fn y = y in (fn, fn)
+patternList [a, b] = a
+caseTuple input = case input of (p, q) -> (p, q)
+lambda = \\x -> (x, x)
+parenPattern ((p), q) = p
+import Decoy (foreign1)
+foreignTuple = (foreign1, foreign1)
+`;
+    const result = extractFromSource('Round2.hs', source);
+    const fnRefs = (owner: string, name: string) => refsFor(result, owner)
+      .filter((ref) => ref.referenceName === name && ref.referenceKind === 'function_ref');
+    // Parameter/pattern binders and let/where-bound constants stay lexical.
+    expect(fnRefs('paramTuple', 'f')).toHaveLength(0);
+    expect(fnRefs('paramTuple', 'x')).toHaveLength(0);
+    expect(fnRefs('letBound', 'helper')).toHaveLength(0);
+    expect(fnRefs('whereBound', 'local')).toHaveLength(0);
+    expect(fnRefs('patternList', 'a')).toHaveLength(0);
+    expect(fnRefs('caseTuple', 'p')).toHaveLength(0);
+    expect(fnRefs('lambda', 'x')).toHaveLength(0);
+    expect(fnRefs('parenPattern', 'p')).toHaveLength(0);
+    // A let-bound function is a materialized same-file node; its value uses
+    // remain visible as strict function references.
+    expect(fnRefs('letFn', 'fn')).toHaveLength(2);
+  });
+
   it('keeps where-bound constants lexical under point bindings', () => {
     const source = `
 module Round2 where
