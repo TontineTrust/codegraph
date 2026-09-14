@@ -312,17 +312,18 @@ export interface LanguageExtractor {
    * tree-sitter parses it as a plain `identifier` node instead of `call`/`method_call`.
    * Returns the callee name if this node is a bare call, or undefined if not.
    */
-  extractBareCall?: (node: SyntaxNode, source: string, stateOwner?: object) => string | undefined;
+  extractBareCall?: (node: SyntaxNode, source: string, stateOwner: object) => string | undefined;
 
   /**
    * Extract a statically named reference that is not represented by one of the
    * language's normal call nodes. Haskell uses this for nullary constructors in
-   * patterns (`Nothing`) and operator sections (`(+ 1)`).
+   * patterns (`Nothing`), operator sections (`(+ 1)`), and bare names in
+   * data positions (tuple/list elements, record field values).
    */
   extractBareReference?: (
     node: SyntaxNode,
     source: string,
-    stateOwner?: object,
+    stateOwner: object,
   ) => BareReferenceInfo | BareReferenceInfo[] | undefined;
 
   /**
@@ -330,7 +331,7 @@ export interface LanguageExtractor {
    * lexical pattern rather than referring to a global/imported callable.
    * Haskell uses this for function/lambda, case, let, and monadic `do` binds.
    */
-  isLexicallyBound?: (name: string, node: SyntaxNode, source: string, stateOwner?: object) => boolean;
+  isLexicallyBound?: (name: string, node: SyntaxNode, source: string, stateOwner: object) => boolean;
 
   /** Return true when an application-shaped AST node is a pattern, not an expression call. */
   isPatternPosition?: (node: SyntaxNode) => boolean;

@@ -4054,6 +4054,8 @@ export class TreeSitterExtractor {
     // classic false edge where `runEventExpr (... f) = f err` links to an
     // unrelated top-level function named `f`.
     if (this.language === 'haskell') {
+      const isLexicallyBound = this.extractor?.isLexicallyBound;
+      if (!isLexicallyBound) return;
       // The grammar reuses expression-shaped `apply` nodes inside visible type
       // arguments (`parseAST @(ast GhcPs) value`). Nothing below `@(...)` is a
       // runtime callee or function value, even when a lower-case type family
@@ -4064,7 +4066,7 @@ export class TreeSitterExtractor {
       const sameSyntaxNode = (a: SyntaxNode | null, b: SyntaxNode): boolean =>
         !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex;
       const patternBinds = (name: string): boolean =>
-        this.extractor!.isLexicallyBound!(name, node, this.source, this.nodes);
+        isLexicallyBound(name, node, this.source, this.nodes);
       const simpleReference = (candidate: SyntaxNode | null): { name: string; node: SyntaxNode } | null => {
         let current = candidate;
         while (current?.type === 'parens' && current.namedChildCount === 1) {
@@ -4206,12 +4208,12 @@ export class TreeSitterExtractor {
               context?.type === 'exp'
               && context.namedChildCount === 1
               && sameSyntaxNode(context.namedChild(0), contextNode)
-            ) || exactContextExpression && (
+            ) || (exactContextExpression && (
               context?.type === 'view_pattern'
               || context?.type === 'pattern_guard'
               || context?.type === 'generator'
               || (context?.type === 'bind' && !!getChildByField(context, 'pattern'))
-            ) || appliedByKnownApplicationOperator;
+            )) || appliedByKnownApplicationOperator;
             if (executesSpecializedValue) emitCall(typeAppliedCallee);
             else emitFunctionRef(typeAppliedCallee);
             return;

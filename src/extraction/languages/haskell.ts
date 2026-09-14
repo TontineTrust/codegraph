@@ -20,7 +20,8 @@ interface HaskellExtractionState {
   localTypeNames?: Set<string>;
   lexicalBindings: Map<string, Map<string, LexicalBinding[]>>;
   signatureIndexes: Map<string, Map<string, SyntaxNode[]>>;
-  scopeNodes: Map<string, ExtractedNode | undefined>;
+  /** id → node index over the extraction's append-only nodes array. */
+  nodeIndex: Map<string, ExtractedNode>;
 }
 
 interface LexicalBinding {
@@ -37,7 +38,7 @@ function extractionState(owner: object): HaskellExtractionState {
       declarationGroups: new Map(),
       lexicalBindings: new Map(),
       signatureIndexes: new Map(),
-      scopeNodes: new Map(),
+      nodeIndex: new Map(),
     };
     extractionStates.set(owner, state);
   }
@@ -48,14 +49,20 @@ function declarationGroupMap(ctx: ExtractorContext): Map<string, ExtractedNode> 
   return extractionState(ctx.nodes as object).declarationGroups;
 }
 
+/**
+ * Resolve a node id to its extracted node. The nodes array only ever grows
+ * during an extraction and ids are unique, so an incrementally-extended
+ * Map<id, Node> answers in O(1) where a linear find was O(n) per lookup.
+ */
 function scopeOwner(ctx: ExtractorContext, id?: string): ExtractedNode | undefined {
   const ownerId = id ?? ctx.nodeStack[ctx.nodeStack.length - 1];
   if (!ownerId) return undefined;
-  const state = extractionState(ctx.nodes as object);
-  if (state.scopeNodes.has(ownerId)) return state.scopeNodes.get(ownerId);
-  const owner = ctx.nodes.find((candidate) => candidate.id === ownerId);
-  state.scopeNodes.set(ownerId, owner);
-  return owner;
+  const index = extractionState(ctx.nodes as object).nodeIndex;
+  for (let i = index.size; i < ctx.nodes.length; i++) {
+    const candidate = ctx.nodes[i];
+    if (candidate) index.set(candidate.id, candidate);
+  }
+  return index.get(ownerId);
 }
 
 function collapseWhitespace(text: string): string {
@@ -72,6 +79,11 @@ const HASKELL_MODULE_NAME_SOURCE = String.raw`${HASKELL_CONID_SOURCE}(?:\.${HASK
 const HASKELL_IDENTIFIER_RE = new RegExp(`^${HASKELL_IDENTIFIER_SOURCE}$`, 'u');
 export const HASKELL_CONID_START_RE = /^[\p{Lu}\p{Lt}]/u;
 const HASKELL_VARID_START_RE = /^[\p{Ll}\p{Lo}_]/u;
+// Qualified-name splitting patterns are static; precompile them so reference
+// normalization never allocates a RegExp per call.
+const QUALIFIED_MODULE_PREFIX_RE = new RegExp(`^(?:${HASKELL_CONID_SOURCE}\\.)+`, 'u');
+const QUALIFIED_NAME_RE = new RegExp(`^((?:${HASKELL_CONID_SOURCE}\\.)+)(.+)$`, 'u');
+const QUALIFIED_REFERENCE_RE = new RegExp(`^(${HASKELL_MODULE_NAME_SOURCE})::(.+)$`, 'u');
 
 function firstDescendant(node: SyntaxNode, types: ReadonlySet<string>): SyntaxNode | null {
   if (types.has(node.type)) return node;
@@ -223,12 +235,9 @@ export function normalizeReferenceText(text: string): string {
   // unqualified operator declaration keeps its conventional `(+)` node name.
   if (compact.startsWith('(') && compact.endsWith(')')) {
     const inner = compact.slice(1, -1);
-    if (new RegExp(`^(?:${HASKELL_CONID_SOURCE}\\.)+`, 'u').test(inner)) compact = inner;
+    if (QUALIFIED_MODULE_PREFIX_RE.test(inner)) compact = inner;
   }
-  const qualified = compact.match(new RegExp(
-    `^((?:${HASKELL_CONID_SOURCE}\\.)+)(.+)$`,
-    'u',
-  ));
+  const qualified = compact.match(QUALIFIED_NAME_RE);
   if (!qualified) return compact;
   const member = qualified[2]!;
   return `${qualified[1]!.slice(0, -1)}::${
@@ -238,10 +247,7 @@ export function normalizeReferenceText(text: string): string {
 
 /** Split a normalized reference at its module delimiter, never inside an op. */
 export function haskellReferenceParts(name: string): { qualifier: string | null; member: string } {
-  const qualified = name.match(new RegExp(
-    `^(${HASKELL_MODULE_NAME_SOURCE})::(.+)$`,
-    'u',
-  ));
+  const qualified = name.match(QUALIFIED_REFERENCE_RE);
   const rawMember = qualified?.[2] ?? name;
   const member = rawMember.startsWith('(') && rawMember.endsWith(')')
     ? rawMember.slice(1, -1)
@@ -573,12 +579,15 @@ function isRecursiveDo(node: SyntaxNode): boolean {
     || (keyword?.type === 'do_module' && keyword.lastChild?.type === 'mdo');
 }
 
+/** Scope kinds a lexical-range decorator reports the span of. */
+const LEXICAL_RANGE_CONTAINERS = new Set(['let_in', 'alternative', 'function', 'do', 'list_comprehension']);
+
 function lexicalRangeDecorator(node: SyntaxNode): string | null {
   let ancestor = node.parent;
   let bindingStatement: SyntaxNode | null = null;
   while (ancestor) {
     if (ancestor.type === 'let' || ancestor.type === 'rec') bindingStatement = ancestor;
-    if (['let_in', 'alternative', 'function', 'do', 'list_comprehension'].includes(ancestor.type)) {
+    if (LEXICAL_RANGE_CONTAINERS.has(ancestor.type)) {
       // A do-let declaration scopes over its own RHS and later statements,
       // including its enclosing recursive group when present. An mdo keeps
       // every declaration recursive across the whole block.
@@ -1129,11 +1138,11 @@ function declarationBindings(
 function lexicalBindingIndex(
   container: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): Map<string, LexicalBinding[]> {
   const key = `${container.type}:${container.startIndex}:${container.endIndex}`;
-  const state = stateOwner ? extractionState(stateOwner) : undefined;
-  const cached = state?.lexicalBindings.get(key);
+  const state = extractionState(stateOwner);
+  const cached = state.lexicalBindings.get(key);
   if (cached) return cached;
 
   const index = new Map<string, LexicalBinding[]>();
@@ -1141,15 +1150,15 @@ function lexicalBindingIndex(
     for (const [name, materializedNode, scopeStartIndex] of declarationBindings(
       child,
       source,
-      stateOwner ?? container,
+      stateOwner,
     )) {
-      const key = lexicalBindingName(name);
-      const occurrences = index.get(key) ?? [];
+      const bindingKey = lexicalBindingName(name);
+      const occurrences = index.get(bindingKey) ?? [];
       occurrences.push({ startIndex: scopeStartIndex ?? child.startIndex, materializedNode });
-      index.set(key, occurrences);
+      index.set(bindingKey, occurrences);
     }
   }
-  state?.lexicalBindings.set(key, index);
+  state.lexicalBindings.set(key, index);
   return index;
 }
 
@@ -1158,7 +1167,7 @@ function bindingAt(
   name: string,
   source: string,
   beforeIndex: number | null,
-  stateOwner?: object,
+  stateOwner: object,
 ): LexicalBinding | undefined {
   const occurrences = lexicalBindingIndex(container, source, stateOwner)
     .get(lexicalBindingName(name));
@@ -1175,7 +1184,7 @@ function isLexicallyBound(
   name: string,
   node: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): boolean {
   if (!name || haskellReferenceParts(name).qualifier !== null) return false;
   let branch = node;
@@ -1550,7 +1559,7 @@ function emitPointFreeReference(node: SyntaxNode, ownerId: string, ctx: Extracto
 function extractHaskellBareCall(
   node: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): string | undefined {
   const reference = normalizedSimpleReference(node, source);
   if (!reference) return undefined;
@@ -1652,7 +1661,7 @@ function extractHaskellBareCall(
 function extractHaskellBareReference(
   node: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): BareReferenceInfo | BareReferenceInfo[] | undefined {
   const dataPosition = extractHaskellDataPositionReference(node, source, stateOwner);
   if (dataPosition) return dataPosition;
@@ -2080,7 +2089,7 @@ function handleDataInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const head = declarationHead(declaration, ctx.source);
   if (!head) return true;
   const baseName = head.baseName;
-  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1];
+  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
   const owner = scopeOwner(ctx, ownerId);
   const instanceName = owner && (owner.kind === 'trait' || owner.decorators?.includes('haskell-instance'))
     ? baseName
