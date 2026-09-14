@@ -189,7 +189,12 @@ function getReExportRouteIndex(reExports: ReExport[]): {
  */
 interface FileExportIndex {
   byName: Map<string, Node>;
-  allByName: Map<string, Node[]>;
+  /**
+   * All exported nodes per name (not just the first). Only the Haskell
+   * ambiguity check needs this multi-candidate view, so it is built lazily
+   * by exportedNodesByName instead of eagerly for every indexed file.
+   */
+  allByName?: Map<string, Node[]>;
   defaultComponent: Node | undefined;
   defaultFnClass: Node | undefined;
   /**
@@ -233,7 +238,6 @@ function getFileExportIndex(filePath: string, context: ResolutionContext): FileE
   if (!idx) {
     idx = {
       byName: new Map(),
-      allByName: new Map(),
       defaultComponent: undefined,
       defaultFnClass: undefined,
       defaultBinding: undefined,
@@ -246,9 +250,6 @@ function getFileExportIndex(filePath: string, context: ResolutionContext): FileE
       if (!declared.has(n.name)) declared.set(n.name, n);
       if (!n.isExported) continue;
       if (!idx.byName.has(n.name)) idx.byName.set(n.name, n);
-      const named = idx.allByName.get(n.name) ?? [];
-      named.push(n);
-      idx.allByName.set(n.name, named);
       if (idx.defaultComponent === undefined && n.kind === 'component') idx.defaultComponent = n;
       if (idx.defaultFnClass === undefined && (n.kind === 'function' || n.kind === 'class')) idx.defaultFnClass = n;
     }
@@ -272,6 +273,29 @@ function getFileExportIndex(filePath: string, context: ResolutionContext): FileE
     perFile.set(filePath, idx);
   }
   return idx;
+}
+
+/**
+ * The lazy multi-candidate view behind FileExportIndex.allByName: every
+ * exported node per name, in the file's node order. Built at most once per
+ * file per context and only when a Haskell ambiguity check asks for it.
+ */
+function exportedNodesByName(
+  exportIndex: FileExportIndex,
+  filePath: string,
+  context: ResolutionContext,
+): Map<string, Node[]> {
+  if (!exportIndex.allByName) {
+    const allByName = new Map<string, Node[]>();
+    for (const n of context.getNodesInFile(filePath)) {
+      if (!n.isExported) continue;
+      const named = allByName.get(n.name) ?? [];
+      named.push(n);
+      allByName.set(n.name, named);
+    }
+    exportIndex.allByName = allByName;
+  }
+  return exportIndex.allByName;
 }
 
 /** Drop the per-context memo tables (see ReferenceResolver.clearCaches). */
@@ -1653,9 +1677,6 @@ export function normalizeHaskellReferenceName(referenceName: string): string {
   if (dotted) {
     return `${dotted[1]}::${canonicalHaskellQualifiedMember(dotted[2]!)}`;
   }
-  // Accept the extractor's historical `M::<op>` form as input and normalize
-  // it too. Match the FIRST delimiter after a syntactically valid module,
-  // never the last `::` in the whole string: that may belong to the operator.
   return value;
 }
 
@@ -1867,9 +1888,28 @@ function haskellImportDeclarationHasModule(declaration: string): boolean {
   return HASKELL_IMPORT_DECLARATION_RE.test(body);
 }
 
-function extractHaskellImports(content: string): ImportMapping[] {
-  const mappings: ImportMapping[] = [];
+/** Strip Haskell comments once, then derive both import surfaces from the
+ *  shared text. The generic dispatchers below each strip independently, so a
+ *  caller that needs both (the topology hash) re-parsed the same file three
+ *  times; stripHaskellComments is idempotent, which is what makes sharing the
+ *  stripped text safe. */
+export function extractHaskellImportSurface(content: string): {
+  imports: ImportMapping[];
+  reExports: ReExport[];
+} {
   const stripped = stripHaskellComments(content);
+  return {
+    imports: extractHaskellImportsFromStripped(stripped),
+    reExports: extractHaskellReExportsFromStripped(stripped),
+  };
+}
+
+function extractHaskellImports(content: string): ImportMapping[] {
+  return extractHaskellImportsFromStripped(stripHaskellComments(content));
+}
+
+function extractHaskellImportsFromStripped(stripped: string): ImportMapping[] {
+  const mappings: ImportMapping[] = [];
   const lines = stripped.split(/\r?\n/);
 
   const declarations: string[] = [];
@@ -2180,7 +2220,10 @@ export function extractReExports(content: string, language: Language): ReExport[
  * also forward a symbol that was explicitly imported into the facade.
  */
 function extractHaskellReExports(content: string): ReExport[] {
-  const cleaned = stripHaskellComments(content);
+  return extractHaskellReExportsFromStripped(stripHaskellComments(content));
+}
+
+function extractHaskellReExportsFromStripped(cleaned: string): ReExport[] {
   const header = cleaned.match(new RegExp(
     `\\bmodule\\s+(${HASKELL_MODULE_NAME_SOURCE})\\s*`,
     'u',
@@ -2206,7 +2249,7 @@ function extractHaskellReExports(content: string): ReExport[] {
   const items = splitHaskellList(cleaned.slice(open + 1, close));
 
   const out: ReExport[] = [];
-  const imports = extractHaskellImports(content);
+  const imports = extractHaskellImportsFromStripped(cleaned);
   const reExportKeys = new Set<string>();
   const pushUnique = (reExport: ReExport): void => {
     const key = JSON.stringify(reExport);
@@ -4100,7 +4143,7 @@ function findExportedSymbolWalk(
   } else {
     for (const name of exportedNames) {
       if (language === 'haskell') {
-        const candidates = (exportIndex.allByName.get(name) ?? [])
+        const candidates = (exportedNodesByName(exportIndex, filePath, context).get(name) ?? [])
           .filter((node) => !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
           .filter((node) => want.haskellNamespace === 'value'
             ? haskellValueNode(node)

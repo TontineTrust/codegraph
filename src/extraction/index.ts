@@ -35,7 +35,7 @@ import ignore, { Ignore } from 'ignore';
 import { detectFrameworks } from '../resolution/frameworks';
 import type { ResolutionContext } from '../resolution/types';
 import { createYielder, type MaybeYield } from '../resolution/cooperative-yield';
-import { extractImportMappings, extractReExports, parseHaskellReferenceName } from '../resolution/import-resolver';
+import { extractHaskellImportSurface, parseHaskellReferenceName } from '../resolution/import-resolver';
 
 /**
  * Number of files to read in parallel during indexing.
@@ -157,10 +157,12 @@ export function hashContent(content: string): string {
 /**
  * Hash only the Haskell surface that can change cross-file import resolution.
  * Bodies, source positions, signatures, and docs are intentionally excluded so
- * comment-only edits do not force a project-wide Haskell replay.
+ * comment-only edits do not force a project-wide Haskell replay. The leading
+ * `_filePath` parameter is deliberately kept (unused) so the signature stays
+ * a stable seam for callers that naturally have the path at hand.
  */
 export function computeHaskellTopologyHash(
-  filePath: string,
+  _filePath: string,
   content: string,
   result: ExtractionResult,
 ): string {
@@ -173,11 +175,14 @@ export function computeHaskellTopologyHash(
       exportParents: (node.decorators ?? [])
         .filter((decorator) => decorator.startsWith('haskell-export-parent:')),
     }));
+  // Both import surfaces share one comment strip (the generic dispatchers
+  // would strip three times for the same file).
+  const { imports, reExports } = extractHaskellImportSurface(content);
   const descriptor = {
     version: 'haskell-topology-v1',
     symbols,
-    imports: extractImportMappings(filePath, content, 'haskell'),
-    reExports: extractReExports(content, 'haskell'),
+    imports,
+    reExports,
   };
   const serialized = JSON.stringify(descriptor, (_key, value: unknown) => {
     if (value instanceof Set) return [...value].sort();
@@ -1906,15 +1911,23 @@ export class ExtractionOrchestrator {
     };
 
 
-    const trackedBeforeIndexAll = new Map(
-      this.queries.getAllFiles().map((file) => [file.path, file] as const),
-    );
-    const oldHaskellModulesByFile = this.queries.getHaskellModuleNamesByFile();
+    // Cheap pre-index probe (indexed DISTINCT scan, same pattern as the
+    // synthesizer language gates, #1212): the before/after bookkeeping below
+    // exists only for the Haskell import replay, so a project without
+    // Haskell pays neither the full-file Map nor the module-name index.
+    // Deliberately based on pre-index state — deleting the last .hs must
+    // still arm the guard for this run so removal-side topology changes are
+    // compared against what the DB remembers.
     const recoveringHaskellInvalidation =
       this.queries.getMetadata(HASKELL_IMPORT_INVALIDATION_PENDING) === '1';
-    const hadExistingHaskell = [...trackedBeforeIndexAll.values()]
-      .some((file) => file.language === 'haskell');
+    const hadExistingHaskell = this.queries.getDistinctFileLanguages().has('haskell');
     const guardHaskellReindex = hadExistingHaskell || recoveringHaskellInvalidation;
+    const trackedBeforeIndexAll = guardHaskellReindex
+      ? new Map(this.queries.getAllFiles().map((file) => [file.path, file] as const))
+      : new Map<string, FileRecord>();
+    const oldHaskellModulesByFile = guardHaskellReindex
+      ? this.queries.getHaskellModuleNamesByFile()
+      : new Map<string, string[]>();
     if (hadExistingHaskell && !recoveringHaskellInvalidation) {
       // Arm recovery before healZeroNodeRows or any per-file store can replace
       // Haskell nodes/edges. A throw leaves this durable marker behind so the

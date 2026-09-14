@@ -687,4 +687,23 @@ describe('Haskell topology-aware sync invalidation', () => {
     expect(privateState.queries.getFileByPath('Lib.hs')!.haskellTopologyHash).toBeTruthy();
     expect(callTarget(current)!.filePath).toBe('Lib.hs');
   });
+
+  it('arms the indexAll Haskell guard from pre-index state across last-file deletion', async () => {
+    const current = await createGraph({
+      'Lib.hs': 'module Lib (foo) where\nfoo value = value + 1\n',
+      'Main.hs': 'module Main where\nimport Lib (foo)\nrun = foo 1\n',
+    });
+    expect(callTarget(current)!.filePath).toBe('Lib.hs');
+
+    // Deleting the only origin .hs leaves the guard decision to the PRE-index
+    // probe (the files table still remembers Haskell from the first run), so
+    // the before/after bookkeeping must be built exactly as before and the
+    // run must complete cleanly.
+    fs.rmSync(path.join(tmpDir!, 'Lib.hs'));
+    const afterDeletion = await current.indexAll();
+    expect(afterDeletion.success).toBe(true);
+
+    const again = await current.indexAll();
+    expect(again.success).toBe(true);
+  });
 });
