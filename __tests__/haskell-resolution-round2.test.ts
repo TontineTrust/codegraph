@@ -2772,4 +2772,46 @@ describe('Haskell resolution round 2', () => {
       expect(typeOperator.haskellTypeOnly).toBe(true);
       expect(typeOperator.haskellValueOnly).toBeUndefined();
   });
+
+  it('keeps non-Haskell re-export walks on shared-visited base semantics', async () => {
+    // A JS diamond barrel must not inherit the Haskell walk's per-branch
+    // visited copies + 64-deep cap: that turns a diamond into worst-case
+    // exponential expansion and resolves chains base deliberately stops at
+    // depth 8. The rename at the head (`originValue as deepTarget`) keeps the
+    // name-matcher from connecting the consumer on its own, so the edge can
+    // only come from the re-export walk.
+    const buildDiamond = (levels: number): Record<string, string> => {
+      const files: Record<string, string> = {
+        'origin.ts': 'export function originFn(): number { return 1; }\n',
+        'head.ts': `export { originFn as deepTarget } from './d1a';\n`,
+        'main.ts': [
+          "import { deepTarget } from './head';",
+          'export function use(): number { return deepTarget(); }',
+        ].join('\n'),
+      };
+      for (let i = 1; i <= levels; i++) {
+        for (const side of ['a', 'b'] as const) {
+          files[`d${i}${side}.ts`] = i < levels
+            ? `export * from './d${i + 1}a';\nexport * from './d${i + 1}b';\n`
+            : "export * from './origin';\n";
+        }
+      }
+      return files;
+    };
+
+    const shallow = await createGraph(buildDiamond(6));
+      const origin = nodeAt(shallow, 'originFn', 'origin.ts');
+      expect(outgoingTargets(shallow, 'use', 'main.ts'))
+        .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: origin.id }) }));
+
+    const started = Date.now();
+    const deep = await createGraph(buildDiamond(12));
+      const deepOrigin = nodeAt(deep, 'originFn', 'origin.ts');
+      const elapsed = Date.now() - started;
+      // Base semantics: the 12-hop chain exceeds the depth-8 cap, so the
+      // walk gives up instead of fanning through the diamond.
+      expect(outgoingTargets(deep, 'use', 'main.ts')
+        .some(({ target }) => target.id === deepOrigin.id)).toBe(false);
+      expect(elapsed).toBeLessThan(1000);
+  });
 });

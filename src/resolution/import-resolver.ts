@@ -3972,10 +3972,20 @@ function resolveGoCrossPackageReference(
   return null;
 }
 
-/** Recursive depth cap for re-export chain following. It is deliberately
- *  high enough for generated/deep facade chains while still bounding
- *  malformed acyclic graphs; cycles are stopped separately by `visited`. */
-const REEXPORT_MAX_DEPTH = 64;
+/** Recursive depth caps for re-export chain following.
+ *
+ *  Non-Haskell keeps the base cap (8) and a SHARED visited set: real
+ *  codebases rarely chain barrels more than 2–3 deep, and sharing the set
+ *  between sibling alternatives is what keeps diamond barrel fan-out linear
+ *  instead of exponential.
+ *
+ *  Haskell facade chains (`module Facade (module M1, module M2) where`
+ *  towers) legitimately run much deeper, and a shared set would let a
+ *  restricted/denied first branch poison a later valid route converging on
+ *  the same origin module — so Haskell gets a higher cap with per-branch
+ *  visited copies instead. */
+const REEXPORT_MAX_DEPTH = 8;
+const HASKELL_REEXPORT_MAX_DEPTH = 64;
 
 /**
  * Find an exported symbol in `filePath`, following `export { x } from
@@ -4047,9 +4057,14 @@ function findExportedSymbolWalk(
   visited: Set<string>,
   depth: number
 ): ExportedSymbolWalkResult {
-  if (depth > REEXPORT_MAX_DEPTH) return undefined;
+  const haskellMode = language === 'haskell';
+  if (depth > (haskellMode ? HASKELL_REEXPORT_MAX_DEPTH : REEXPORT_MAX_DEPTH)) return undefined;
   if (visited.has(filePath)) return undefined;
   visited.add(filePath);
+  // Cycle detection is path-local for Haskell only (per the depth-cap note
+  // above); every other language shares the mutable set across sibling
+  // alternatives, which bounds diamond barrels linearly.
+  const branchVisited = (): Set<string> => (haskellMode ? new Set(visited) : visited);
 
   const exportIndex = getFileExportIndex(filePath, context);
   const exportedNames = language === 'haskell'
@@ -4137,10 +4152,7 @@ function findExportedSymbolWalk(
       },
       language,
       context,
-      // Cycle detection is path-local. Sharing the mutable set between
-      // sibling alternatives lets a restricted/denied first branch poison a
-      // later valid route that converges on the same origin module.
-      new Set(visited),
+      branchVisited(),
       depth + 1
     );
     if (chained === HASKELL_EXPORT_AMBIGUOUS) {
@@ -4203,7 +4215,7 @@ function findExportedSymbolWalk(
         },
         language,
         context,
-        new Set(visited),
+        branchVisited(),
         depth + 1
       );
       if (chained === HASKELL_EXPORT_AMBIGUOUS) {
