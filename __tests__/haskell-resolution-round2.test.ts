@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { CodeGraph } from '../src';
 import { initGrammars, loadAllGrammars } from '../src/extraction/grammars';
-import { extractReExports } from '../src/resolution/import-resolver';
+import { extractImportMappings, extractReExports } from '../src/resolution/import-resolver';
 
 beforeAll(async () => {
   await initGrammars();
@@ -1555,8 +1555,13 @@ describe('Haskell resolution round 2', () => {
       expect(outgoingTargets(graph, 'runOperator', 'Consumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: originOperator.id }) }));
       expect(constructor).toBeDefined();
-      expect(outgoingTargets(graph, 'notAConstructor', 'Consumer.hs')
-        .some(({ target }) => target.name === 'T')).toBe(false);
+      // A bare uppercase facade item (`O.T`) re-exports BOTH namespaces
+      // (Haskell2010 §5.3), so the value-position `T` is the constructor.
+      expect(outgoingTargets(graph, 'notAConstructor', 'Consumer.hs'))
+        .toContainEqual(expect.objectContaining({
+          edge: expect.objectContaining({ kind: 'references' }),
+          target: expect.objectContaining({ id: constructor!.id }),
+        }));
       expect(outgoingTargets(graph, 'runGrouped', 'GroupedConsumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: constructor!.id }) }));
 
@@ -1569,7 +1574,7 @@ describe('Haskell resolution round 2', () => {
       kind: 'wildcard',
       source: 'Origin',
       includedNames: ['foo', 'T', '<+>'],
-      haskellTypeOnlyNames: ['T'],
+      // `O.T` is dual-namespace, so it appears in neither Only list.
       haskellValueOnlyNames: ['foo', '<+>'],
       haskellClearParent: true,
     }));
@@ -2673,5 +2678,98 @@ describe('Haskell resolution round 2', () => {
       }]);
 
       expect(edges.map((edge) => edge.target)).toEqual([jsTarget.id]);
+  });
+
+  it('resolves dual-namespace bare uppercase import items in value and type positions', async () => {
+    const graph = await createGraph({
+      'Origin.hs': [
+        'module Origin (Maybe(..), C) where',
+        'data Maybe a = Nothing | Just a',
+        'class C a where',
+        '  method :: a -> a',
+      ].join('\n'),
+      'ValueConsumer.hs': [
+        'module ValueConsumer where',
+        'import Origin (Just)',
+        'make x = Just x',
+      ].join('\n'),
+      'TypeConsumer.hs': [
+        'module TypeConsumer where',
+        'import Origin (C)',
+        'data T = T',
+        'instance C T where',
+        '  method x = x',
+      ].join('\n'),
+    });
+      const constructor = graph.getNodesByName('Just')
+        .find((node) => node.filePath === 'Origin.hs' && node.kind === 'enum_member')!;
+      expect(constructor).toBeDefined();
+      expect(outgoingTargets(graph, 'make', 'ValueConsumer.hs'))
+        .toContainEqual(expect.objectContaining({
+          edge: expect.objectContaining({ kind: 'calls' }),
+          target: expect.objectContaining({ id: constructor.id }),
+        }));
+      const clazz = nodeAt(graph, 'C', 'Origin.hs');
+      const instance = graph.getNodesByKind('class')
+        .find((node) => node.filePath === 'TypeConsumer.hs'
+          && node.decorators?.includes('haskell-instance'))!;
+      expect(instance).toBeDefined();
+      expect(graph.getOutgoingEdges(instance.id)).toContainEqual(expect.objectContaining({
+        kind: 'implements',
+        target: clazz.id,
+      }));
+
+      // Haskell2010 §5.3: a bare uppercase item occupies both namespaces, a
+      // bare operator item is a value, and only an explicit `type` qualifier
+      // makes an item type-only.
+      const dualMappings = extractImportMappings('C.hs', [
+        'module C where',
+        'import Origin (Just)',
+        'import Origin (type Maybe)',
+      ].join('\n'), 'haskell');
+      const just = dualMappings.find((m) => m.localName === 'Just' && !m.isNamespace)!;
+      expect(just.haskellTypeOnly).toBeUndefined();
+      expect(just.haskellValueOnly).toBeUndefined();
+      const maybeType = dualMappings.find((m) => m.localName === 'Maybe' && !m.isNamespace)!;
+      expect(maybeType.haskellTypeOnly).toBe(true);
+      expect(maybeType.haskellValueOnly).toBeUndefined();
+  });
+
+  it('resolves colon-headed constructor operators imported as bare value items', async () => {
+    const graph = await createGraph({
+      'Origin.hs': [
+        'module Origin (Seq(..)) where',
+        'data Seq a = a :< [a]',
+      ].join('\n'),
+      'Cons.hs': [
+        'module Cons where',
+        'import Origin ((:<))',
+        'cons a b = a :< b',
+        'section values = map (:<) values',
+      ].join('\n'),
+    });
+      const constructor = graph.getNodesByName('(:<)')
+        .find((node) => node.filePath === 'Origin.hs')!;
+      expect(constructor).toBeDefined();
+      expect(outgoingTargets(graph, 'cons', 'Cons.hs'))
+        .toContainEqual(expect.objectContaining({
+          edge: expect.objectContaining({ kind: 'calls' }),
+          target: expect.objectContaining({ id: constructor.id }),
+        }));
+      expect(outgoingTargets(graph, 'section', 'Cons.hs')
+        .some(({ target }) => target.id === constructor.id)).toBe(true);
+
+      // The cons spelling is the canonical `:`-headed item: value-only.
+      const mappings = extractImportMappings('C.hs', [
+        'module C where',
+        'import Origin ((:))',
+        'import Origin (type (+.:))',
+      ].join('\n'), 'haskell');
+      const cons = mappings.find((m) => m.localName === ':' && !m.isNamespace)!;
+      expect(cons.haskellValueOnly).toBe(true);
+      expect(cons.haskellTypeOnly).toBeUndefined();
+      const typeOperator = mappings.find((m) => m.localName === '+.:' && !m.isNamespace)!;
+      expect(typeOperator.haskellTypeOnly).toBe(true);
+      expect(typeOperator.haskellValueOnly).toBeUndefined();
   });
 });

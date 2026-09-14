@@ -1813,9 +1813,14 @@ function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
     const close = cleaned.lastIndexOf(')');
     if (open >= 0 && close > open) childList = cleaned.slice(open + 1, close).trim();
   }
-  const typeName = operatorHead ? name.startsWith(':') : HASKELL_CONID_START_RE.test(name);
-  const typeOnly = explicitType || (!explicitPattern && typeName);
-  const valueOnly = explicitPattern || (!explicitType && !typeName);
+  // Haskell2010 §5.3: a bare uppercase item imports BOTH the type and its
+  // data constructors (dual namespace) — neither flag, matching the
+  // conservative child semantics of parseHaskellImportChild. Lowercase
+  // identifiers are necessarily values, and a bare operator item — including
+  // any `:`-headed constructor operator — can only denote a value;
+  // type-level operators require an explicit `type` qualifier.
+  const typeOnly = explicitType;
+  const valueOnly = explicitPattern || (!explicitType && !HASKELL_CONID_START_RE.test(name));
   return {
     name,
     children: childList === null ? null : childList === '..' ? '*'
