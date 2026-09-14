@@ -1891,8 +1891,9 @@ function haskellImportDeclarationHasModule(declaration: string): boolean {
 /** Strip Haskell comments once, then derive both import surfaces from the
  *  shared text. The generic dispatchers below each strip independently, so a
  *  caller that needs both (the topology hash) re-parsed the same file three
- *  times; stripHaskellComments is idempotent, which is what makes sharing the
- *  stripped text safe. */
+ *  times. Both consumers take already-stripped text as their input contract,
+ *  so the shared result is byte-identical to what the old one-strip-each
+ *  path produced. */
 export function extractHaskellImportSurface(content: string): {
   imports: ImportMapping[];
   reExports: ReExport[];

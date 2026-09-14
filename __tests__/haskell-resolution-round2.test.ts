@@ -2814,4 +2814,35 @@ describe('Haskell resolution round 2', () => {
         .some(({ target }) => target.id === deepOrigin.id)).toBe(false);
       expect(elapsed).toBeLessThan(1000);
   });
+
+  it('claims record-dot projections on lines with non-ASCII prefixes', async () => {
+    // Native tree-sitter's Point.column is a byte offset, but web-tree-sitter
+    // 0.25.x reports UTF-16 code units — the same units String.slice counts —
+    // so the projection detector's sourceLine.slice(ref.column) stays aligned
+    // even past multi-byte text, and no byte→UTF-16 conversion is needed.
+    // This pins that alignment: if the binding ever reports byte columns,
+    // the projection below is no longer claimed and the import fallback
+    // fabricates an edge for the bare selector, failing the first assertion.
+    const graph = await createGraph({
+      'Origin.hs': [
+        'module Origin (B(..)) where',
+        'data B = B { ascii :: Int }',
+      ].join('\n'),
+      'Consumer.hs': [
+        '{-# LANGUAGE OverloadedRecordDot #-}',
+        'module Consumer where',
+        'import Origin (B(..))',
+        'shiftedUnknown 中文 value = value.ascii',
+        'shiftedAnnotated :: B -> Int',
+        'shiftedAnnotated 值 = 值.ascii',
+      ].join('\n'),
+    });
+      const asciiField = graph.getNodesByName('ascii')
+        .find((node) => node.filePath === 'Origin.hs' && node.kind === 'field')!;
+      expect(asciiField).toBeDefined();
+      expect(outgoingTargets(graph, 'shiftedUnknown', 'Consumer.hs')
+        .some(({ target }) => target.id === asciiField.id)).toBe(false);
+      expect(outgoingTargets(graph, 'shiftedAnnotated', 'Consumer.hs')
+        .some(({ target }) => target.id === asciiField.id)).toBe(true);
+  });
 });
