@@ -1767,6 +1767,19 @@ function derivedClassNames(node: SyntaxNode, source: string): Array<{ name: stri
   return result;
 }
 
+/**
+ * Text of a value binding's left-hand side (name + parameter patterns),
+ * located through the AST rather than string-splitting on `=`: an operator
+ * name may itself contain `=` (`(=<<)`, `(==)`), which would truncate the
+ * split-based extraction mid-parenthesis. The `match` child starts at the
+ * defining `=` token (or at `|` when guards precede it), so the slice up to
+ * its start is exactly the binding head.
+ */
+function bindingLhsText(node: SyntaxNode, source: string): string {
+  const match = getChildByField(node, 'match');
+  return source.substring(node.startIndex, match ? match.startIndex : node.endIndex);
+}
+
 function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
   // A `bind` under `do` is a monadic pattern bind (`x <- action`), not a named
   // declaration. Local value binds stay attributed to their enclosing symbol;
@@ -1822,7 +1835,7 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
   }
   const signature = signatureNode
     ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
-    : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
+    : collapseWhitespace(bindingLhsText(node, ctx.source)).slice(0, 240);
   const bindingNode = ctx.createNode(kind, name, node, {
     signature: signature || undefined,
     docstring: bindingDocstring(node, signatureNode, ctx.source),
@@ -1870,7 +1883,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const signatureNode = associatedSignature(node, name, ctx.source, ctx.nodes as object);
   const signature = signatureNode
     ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
-    : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
+    : collapseWhitespace(bindingLhsText(node, ctx.source)).slice(0, 240);
   const functionNode = ctx.createNode(kind, name, node, {
     signature: signature || undefined,
     docstring: bindingDocstring(node, signatureNode, ctx.source),

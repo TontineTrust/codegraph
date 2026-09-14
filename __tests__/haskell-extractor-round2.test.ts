@@ -1449,6 +1449,30 @@ use = consume x y z selected a b
     }));
   });
 
+  it('keeps the full operator name in unsignatured operator bindings', () => {
+    const source = `
+module Round2 where
+(=<<) f x = f x
+(==) a b = a b
+(>=) p q = p q
+(.) f g x = f (g x)
+infixEq x === y = x
+`;
+    const result = extractFromSource('Round2.hs', source);
+    for (const [name, lhs] of [
+      ['(=<<)', '(=<<) f x'],
+      ['(==)', '(==) a b'],
+      ['(>=)', '(>=) p q'],
+      ['(.)', '(.) f g x'],
+      ['(===)', 'infixEq x === y'],
+    ] as const) {
+      expect(result.nodes.find((node) => node.name === name), name).toEqual(expect.objectContaining({
+        kind: 'function',
+        signature: lhs,
+      }));
+    }
+  });
+
   it('keeps where-bound constants lexical under point bindings', () => {
     const source = `
 module Round2 where
