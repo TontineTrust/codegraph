@@ -1735,6 +1735,7 @@ describe('Haskell resolution round 2', () => {
         '{-# LANGUAGE TypeApplications #-}',
         'module Consumer where',
         'import qualified Actions as A',
+        'import Data.Function ((&))',
         'asFunction = A.specialize @Int',
         'asValue = A.token @Int',
         'asConstructor = A.Token @Int',

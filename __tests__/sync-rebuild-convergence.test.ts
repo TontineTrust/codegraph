@@ -35,12 +35,13 @@
  * because `rebuildEdgeSet` was not rebuilding anything — see the note there.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import CodeGraph from '../src/index';
 import { createDatabase } from '../src/db/sqlite-adapter';
+import type { ExtractionOrchestrator } from '../src/extraction';
 
 describe('Incremental sync converges to a full rebuild (CG-33)', () => {
   let testDir: string;
@@ -144,6 +145,136 @@ describe('Incremental sync converges to a full rebuild (CG-33)', () => {
     const synced = edgeSet();
     const rebuilt = await rebuildEdgeSet();
     expect(describeDiff(synced, rebuilt)).toBe('missing from synced: 0, stale in synced: 0');
+  });
+
+  it('keeps one edge when re-resolution selects the same target', async () => {
+    write('src/caller.ts', `export function run(): number {\n  return pct(1);\n}\n`);
+    write('src/alpha.ts', `export function pct(n: number): number {\n  return n;\n}\n`);
+    cg = CodeGraph.initSync(testDir, { config: { include: ['**/*.ts'], exclude: [] } });
+    await cg.indexAll();
+
+    // zeta.ts introduces a competing definition, so the existing edge is
+    // reopened, but alpha.ts remains the deterministic first candidate.
+    write('src/zeta.ts', `export function pct(n: number): number {\n  return n * 2;\n}\n`);
+    const result = await cg.sync();
+    expect(result.definitionDelta).toContain('pct');
+
+    const targets = withDb((db) =>
+      (
+        db
+          .prepare(
+            `SELECT target.file_path AS file
+               FROM edges edge
+               JOIN nodes source ON source.id = edge.source
+               JOIN nodes target ON target.id = edge.target
+              WHERE source.name = 'run'
+                AND target.name = 'pct'
+                AND edge.kind = 'calls'`
+          )
+          .all() as Array<{ file: string }>
+      ).map((row) => row.file)
+    );
+    expect(targets).toEqual(['src/alpha.ts']);
+  });
+
+  it.each(['store', 'definition replay'] as const)(
+    'recovers warm resolution caches after indexFiles throws following %s',
+    async (phase) => {
+      write('src/target.ts', 'export function oldTarget() { return 1; }\n');
+      write('src/caller.ts', 'export function run() { return oldTarget(); }\n');
+      cg = CodeGraph.initSync(testDir, { config: { include: ['**/*.ts'], exclude: [] } });
+      await cg.indexAll();
+      await cg.resolveReferencesBatched();
+
+      write('src/target.ts', 'export function freshTarget() { return 2; }\n');
+      write('src/caller.ts', 'export function run() { return freshTarget(); }\n');
+      const { orchestrator } = cg as unknown as { orchestrator: ExtractionOrchestrator };
+      const interrupt = (): never => { throw new Error('forced post-store interruption'); };
+      const spy = phase === 'store'
+        ? (() => {
+          const original = orchestrator.indexFiles.bind(orchestrator);
+          return vi.spyOn(orchestrator, 'indexFiles').mockImplementation(async (...args) => {
+            await original(...args);
+            return interrupt();
+          });
+        })()
+        : (() => {
+          const original = orchestrator.resurrectStaleResolutionEdges.bind(orchestrator);
+          return vi.spyOn(orchestrator, 'resurrectStaleResolutionEdges').mockImplementation((...args) => {
+            original(...args);
+            return interrupt();
+          });
+        })();
+      try {
+        await expect(cg.indexFiles(['src/target.ts', 'src/caller.ts']))
+          .rejects.toThrow('forced post-store interruption');
+      } finally {
+        spy.mockRestore();
+      }
+
+      // Both files were committed before the exception. With no subsequent
+      // file edit, only the orphan sweep can resolve the new name; retaining
+      // the old known-name/import caches incorrectly parks it as failed.
+      expect(cg.getPendingReferenceCount()).toBeGreaterThan(0);
+      const syncedResult = await cg.sync();
+      expect(syncedResult.filesAdded + syncedResult.filesModified + syncedResult.filesRemoved).toBe(0);
+      const [caller] = cg.getNodesByName('run');
+      expect(caller).toBeDefined();
+      expect(cg.getCallees(caller!.id).map(({ node }) => node.name)).toContain('freshTarget');
+      const synced = edgeSet();
+      const rebuilt = await rebuildEdgeSet();
+      expect(describeDiff(synced, rebuilt)).toBe('missing from synced: 0, stale in synced: 0');
+    },
+  );
+
+  it('rolls back edge deletion when requeueing its reference is interrupted', async () => {
+    write('src/caller.ts', `export function run(): number {\n  return pct(1);\n}\n`);
+    write('src/zeta.ts', `export function pct(n: number): number {\n  return n;\n}\n`);
+    cg = CodeGraph.initSync(testDir, { config: { include: ['**/*.ts'], exclude: [] } });
+    await cg.indexAll();
+
+    const originalEdge = withDb((db) => {
+      const row = db
+        .prepare(
+          `SELECT edge.source, edge.target, edge.kind
+             FROM edges edge
+             JOIN nodes source ON source.id = edge.source
+             JOIN nodes target ON target.id = edge.target
+            WHERE source.name = 'run'
+              AND target.name = 'pct'
+              AND edge.kind = 'calls'`
+        )
+        .get() as { source: string; target: string; kind: string };
+      db.exec(
+        `CREATE TRIGGER interrupt_pct_requeue
+         BEFORE INSERT ON unresolved_refs
+         WHEN NEW.reference_name = 'pct'
+         BEGIN
+           SELECT RAISE(ABORT, 'forced rebind interruption');
+         END;`
+      );
+      return `${row.source}|${row.target}|${row.kind}`;
+    });
+
+    write('src/alpha.ts', `export function pct(n: number): number {\n  return n * 2;\n}\n`);
+    await expect(cg.sync()).rejects.toThrow(/forced rebind interruption/);
+
+    // A failed requeue leaves the last committed graph answer untouched.
+    expect(edgeSet().has(originalEdge)).toBe(true);
+    const queued = withDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS count
+                 FROM unresolved_refs ref
+                 JOIN nodes source ON source.id = ref.from_node_id
+                WHERE source.name = 'run' AND ref.reference_name = 'pct'`
+            )
+            .get() as { count: number }
+        ).count
+    );
+    expect(queued).toBe(0);
   });
 
   /**

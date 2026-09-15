@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX } from '../types';
+import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE } from '../types';
 import { QueryBuilder } from '../db/queries';
 import {
   UnresolvedRef,
@@ -19,8 +19,9 @@ import {
   isInheritanceRef,
   isImportableKind,
 } from './types';
-import { isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesKnownFamily, dumpNameMatcherProfile, clearNameMatcherMemos } from './name-matcher';
+import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesKnownFamily, dumpNameMatcherProfile, clearNameMatcherMemos } from './name-matcher';
 import { resolveViaImport, resolvePhpImportedStaticCall, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
+import { haskellCombinatorHasCanonicalOrigin } from './haskell-combinators';
 import { ResolverPool, minRefsForPool } from './resolver-pool';
 import { resolveAliasBinding } from './alias-binding';
 import { detectFrameworks } from './frameworks';
@@ -453,6 +454,7 @@ export class ReferenceResolver {
    */
   private createContext(): ResolutionContext {
     return {
+      resolveImport: (ref) => resolveViaImport(ref, this.context),
       getNodesInFile: (filePath: string) => {
         if (!this.nodeCache.has(filePath)) {
           this.nodeCache.set(filePath, this.queries.getNodesByFile(filePath));
@@ -488,7 +490,7 @@ export class ReferenceResolver {
           matches = [];
           for (const m of candidates) {
             if (m.kind !== 'method') continue;
-            if (m.language !== language) continue;
+            if (!sameLanguageFamily(m.language, language)) continue;
             const qn = m.qualifiedName;
             if (qn === want || qn.endsWith(`::${want}`)) matches.push(m);
           }
@@ -511,7 +513,7 @@ export class ReferenceResolver {
             ownerIndex = new Map<string, Node[]>();
             for (const m of candidates) {
               if (m.kind !== 'method') continue;
-              if (m.language !== language) continue;
+              if (!sameLanguageFamily(m.language, language)) continue;
               const qn = m.qualifiedName;
               const i2 = qn.lastIndexOf('::');
               if (i2 < 0) continue; // single-segment qn can never match `T::m`
@@ -1514,7 +1516,44 @@ export class ReferenceResolver {
     };
   }
 
+  /** Resolve the operand as a value, then prove the combinator's execution semantics. */
+  private resolveHaskellCombinator(ref: UnresolvedRef, combinator: string): ResolvedRef | null {
+    const valueRef: UnresolvedRef = { ...ref, referenceKind: 'function_ref', candidates: undefined };
+    const resolved = this.resolveOneInner(valueRef);
+    if (!resolved) return null;
+    const combinatorRef: UnresolvedRef = {
+      ...ref, referenceName: combinator, referenceKind: 'calls', candidates: undefined,
+    };
+    // Materialized lexical/module definitions override package provenance;
+    // non-materialized parameters were already rejected during extraction.
+    const lexical = this.resolveHaskellLexical(combinatorRef);
+    const canonical = !lexical.claimed
+      && haskellCombinatorHasCanonicalOrigin(ref.filePath, combinator, this.context);
+    return {
+      ...resolved,
+      original: ref,
+      edgeKind: canonical ? 'calls' : 'references',
+      ...(canonical ? { provenance: 'heuristic' as const } : {}),
+      metadata: {
+        ...resolved.metadata,
+        haskellImportDependent: true,
+        ...(canonical ? {
+          synthesizedBy: 'haskell-combinator',
+          via: combinator,
+          registeredAt: `${ref.filePath}:${ref.line}`,
+        } : {}),
+      },
+    };
+  }
+
   private resolveOneInner(ref: UnresolvedRef): ResolvedRef | null {
+    const combinator = ref.language === 'haskell' && ref.referenceKind === 'calls'
+      ? ref.candidates?.find((candidate) => candidate.startsWith(HASKELL_COMBINATOR_PREFIX))
+      : undefined;
+    if (combinator) {
+      return this.resolveHaskellCombinator(ref, combinator.slice(HASKELL_COMBINATOR_PREFIX.length));
+    }
+
     // Skip built-in/external references
     if (this.isBuiltInOrExternal(ref)) {
       return null;
@@ -1580,7 +1619,7 @@ export class ReferenceResolver {
       this.frameworks.some((f) => f.claimsReference?.(ref.referenceName));
     if (this.profileStages) this.stageAdd('preFilter', ref, preFilterPass, tPre);
     if (!preFilterPass) {
-      return null;
+      return this.gateLanguage(matchJsStoreBindingCall(ref, this.context), ref);
     }
 
     // Function-as-value refs (#756) get a dedicated, strictly-gated path:
@@ -1665,6 +1704,9 @@ export class ReferenceResolver {
     }
     if (this.profileStages) this.stageAdd('frameworks', ref, fwEarly !== null, tFw);
     if (fwEarly) return fwEarly;
+    // A retained untyped chain supplies effect/call-site evidence only. In
+    // particular, importing its root does not make the root its call target.
+    if (isUnresolvedJsMemberCall(ref)) return null;
 
     // Strategy 2: Try import-based resolution
     // A TS/JS/Python call-receiver chain (`useStore.getState().reset`, #1683)
@@ -1836,41 +1878,60 @@ export class ReferenceResolver {
           )
         ),
       ];
-      return targets.map((t) => ({
-        source: ref.original.fromNodeId,
-        target: t.targetNodeId,
-        kind,
-        line: ref.original.line,
-        column: ref.original.column,
-        metadata: {
-          ...(t.metadata ?? {}),
-          confidence: ref.confidence,
-          resolvedBy: ref.resolvedBy,
-          // The ORIGINAL reference text (and kind, when edge-kind promotion
-          // rewrote it — calls→instantiates, extends→implements,
-          // function_ref→references). If this edge's target is later removed
-          // by a re-index, the edge is resurrected as exactly this ref and
-          // re-resolved (#1240 removal case) — a faithful resurrection, so
-          // re-resolution can never bind anywhere a full re-index wouldn't.
-          // Reconstruction from the target node's name instead would strip
-          // receiver/qualifier context (`h.greet` → `greet`) and risk a
-          // wrong rebind; edges without refName (pre-#1240, synthesized) are
-          // deliberately NOT resurrected for the same reason.
-          refName: ref.original.referenceName,
-          ...(ref.original.referenceKind !== kind ? { refKind: ref.original.referenceKind } : {}),
-          ...((ref.original.referenceKind === 'haskell_effect_alias'
-            || (ref.original.language === 'haskell' && ref.original.referenceKind === 'references'))
-            && ref.original.candidates
-            ? { refCandidates: ref.original.candidates }
-            : {}),
-          // Uniform marker for function-as-value edges (#756), regardless of
-          // which strategy resolved them (import vs matchFunctionRef) — lets
-          // tooling label "callback registration" and lets validation diff
-          // exactly the edges this feature added.
-          ...(ref.original.referenceKind === 'function_ref' ? { fnRef: true } : {}),
-          ...(ref.original.referenceKind === 'haskell_effect_alias' ? { haskellEffectAlias: true } : {}),
-        },
-      }));
+      return targets.flatMap((t): Edge[] => {
+        const edge: Edge = {
+          source: ref.original.fromNodeId,
+          target: t.targetNodeId,
+          kind,
+          ...(ref.provenance ? { provenance: ref.provenance } : {}),
+          line: ref.original.line,
+          column: ref.original.column,
+          metadata: {
+            ...(t.metadata ?? {}),
+            confidence: ref.confidence,
+            resolvedBy: ref.resolvedBy,
+            // The ORIGINAL reference text (and kind, when edge-kind promotion
+            // rewrote it — calls→instantiates, extends→implements,
+            // function_ref→references). If this edge's target is later removed
+            // by a re-index, the edge is resurrected as exactly this ref and
+            // re-resolved (#1240 removal case) — a faithful resurrection, so
+            // re-resolution can never bind anywhere a full re-index wouldn't.
+            // Reconstruction from the target node's name instead would strip
+            // receiver/qualifier context (`h.greet` → `greet`) and risk a
+            // wrong rebind; edges without refName (pre-#1240, synthesized) are
+            // deliberately NOT resurrected for the same reason.
+            refName: ref.original.referenceName,
+            ...(ref.original.referenceKind !== kind ? { refKind: ref.original.referenceKind } : {}),
+            ...((ref.original.referenceKind === 'haskell_effect_alias'
+              || (ref.original.language === 'haskell'
+                && (ref.original.referenceKind === 'references' || ref.original.referenceKind === 'calls')))
+              && ref.original.candidates
+              ? { refCandidates: ref.original.candidates }
+              : {}),
+            // Uniform marker for function-as-value edges (#756), regardless of
+            // which strategy resolved them (import vs matchFunctionRef) — lets
+            // tooling label "callback registration" and lets validation diff
+            // exactly the edges this feature added.
+            ...(ref.original.referenceKind === 'function_ref' ? { fnRef: true } : {}),
+            ...(ref.original.referenceKind === 'haskell_effect_alias' ? { haskellEffectAlias: true } : {}),
+          },
+        };
+        if (kind !== 'calls'
+          || !ref.original.candidates?.includes(HASKELL_COMBINATOR_VALUE_REFERENCE)) return [edge];
+        // Derive the call and its original value dependency from ONE pending
+        // reference. Both retain the proof, so re-indexing, batch boundaries,
+        // and a canonical→custom→canonical replay produce identical edges.
+        const valueMetadata: Record<string, unknown> = { ...edge.metadata, refKind: 'calls', fnRef: true };
+        delete valueMetadata.synthesizedBy;
+        delete valueMetadata.via;
+        delete valueMetadata.registeredAt;
+        return [edge, {
+          ...edge,
+          kind: 'references',
+          provenance: undefined,
+          metadata: valueMetadata,
+        }];
+      });
     });
   }
 

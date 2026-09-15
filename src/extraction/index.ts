@@ -1696,7 +1696,7 @@ function resurrectRefFromDroppedEdge(
     filePath: e.sourceFilePath,
     language: e.sourceLanguage,
     ...(e.sourceLanguage === 'haskell'
-      && (refKind === 'haskell_effect_alias' || refKind === 'references')
+      && (refKind === 'haskell_effect_alias' || refKind === 'references' || refKind === 'calls')
       && Array.isArray(refCandidates)
       && refCandidates.every((candidate) => typeof candidate === 'string')
       ? { candidates: refCandidates as string[] }
@@ -3195,11 +3195,8 @@ export class ExtractionOrchestrator {
     // rebind to the same target is a clean no-op, but leaving the old row in
     // place for a rebind ELSEWHERE would keep both, turning drift into
     // duplication.
-    return this.queries.transaction(() => {
-      this.queries.deleteEdgesByIds(edgeIds);
-      this.queries.insertUnresolvedRefsBatch(refs);
-      return refs.length;
-    });
+    this.queries.replaceResolutionEdgesWithUnresolvedRefs(edgeIds, refs);
+    return refs.length;
   }
 
   /**

@@ -799,6 +799,11 @@ export class CodeGraph {
           resolutionStateInvalidated = true;
         }
         return result;
+      } catch (error) {
+        // Earlier stores may have committed before a later store or replay
+        // failed. Recovery must resolve against those writes, not warm caches.
+        resolutionStateInvalidated = true;
+        throw error;
       } finally {
         if (resolutionStateInvalidated) this.resolver.clearCaches();
         this.fileLock.release();

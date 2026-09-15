@@ -145,13 +145,25 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Haskell projects now get code intelligence:** CodeGraph indexes modules, declarations, imports, re-exports, operators, Template Haskell, Unicode identifiers, and Cabal/Stack workspaces so `codegraph_explore` can follow many real flows within a workspace.
 
+### Security
+
+- Indexing now bounds re-export searches so deeply interconnected modules cannot cause exponential work and block the process. (#1337)
+
 ### Fixes
+
+- Calls between JavaScript, JSX and TypeScript files keep their callers and callback flows.
+- Zustand actions keep their callers when read through typed stores, destructured from store state, or selected by a hook.
+- Steps diagrams retain database operations made through external client chains without inventing internal dependencies.
+- Direct React Native bridge calls retain their native implementations and cross-platform relationships.
+- Dart extension-type getters remain searchable when using the WebAssembly parser.
 
 - Spring mappings now include every declared path combination and resolve constants declared in the same file, while unresolved paths no longer appear as false root routes. (#1461)
 - `codegraph callers`, `codegraph callees` and `codegraph impact` now resolve qualified names, group results and JSON edges by definition, and accept `--file` to narrow ambiguous names; thanks @ferrine. (#1512, #1656)
 - `codegraph callers`, `codegraph callees` and `codegraph impact` (CLI and MCP) now report missing names with did-you-mean suggestions instead of another symbol's results, and exact matches with no callers stay empty; thanks @uvmplus. (#1473, #1481)
 
 #### MCP / indexing
+
+- Incremental sync now keeps edge rebinding crash-safe: replacing a resolved edge with its recovery reference commits atomically, so an interruption cannot permanently remove the relationship.
 
 - The prompt hook no longer injects unrelated projects when run from your home directory or a broader directory containing a stray workspace manifest. (#1454)
 
@@ -252,6 +264,12 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A FastAPI service that lives in one directory of a monorepo is detected.** `backend/pyproject.toml` and `backend/app/main.py` count, not only files at the repository root — the official full-stack template's routes now appear in Entry points and the Steps tab.
 
 #### Haskell indexing
+
+- Large Haskell projects index and refresh exported definitions faster while preserving import visibility and ambiguity checks. (#1337)
+
+- Haskell local functions keep their callers when they shadow a parameter with the same name. (#1337)
+
+- Custom Haskell functions named like standard combinators no longer create calls to arguments they do not execute. (#1337)
 
 - Haskell pattern synonyms now retain calls through local helpers while excluding quoted code that is not executed.
 

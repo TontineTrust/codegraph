@@ -484,11 +484,16 @@ export function flowTokens(query: string): string[] {
     const start = match.index!;
     const end = start + match[0].length;
     if (overlapsQualifiedOperator(start, end)) continue;
+    // Backticks explicitly name the whole identifier (Haskell infix syntax
+    // or inline code). Validate both outside edges as well, so quoted paths,
+    // emails, and a backticked fragment glued to another word stay rejected.
+    const backtickWrapped = query[start - 1] === '`' && query[end] === '`'
+      && atOldSplitBoundary(query[start - 2]) && atOldSplitBoundary(query[end + 1]);
     // A Template Haskell quote (`'name`) is syntax, not part of the queried
     // identifier, and `'` was never a split character — the boundary rule
     // rejects it on either side.
-    if (!atOldSplitBoundary(query[start - 1])) continue;
-    if (!atOldSplitBoundary(query[end])) {
+    if (!backtickWrapped && !atOldSplitBoundary(query[start - 1])) continue;
+    if (!backtickWrapped && !atOldSplitBoundary(query[end])) {
       // One escape on the right edge: a dot/colon run followed by an operator
       // body is the Haskell qualified-operator spelling (`notOps.<+>`,
       // `M::(<+>)`) — the module half stays a token (the operator half
@@ -512,7 +517,7 @@ export function flowTokens(query: string): string[] {
     // valid one- or two-codepoint Unicode identifier (`λ`, `函数`). Exact node
     // lookup plus precise-token ranking still prevents a fuzzy fallback.
     if ((token.length >= 3 || HAS_NON_ASCII.test(token))
-      && !ENGLISH_CONTRACTION.test(token)
+      && (backtickWrapped || !ENGLISH_CONTRACTION.test(token))
       && ANCHORED_IDENTIFIER.test(token)) {
       found.push({ index: start, token });
     }

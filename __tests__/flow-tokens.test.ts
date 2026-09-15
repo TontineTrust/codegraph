@@ -101,3 +101,29 @@ describe('flowTokens keeps the capabilities the rewrite added', () => {
     expect(flowTokens(query)).toEqual(expected);
   });
 });
+
+describe('flowTokens preserves whole backticked identifiers', () => {
+  it.each([
+    ['`mapMaybe` `request`', ['mapMaybe', 'request']],
+    ["`hover'` `Module'.run'`", ["hover'", "Module'.run'"]],
+    ["`item's` finish", ["item's", 'finish']],
+    ['`$fetch` `Module.render$`', ['$fetch', 'Module.render$']],
+    ['[`mapMaybe`],(`request`)', ['mapMaybe', 'request']],
+  ])('%s', (query, expected) => {
+    expect(flowTokens(query)).toEqual(expected);
+  });
+
+  it.each([
+    ['`src/Foo.bar` finish', ['finish']],
+    ['`user@example.com` finish', ['finish']],
+    ['`foo;bar` finish', ['finish']],
+    ['`foo-bar` finish', ['finish']],
+    ['`1bad` finish', ['finish']],
+    ["`Module.'name` finish", ['finish']],
+    ['prefix`hover` finish', ['finish']],
+    ['`hover`tail finish', ['finish']],
+    ['"`hover`" finish', ['finish']],
+  ])('does not mine a quoted fragment: %s', (query, expected) => {
+    expect(flowTokens(query)).toEqual(expected);
+  });
+});
