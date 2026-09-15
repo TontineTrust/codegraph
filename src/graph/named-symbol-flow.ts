@@ -234,8 +234,7 @@ const DYN_KINDS: ReadonlySet<string> = new Set(['constant', 'variable', 'field',
  * kinds the Traverser can actually walk, so a node joined to the graph by
  * containment alone never qualifies. Same two indexed edge reads per
  * candidate as the old version (outgoing + incoming, no opposite-node
- * hydration); self-loops don't count. Semantic change from the old check:
- * heuristic `contains`/`extends`/… edges previously admitted endpoints too.
+ * hydration); self-loops don't count.
  */
 const TRAVERSABLE_EDGE_KINDS: ReadonlySet<string> = new Set([
   'calls', 'references', 'imports', 'instantiates', 'navigates',
@@ -278,7 +277,7 @@ const PROSE_UNICODE_OPERATOR_BODY =
 
 /** May this whitespace-delimited operator shape be a flow token at all? */
 function isPlausibleBareOperator(body: string): boolean {
-  if (/[^\x00-\x7f]/u.test(body)) return !PROSE_UNICODE_OPERATOR_BODY.test(body);
+  if (HAS_NON_ASCII.test(body)) return !PROSE_UNICODE_OPERATOR_BODY.test(body);
   return body.length >= 2 && !PROSE_OPERATOR_BODY.test(body);
 }
 
@@ -295,6 +294,15 @@ const ANCHORED_IDENTIFIER = new RegExp(
   `^${HASKELL_FLOW_IDENTIFIER_SOURCE}(?:(?:::|\\.)${HASKELL_FLOW_IDENTIFIER_SOURCE})*$`,
   'u',
 );
+
+/** A non-ASCII codepoint — the pass for Unicode identifiers (`λ`, `函数`). */
+const HAS_NON_ASCII = /[^\x00-\x7f]/u;
+/** A dot/colon run and the run's first following word (`work.` → ``). */
+const DOT_COLON_RUN_BODY = /^[.:]+(\S+)/;
+/** A whole parenthesized body (`(<+>)` → `<+>`). */
+const PAREN_WRAP = /^\(([^()]*)\)$/;
+/** A dot/colon-only body — punctuation, not a qualified-operator spelling. */
+const DOT_COLON_ONLY = /^[.:]+$/;
 
 /** Chain length ceiling, in NODES. Explore's Flow section has always used 7. */
 export const DEFAULT_MAX_HOPS = 7;
@@ -488,12 +496,12 @@ export function flowTokens(query: string): string[] {
       // the run — nothing (`work.`), whitespace (`foo.. bar`), or another
       // word (`work.: fix`, `e.g.: fix`) — is not a qualified name and drops
       // whole, exactly as the old whole-word check dropped it.
-      const body = /^[.:]+(\S+)/.exec(query.slice(end))?.[1] ?? '';
-      const unparenthesized = body.replace(/^\(([^()]*)\)$/, '$1');
+      const body = DOT_COLON_RUN_BODY.exec(query.slice(end))?.[1] ?? '';
+      const unparenthesized = body.replace(PAREN_WRAP, '$1');
       // Test the RAW body: `.`/`:` are legal operator bodies (`M::(.)`), so a
       // dot/colon-only run is distinguished from a qualified spelling here,
       // before the operator-body check below.
-      if (/^[.:]+$/.test(body)) continue;
+      if (DOT_COLON_ONLY.test(body)) continue;
       if (!isHaskellOperatorBody(unparenthesized)) continue;
     }
     const token = normalizeToken(match[0]);
@@ -503,7 +511,7 @@ export function flowTokens(query: string): string[] {
     // Keep the noise floor for short ASCII prose words, but do not discard a
     // valid one- or two-codepoint Unicode identifier (`λ`, `函数`). Exact node
     // lookup plus precise-token ranking still prevents a fuzzy fallback.
-    if ((token.length >= 3 || /[^\x00-\x7f]/u.test(token))
+    if ((token.length >= 3 || HAS_NON_ASCII.test(token))
       && !ENGLISH_CONTRACTION.test(token)
       && ANCHORED_IDENTIFIER.test(token)) {
       found.push({ index: start, token });

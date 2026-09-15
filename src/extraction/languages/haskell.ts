@@ -1840,8 +1840,7 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
   // A `bind` under `do` is a monadic pattern bind (`x <- action`), not a named
   // declaration. Local value binds stay attributed to their enclosing symbol;
   // only function-valued local binds become their own graph nodes.
-  const scopeId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const owner = scopeOwner(ctx, scopeId);
+  const owner = scopeOwner(ctx);
   const isMethod = !!owner && (owner.kind === 'trait' || owner.decorators?.includes('haskell-instance'));
   const isTopLevel = !owner || owner.kind === 'file' || owner.kind === 'namespace';
   const nameNode = getChildByField(node, 'name');
@@ -1921,8 +1920,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
   }
   if (!name) return true;
 
-  const scopeId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const parent = scopeOwner(ctx, scopeId);
+  const parent = scopeOwner(ctx);
   const kind = parent && (parent.kind === 'trait' || parent.decorators?.includes('haskell-instance'))
     ? 'method'
     : 'function';
@@ -2070,8 +2068,7 @@ function handleDataFamily(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const head = declarationHead(node, ctx.source);
   if (!head) return true;
   const name = head.baseName;
-  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const owner = scopeOwner(ctx, ownerId);
+  const owner = scopeOwner(ctx);
   ctx.createNode('enum', name, node, {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
     docstring: getHaskellPrecedingDocstring(node, ctx.source),
@@ -2089,8 +2086,7 @@ function handleDataInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const head = declarationHead(declaration, ctx.source);
   if (!head) return true;
   const baseName = head.baseName;
-  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const owner = scopeOwner(ctx, ownerId);
+  const owner = scopeOwner(ctx);
   const instanceName = owner && (owner.kind === 'trait' || owner.decorators?.includes('haskell-instance'))
     ? baseName
     : head.displayName;
@@ -2236,8 +2232,7 @@ function handleTypeFamily(node: SyntaxNode, ctx: ExtractorContext): boolean {
   if (!head) return true;
   const baseName = head.baseName;
   const name = node.type === 'type_instance' ? head.displayName : baseName;
-  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const owner = scopeOwner(ctx, ownerId);
+  const owner = scopeOwner(ctx);
   ctx.createNode('type_alias', name, node, {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
     docstring: getHaskellPrecedingDocstring(node, ctx.source),

@@ -145,7 +145,9 @@ export interface SyncResult {
   definitionDelta?: string[];
 }
 
-const HASKELL_IMPORT_INVALIDATION_PENDING = 'haskell_import_invalidation_pending';
+/** Durable marker that a Haskell import-topology invalidation is in flight.
+ *  Shared by the orchestrator and `CodeGraph` (its indexFiles cache gating). */
+export const HASKELL_IMPORT_INVALIDATION_PENDING = 'haskell_import_invalidation_pending';
 
 /**
  * Calculate SHA256 hash of file contents
@@ -157,12 +159,9 @@ export function hashContent(content: string): string {
 /**
  * Hash only the Haskell surface that can change cross-file import resolution.
  * Bodies, source positions, signatures, and docs are intentionally excluded so
- * comment-only edits do not force a project-wide Haskell replay. The leading
- * `_filePath` parameter is deliberately kept (unused) so the signature stays
- * a stable seam for callers that naturally have the path at hand.
+ * comment-only edits do not force a project-wide Haskell replay.
  */
 export function computeHaskellTopologyHash(
-  _filePath: string,
   content: string,
   result: ExtractionResult,
 ): string {
@@ -2814,7 +2813,7 @@ export class ExtractionOrchestrator {
     // the unchanged-file early return so untouched files pay nothing.
     const generated = detectGeneratedFile(filePath, content);
     const haskellTopologyHash = language === 'haskell'
-      ? computeHaskellTopologyHash(filePath, content, result)
+      ? computeHaskellTopologyHash(content, result)
       : undefined;
     const haskellTopologyChanged = language === 'haskell'
       && existingFile?.haskellTopologyHash !== haskellTopologyHash;
@@ -2985,7 +2984,7 @@ export class ExtractionOrchestrator {
       indexedAt: Date.now(),
       nodeCount: nodeCountOverride ?? result.nodes.length,
       haskellTopologyHash: language === 'haskell'
-        ? computeHaskellTopologyHash(filePath, content, result)
+        ? computeHaskellTopologyHash(content, result)
         : undefined,
       errors: result.errors.length > 0 ? result.errors : undefined,
       // Decided here, once, while the content is already in memory — never at

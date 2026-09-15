@@ -41,6 +41,7 @@ import {
   SyncResult,
   extractFromSource,
   initGrammars,
+  HASKELL_IMPORT_INVALIDATION_PENDING,
 } from './extraction';
 import {
   ReferenceResolver,
@@ -774,7 +775,7 @@ export class CodeGraph {
       // them warm.
       let resolutionStateInvalidated = false;
       const haskellInvalidationPending = (): boolean =>
-        this.queries.getMetadata('haskell_import_invalidation_pending') === '1';
+        this.queries.getMetadata(HASKELL_IMPORT_INVALIDATION_PENDING) === '1';
       try {
         const haskellPendingBefore = haskellInvalidationPending();
         const beforePairs = this.queries.getNodeNamePairsByFiles(filePaths);

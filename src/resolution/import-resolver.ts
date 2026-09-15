@@ -1899,9 +1899,10 @@ export function extractHaskellImportSurface(content: string): {
   reExports: ReExport[];
 } {
   const stripped = stripHaskellComments(content);
+  const imports = extractHaskellImportsFromStripped(stripped);
   return {
-    imports: extractHaskellImportsFromStripped(stripped),
-    reExports: extractHaskellReExportsFromStripped(stripped),
+    imports,
+    reExports: extractHaskellReExportsFromStripped(stripped, imports),
   };
 }
 
@@ -2221,10 +2222,11 @@ export function extractReExports(content: string, language: Language): ReExport[
  * also forward a symbol that was explicitly imported into the facade.
  */
 function extractHaskellReExports(content: string): ReExport[] {
-  return extractHaskellReExportsFromStripped(stripHaskellComments(content));
+  const stripped = stripHaskellComments(content);
+  return extractHaskellReExportsFromStripped(stripped, extractHaskellImportsFromStripped(stripped));
 }
 
-function extractHaskellReExportsFromStripped(cleaned: string): ReExport[] {
+function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMapping[]): ReExport[] {
   const header = cleaned.match(new RegExp(
     `\\bmodule\\s+(${HASKELL_MODULE_NAME_SOURCE})\\s*`,
     'u',
@@ -2250,7 +2252,6 @@ function extractHaskellReExportsFromStripped(cleaned: string): ReExport[] {
   const items = splitHaskellList(cleaned.slice(open + 1, close));
 
   const out: ReExport[] = [];
-  const imports = extractHaskellImportsFromStripped(cleaned);
   const reExportKeys = new Set<string>();
   const pushUnique = (reExport: ReExport): void => {
     const key = JSON.stringify(reExport);
