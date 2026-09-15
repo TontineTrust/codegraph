@@ -1692,7 +1692,7 @@ function resurrectRefFromDroppedEdge(
     filePath: e.sourceFilePath,
     language: e.sourceLanguage,
     ...(e.sourceLanguage === 'haskell'
-      && (refKind === 'haskell_effect_alias' || refKind === 'references')
+      && (refKind === 'haskell_effect_alias' || refKind === 'references' || refKind === 'calls')
       && Array.isArray(refCandidates)
       && refCandidates.every((candidate) => typeof candidate === 'string')
       ? { candidates: refCandidates as string[] }

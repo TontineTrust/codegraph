@@ -14,6 +14,8 @@ import {
   ExtractionResult,
   ExtractionError,
   UnresolvedReference,
+  HASKELL_COMBINATOR_PREFIX,
+  HASKELL_COMBINATOR_VALUE_REFERENCE,
 } from '../types';
 import { getParser, detectLanguage, isLanguageSupported, isFileLevelOnlyLanguage } from './grammars';
 import { generateNodeId, getNodeText, getChildByField, getPrecedingDocstring } from './tree-sitter-helpers';
@@ -638,7 +640,23 @@ export class TreeSitterExtractor {
     let unresolvedReferences = this.unresolvedReferences;
     if (this.language === 'haskell') {
       const seen = new Set<string>();
+      const site = (reference: UnresolvedReference): string =>
+        `${reference.fromNodeId}\0${reference.referenceName}\0${reference.line}\0${reference.column}`;
+      const combinatorSites = new Set(this.unresolvedReferences.filter((reference) =>
+        reference.candidates?.some((candidate) => candidate.startsWith(HASKELL_COMBINATOR_PREFIX))
+      ).map(site));
+      const valueSites = new Set(this.unresolvedReferences.filter((reference) =>
+        reference.referenceKind === 'function_ref').map(site));
+      // Persist one reference per semantic operand. Separate plain/semantic
+      // rows can land in different resolution batches and race to insert the
+      // same demoted edge, losing the proof needed for later topology replay.
       unresolvedReferences = this.unresolvedReferences.filter((reference) => {
+        if (reference.referenceKind === 'function_ref' && combinatorSites.has(site(reference))) return false;
+        if (reference.candidates?.some((candidate) => candidate.startsWith(HASKELL_COMBINATOR_PREFIX))
+          && valueSites.has(site(reference))
+          && !reference.candidates.includes(HASKELL_COMBINATOR_VALUE_REFERENCE)) {
+          reference.candidates.push(HASKELL_COMBINATOR_VALUE_REFERENCE);
+        }
         const key = `${reference.fromNodeId}\0${reference.referenceName}\0${reference.referenceKind}`
           + `\0${reference.line}\0${reference.column}`;
         if (seen.has(key)) return false;
@@ -4098,7 +4116,7 @@ export class TreeSitterExtractor {
           column: reference.node.startPosition.column,
         });
       };
-      const emitCall = (candidate: SyntaxNode | null): boolean => {
+      const emitCall = (candidate: SyntaxNode | null, combinator?: string): boolean => {
         const reference = simpleReference(candidate);
         if (!reference) return false;
         this.unresolvedReferences.push({
@@ -4107,6 +4125,7 @@ export class TreeSitterExtractor {
           referenceKind: 'calls',
           line: reference.node.startPosition.row + 1,
           column: reference.node.startPosition.column,
+          ...(combinator ? { candidates: [`${HASKELL_COMBINATOR_PREFIX}${combinator}`] } : {}),
         });
         return true;
       };
@@ -4213,7 +4232,8 @@ export class TreeSitterExtractor {
               || context?.type === 'generator'
               || (context?.type === 'bind' && !!getChildByField(context, 'pattern'))
             ) || appliedByKnownApplicationOperator;
-            if (executesSpecializedValue) emitCall(typeAppliedCallee);
+            if (executesSpecializedValue) emitCall(typeAppliedCallee,
+              appliedByKnownApplicationOperator ? contextOperatorName : undefined);
             else emitFunctionRef(typeAppliedCallee);
             return;
           }
@@ -4224,20 +4244,7 @@ export class TreeSitterExtractor {
         // intentionally strict (callables only; import/same-file/unique), so
         // ordinary value arguments do not turn into fuzzy call edges.
         const argument = getChildByField(node, 'argument');
-        let appliedArgumentCount = 0;
-        let prefixCallee = getChildByField(node, 'function');
-        while (prefixCallee?.type === 'apply') {
-          appliedArgumentCount++;
-          prefixCallee = getChildByField(prefixCallee, 'function');
-        }
-        const prefixReference = simpleReference(prefixCallee);
-        const prefixBase = prefixReference
-          ? haskellReferenceParts(prefixReference.name).member
-          : '';
-        const actionArgument = ['>>', '*>', '<*', '<*>', '<**>', '<|>'].includes(prefixBase)
-          || (['<$>', '<$', '=<<'].includes(prefixBase) && appliedArgumentCount === 1)
-          || (['<&>', '$>', '>>='].includes(prefixBase) && appliedArgumentCount === 0);
-        if (!actionArgument) emitFunctionRef(argument);
+        emitFunctionRef(argument);
         // Known Haskell HOF arguments are emitted by the language-specific
         // bare-call hook during the child walk. Keeping that semantic decision
         // in one place avoids duplicate calls for `map Just xs` and friends.
@@ -4270,14 +4277,13 @@ export class TreeSitterExtractor {
 
         // `$`/`$!` and `&` are application syntax in practice. The function is
         // an operand rather than an `apply` node, so surface the semantic callee
-        // (`handler $ value`, `value & handler`) and omit the Prelude operator.
+        // (`handler $ value`, `value & handler`). Keep the operator itself
+        // as a normal reference so a custom definition still resolves.
         if (operatorName === '$' || operatorName === '$!') {
-          emitCall(getChildByField(node, 'left_operand'));
-          return;
+          emitCall(getChildByField(node, 'left_operand'), operatorName);
         }
         if (operatorName === '&') {
-          emitCall(getChildByField(node, 'right_operand'));
-          return;
+          emitCall(getChildByField(node, 'right_operand'), operatorName);
         }
 
         if (HASKELL_FUNCTION_COMPOSITION_OPERATORS.has(operatorName)) {
@@ -4290,7 +4296,7 @@ export class TreeSitterExtractor {
         }
         this.unresolvedReferences.push({
           fromNodeId: callerId,
-          referenceName: operatorName,
+          referenceName: ['$', '$!', '&'].includes(operatorName) ? `(${operatorName})` : operatorName,
           referenceKind: 'calls',
           line: operator.startPosition.row + 1,
           column: operator.startPosition.column,

@@ -349,6 +349,10 @@ export type ReferenceKind = EdgeKind | 'function_ref' | 'haskell_effect_alias';
 export const HASKELL_EFFECT_ALIAS_HEAD_PREFIX = 'haskell-effect-head:';
 /** Constructor proof for a record-construction field label. */
 export const HASKELL_RECORD_CONSTRUCTOR_PREFIX = 'haskell-record-constructor:';
+/** Combinator whose canonical origin must prove an inferred operand call. */
+export const HASKELL_COMBINATOR_PREFIX = 'haskell-combinator:';
+/** The same operand also appeared as a function value; replay both semantic edges. */
+export const HASKELL_COMBINATOR_VALUE_REFERENCE = 'haskell-combinator-value-reference';
 
 /**
  * A reference that couldn't be resolved during extraction

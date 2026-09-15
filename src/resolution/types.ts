@@ -50,6 +50,8 @@ export interface ResolvedRef {
    * re-resolution after a target is removed reconstructs the ref faithfully.
    */
   edgeKind?: EdgeKind;
+  /** Provenance for a resolved semantic edge inferred from a known combinator. */
+  provenance?: import('../types').Edge['provenance'];
   /** Extra metadata the strategy wants persisted on the edge (`href`, …). */
   metadata?: Record<string, unknown>;
   /**

@@ -3246,20 +3246,6 @@ const HASKELL_TYPE_DECLARATION_KINDS = new Set<Node['kind']>([
   'class', 'struct', 'interface', 'trait', 'enum', 'type_alias',
 ]);
 
-function haskellNameRestrictionsAllow(
-  restriction: Pick<ImportMapping, 'includedNames' | 'includedParentExports' | 'includedParentChildren'
-    | 'excludedNames' | 'excludedParentExports' | 'excludedParentChildren'>,
-  name: string,
-): boolean {
-  if (restriction.excludedNames?.includes(name)) return false;
-  if (restriction.excludedParentExports?.includes(name)) return false;
-  const hasAllowList = restriction.includedNames !== undefined
-    || restriction.includedParentExports !== undefined
-    || restriction.includedParentChildren !== undefined;
-  if (!hasAllowList) return true;
-  return restriction.includedNames?.includes(name) === true
-    || restriction.includedParentExports?.includes(name) === true;
-}
 
 /**
  * Prove that a Haskell type head visible at `filePath` originates from one of
@@ -3275,30 +3261,51 @@ export function haskellEffectHeadHasCanonicalOrigin(
   rawHead: string,
   context: ResolutionContext,
 ): boolean {
+  const { member } = parseHaskellReferenceName(rawHead);
+  const canonicalModules = CANONICAL_HASKELL_EFFECT_MODULES.get(member);
+  return canonicalModules !== undefined && haskellNameHasCanonicalOrigin(filePath, rawHead, context, {
+    canonicalModules,
+    canonicalPackages: CANONICAL_HASKELL_EFFECT_PACKAGES,
+    namespace: 'type',
+    implicitPrelude: member === 'IO',
+  });
+}
+
+export function haskellNameHasCanonicalOrigin(
+  filePath: string,
+  rawHead: string,
+  context: ResolutionContext,
+  options: {
+    canonicalModules: ReadonlySet<string>;
+    canonicalPackages: ReadonlyMap<string, ReadonlySet<string>>;
+    namespace: 'type' | 'value';
+    implicitPrelude: boolean;
+  },
+): boolean {
   const parsedHead = parseHaskellReferenceName(rawHead);
   const qualifier = parsedHead.qualifier;
   const leaf = parsedHead.member;
-  const canonicalModules = CANONICAL_HASKELL_EFFECT_MODULES.get(leaf);
-  if (!canonicalModules) return false;
+  const { canonicalModules, canonicalPackages, namespace } = options;
 
   const mappings = context.getImportMappings(filePath, 'haskell');
   type ModuleRoute = Pick<ImportMapping, 'source' | 'packageQualifier'>;
   const sourceRoutes: ModuleRoute[] = mappings
     .filter((mapping) => {
+      if (namespace === 'value' ? mapping.haskellTypeOnly : mapping.haskellValueOnly) return false;
       if (qualifier !== null) {
         return mapping.isNamespace
           && mapping.localName === qualifier
-          && haskellNameRestrictionsAllow(mapping, leaf);
+          && haskellReExportCouldExposeName(mapping, leaf, namespace);
       }
       if (mapping.isNamespace || mapping.isQualifiedOnly) return false;
       if (mapping.localName !== '*' && mapping.localName !== leaf) return false;
-      return haskellNameRestrictionsAllow(mapping, leaf);
+      return haskellReExportCouldExposeName(mapping, leaf, namespace);
     })
     .map((mapping) => ({
       source: mapping.source,
       ...(mapping.packageQualifier ? { packageQualifier: mapping.packageQualifier } : {}),
     }));
-  if (leaf === 'IO' && qualifier === null) {
+  if (options.implicitPrelude && qualifier === null) {
     const source = context.readFile(filePath) ?? '';
     const explicitPrelude = mappings.some((mapping) => mapping.source === 'Prelude');
     const noImplicitPrelude = /\{\-#\s*LANGUAGE\b[^#]*\bNoImplicitPrelude\b[^#]*#-\}/s.test(source)
@@ -3311,16 +3318,24 @@ export function haskellEffectHeadHasCanonicalOrigin(
   ])).values()];
   if (uniqueRoutes.length === 0) return false;
 
+  // Share one budget across the entire proof, not one budget per branch.
+  // An exhausted branch invalidates the proof even if another route succeeded.
+  let remainingRoutes = 10_000;
+  let exhausted = false;
   type Origin = 'canonical' | 'noncanonical' | 'absent';
   const routeOrigin = (
     route: ModuleRoute,
     fromFile: string,
     visited: ReadonlySet<string>,
   ): Origin => {
+    if (--remainingRoutes < 0 || visited.size >= 64) {
+      exhausted = true;
+      return 'noncanonical';
+    }
     const { source: moduleName, packageQualifier } = route;
     if (packageQualifier) {
       if (!canonicalModules.has(moduleName)) return 'noncanonical';
-      return CANONICAL_HASKELL_EFFECT_PACKAGES.get(moduleName)?.has(packageQualifier) === true
+      return canonicalPackages.get(moduleName)?.has(packageQualifier) === true
         ? 'canonical'
         : 'noncanonical';
     }
@@ -3346,14 +3361,17 @@ export function haskellEffectHeadHasCanonicalOrigin(
 
     if (context.getNodesInFile(localPath).some((node) =>
       node.language === 'haskell'
-      && node.name === leaf
+      && parseHaskellReferenceName(node.name).member === leaf
       && node.isExported === true
-      && HASKELL_TYPE_DECLARATION_KINDS.has(node.kind)
+      && (namespace === 'type'
+        ? HASKELL_TYPE_DECLARATION_KINDS.has(node.kind)
+        : haskellValueNode(node))
     )) return 'noncanonical';
 
     const routes = (context.getReExports?.(localPath, 'haskell') ?? [])
       .flatMap((reExport): ModuleRoute[] => {
         if (reExport.kind === 'named') {
+          if (namespace === 'value' ? reExport.haskellTypeOnly : reExport.haskellValueOnly) return [];
           return reExport.exportedName === leaf && reExport.originalName === leaf
             ? [{
                 source: reExport.source,
@@ -3363,7 +3381,7 @@ export function haskellEffectHeadHasCanonicalOrigin(
               }]
             : [];
         }
-        return haskellNameRestrictionsAllow(reExport, leaf)
+        return haskellReExportCouldExposeName(reExport, leaf, namespace)
           ? [{
               source: reExport.source,
               ...(reExport.packageQualifier
@@ -3390,7 +3408,7 @@ export function haskellEffectHeadHasCanonicalOrigin(
   // the alias rather than exploiting resolver ordering.
   const origins = uniqueRoutes.map((route) => routeOrigin(route, filePath, new Set()))
     .filter((origin) => origin !== 'absent');
-  return origins.length > 0 && origins.every((origin) => origin === 'canonical');
+  return !exhausted && origins.length > 0 && origins.every((origin) => origin === 'canonical');
 }
 
 /**
@@ -3967,10 +3985,17 @@ function resolveGoCrossPackageReference(
   return null;
 }
 
-/** Recursive depth cap for re-export chain following. It is deliberately
- *  high enough for generated/deep facade chains while still bounding
- *  malformed acyclic graphs; cycles are stopped separately by `visited`. */
-const REEXPORT_MAX_DEPTH = 64;
+/** Preserve the existing barrel limit outside Haskell. Haskell facades can
+ *  legitimately form longer chains and need path-local visibility checks. */
+const REEXPORT_MAX_DEPTH = 8;
+const HASKELL_REEXPORT_MAX_DEPTH = 64;
+/** Bound total work, not just depth: a small diamond graph can have billions
+ *  of paths. Exhaustion is an incomplete search, never proof of uniqueness. */
+const REEXPORT_MAX_VISITS = 10_000;
+interface ReExportTraversal {
+  remaining: number;
+  exhausted: boolean;
+}
 
 /**
  * Find an exported symbol in `filePath`, following `export { x } from
@@ -4014,6 +4039,13 @@ function findExportedSymbolResult(
   visited: Set<string>,
   depth = 0
 ): ExportedSymbolWalkResult {
+  const walk = (): ExportedSymbolWalkResult => {
+    const traversal: ReExportTraversal = { remaining: REEXPORT_MAX_VISITS, exhausted: false };
+    const result = findExportedSymbolWalk(filePath, want, language, context, visited, depth, traversal);
+    // Reuse the conservative ambiguity result so an incomplete route cannot
+    // disappear when combined with a successful sibling import or facade.
+    return traversal.exhausted ? HASKELL_EXPORT_AMBIGUOUS : result;
+  };
   // Memoize fresh (top-level) lookups only: recursive re-export steps carry a
   // populated `visited` set, whose contents change the reachable answer.
   // Every ref to the same imported symbol repeats this exact walk, so the
@@ -4027,11 +4059,11 @@ function findExportedSymbolResult(
     }
     const key = `${filePath}\0${want.isDefault ? 1 : 0}${want.isNamespace ? 1 : 0}\0${want.exportedName}\0${want.memberName ?? ''}\0${want.haskellParent ?? ''}\0${want.haskellNamespace ?? ''}\0${language}`;
     if (memo.has(key)) return memo.get(key);
-    const walked = findExportedSymbolWalk(filePath, want, language, context, visited, depth);
+    const walked = walk();
     memo.set(key, walked);
     return walked;
   }
-  return findExportedSymbolWalk(filePath, want, language, context, visited, depth);
+  return walk();
 }
 
 function findExportedSymbolWalk(
@@ -4040,11 +4072,26 @@ function findExportedSymbolWalk(
   language: Language,
   context: ResolutionContext,
   visited: Set<string>,
-  depth: number
+  depth: number,
+  traversal: ReExportTraversal,
 ): ExportedSymbolWalkResult {
-  if (depth > REEXPORT_MAX_DEPTH) return undefined;
+  if (traversal.exhausted) return undefined;
+  if (traversal.remaining-- <= 0) {
+    traversal.exhausted = true;
+    return undefined;
+  }
   if (visited.has(filePath)) return undefined;
+  const haskellMode = language === 'haskell';
+  if (depth > (haskellMode ? HASKELL_REEXPORT_MAX_DEPTH : REEXPORT_MAX_DEPTH)) {
+    // A hidden competitor beyond the limit makes a Haskell export's apparent
+    // uniqueness unproven. Keep the historical non-Haskell depth behavior.
+    if (haskellMode) traversal.exhausted = true;
+    return undefined;
+  }
   visited.add(filePath);
+  // Only Haskell carries path-local allow/deny predicates. Other languages
+  // retain a shared visited set to visit converging barrels once per lookup.
+  const branchVisited = (): Set<string> => haskellMode ? new Set(visited) : visited;
 
   const exportIndex = getFileExportIndex(filePath, context);
   const exportedNames = language === 'haskell'
@@ -4132,12 +4179,11 @@ function findExportedSymbolWalk(
       },
       language,
       context,
-      // Cycle detection is path-local. Sharing the mutable set between
-      // sibling alternatives lets a restricted/denied first branch poison a
-      // later valid route that converges on the same origin module.
-      new Set(visited),
-      depth + 1
+      branchVisited(),
+      depth + 1,
+      traversal,
     );
+    if (traversal.exhausted) return undefined;
     if (chained === HASKELL_EXPORT_AMBIGUOUS) {
       haskellAmbiguous = true;
     } else if (chained) {
@@ -4198,8 +4244,9 @@ function findExportedSymbolWalk(
         },
         language,
         context,
-        new Set(visited),
-        depth + 1
+        branchVisited(),
+        depth + 1,
+        traversal,
       );
       if (chained === HASKELL_EXPORT_AMBIGUOUS) {
         haskellAmbiguous = true;
@@ -4207,6 +4254,7 @@ function findExportedSymbolWalk(
       }
       return chained ? [chained] : [];
     });
+    if (traversal.exhausted) return undefined;
     const unique = [...new Map(candidates.map((node) => [node.id, node])).values()];
     if (language === 'haskell' && unique.length > 1) haskellAmbiguous = true;
     const chained = unique.length === 1 ? unique[0] : undefined;

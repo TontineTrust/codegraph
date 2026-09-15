@@ -577,7 +577,9 @@ pattern Present x = Just x
       && ref.referenceName === 'Data.List::union')).toBe(true);
     const qualifiedHof = result.nodes.find((node) => node.name === 'qualifiedHof')!;
     expect(refs.some((ref) => ref.fromNodeId === qualifiedHof.id
-      && ref.referenceKind === 'function_ref' && ref.referenceName === 'target')).toBe(true);
+      && ref.referenceKind === 'calls' && ref.referenceName === 'target'
+      && ref.candidates?.includes('haskell-combinator:Data.List::map')
+      && ref.candidates?.includes('haskell-combinator-value-reference'))).toBe(true);
     expect(refs.some((ref) => ref.referenceKind === 'calls' && ref.referenceName === 'Server::start')).toBe(true);
     expect(refs.some((ref) => ref.referenceKind === 'calls' && ref.referenceName === 'Server::stop')).toBe(true);
     expect(refs.some((ref) => ref.referenceKind === 'calls' && ref.referenceName === 'Just')).toBe(false);

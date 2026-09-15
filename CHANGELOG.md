@@ -145,6 +145,10 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Haskell projects now get code intelligence:** CodeGraph indexes modules, declarations, imports, re-exports, operators, Template Haskell, Unicode identifiers, and Cabal/Stack workspaces so `codegraph_explore` can follow many real flows within a workspace.
 
+### Security
+
+- Indexing now bounds re-export searches so deeply interconnected modules cannot cause exponential work and block the process. (#1337)
+
 ### Fixes
 
 - Calls between JavaScript, JSX and TypeScript files keep their callers and callback flows.
@@ -260,6 +264,10 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A FastAPI service that lives in one directory of a monorepo is detected.** `backend/pyproject.toml` and `backend/app/main.py` count, not only files at the repository root — the official full-stack template's routes now appear in Entry points and the Steps tab.
 
 #### Haskell indexing
+
+- Haskell local functions keep their callers when they shadow a parameter with the same name. (#1337)
+
+- Custom Haskell functions named like standard combinators no longer create calls to arguments they do not execute. (#1337)
 
 - Haskell pattern synonyms now retain calls through local helpers while excluding quoted code that is not executed.
 

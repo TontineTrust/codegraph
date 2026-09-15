@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getChildByField, getNodeText, getPrecedingDocstring } from '../tree-sitter-helpers';
 import type { BareReferenceInfo, ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
-import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX } from '../../types';
+import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX } from '../../types';
 
 // tree-sitter-haskell emits signatures, default signatures, and equations as
 // separate syntax nodes. Keep them under one graph node per lexical declaration.
@@ -1187,23 +1187,25 @@ function isLexicallyBound(
         : [getChildByField(ancestor, 'patterns')].filter(
             (candidate): candidate is SyntaxNode => candidate !== null,
           );
+      // A where group is the nearest scope in the RHS and its declarations,
+      // but is not in scope in the function's left-hand-side view patterns.
+      const whereBinds = getChildByField(ancestor, 'binds');
+      if (whereBinds && !patternRoots.some((pattern) => nodeContains(pattern, node))) {
+        const binding = bindingAt(whereBinds, name, source, null, stateOwner);
+        if (binding) return !binding.materializedNode;
+      }
       // View-pattern expressions are evaluated left-to-right. A binder in the
       // view result (or in a later argument) must not retroactively shadow the
       // callable used by the view expression; every binder is visible in the
       // ordinary RHS because all pattern positions precede it.
       if (patternRoots.some((pattern) =>
         patternContainsName(pattern, name, source, node.startIndex))) return true;
-      const whereBinds = getChildByField(ancestor, 'binds');
-      if (whereBinds) {
-        const binding = bindingAt(whereBinds, name, source, null, stateOwner);
-        if (binding && !binding.materializedNode) return true;
-      }
     }
     if (ancestor.type === 'bind') {
       const whereBinds = getChildByField(ancestor, 'binds');
       if (whereBinds) {
         const binding = bindingAt(whereBinds, name, source, null, stateOwner);
-        if (binding && !binding.materializedNode) return true;
+        if (binding) return !binding.materializedNode;
       }
     }
     if (ancestor.type === 'pattern_synonym') {
@@ -1225,18 +1227,18 @@ function isLexicallyBound(
         // Haskell let bindings are recursive: every declaration is in scope in
         // every RHS as well as in the body.
         const binding = bindingAt(binds, name, source, null, stateOwner);
-        if (binding && !binding.materializedNode) return true;
+        if (binding) return !binding.materializedNode;
       }
     }
     if (ancestor.type === 'local_binds') {
       const binding = bindingAt(ancestor, name, source, null, stateOwner);
-      if (binding && !binding.materializedNode) return true;
+      if (binding) return !binding.materializedNode;
     }
     if (ancestor.type === 'rec') {
       // RecursiveDo's explicit `rec` block brings every contained monadic
       // binder into scope throughout the block, even inside earlier RHSs.
       const binding = bindingAt(ancestor, name, source, null, stateOwner);
-      if (binding && !binding.materializedNode) return true;
+      if (binding) return !binding.materializedNode;
     }
     if (ancestor.type === 'do') {
       const binding = bindingAt(
@@ -1246,30 +1248,30 @@ function isLexicallyBound(
         isRecursiveDo(ancestor) ? null : branch.startIndex,
         stateOwner,
       );
-      if (binding && !binding.materializedNode) return true;
+      if (binding) return !binding.materializedNode;
     }
     if (ancestor.type === 'qualifiers') {
       const binding = bindingAt(ancestor, name, source, branch.startIndex, stateOwner);
-      if (binding && !binding.materializedNode) return true;
+      if (binding) return !binding.materializedNode;
     }
     if (ancestor.type === 'list_comprehension') {
       const output = getChildByField(ancestor, 'expression');
       const qualifiers = getChildByField(ancestor, 'qualifiers');
       if (output && qualifiers && nodeContains(output, node)) {
         const binding = bindingAt(qualifiers, name, source, null, stateOwner);
-        if (binding && !binding.materializedNode) return true;
+        if (binding) return !binding.materializedNode;
       }
     }
     if (ancestor.type === 'guards') {
       const binding = bindingAt(ancestor, name, source, branch.startIndex, stateOwner);
-      if (binding && !binding.materializedNode) return true;
+      if (binding) return !binding.materializedNode;
     }
     if (ancestor.type === 'match') {
       const guards = getChildByField(ancestor, 'guards');
       const expression = getChildByField(ancestor, 'expression');
       if (guards && expression && nodeContains(expression, node)) {
         const binding = bindingAt(guards, name, source, null, stateOwner);
-        if (binding && !binding.materializedNode) return true;
+        if (binding) return !binding.materializedNode;
       }
     }
     branch = ancestor;
@@ -1465,7 +1467,7 @@ function extractHaskellBareCall(
   node: SyntaxNode,
   source: string,
   stateOwner?: object,
-): string | undefined {
+): BareReferenceInfo | undefined {
   const reference = normalizedSimpleReference(node, source);
   if (!reference) return undefined;
   const parent = node.parent;
@@ -1488,6 +1490,7 @@ function extractHaskellBareCall(
   ) return undefined;
 
   let eligible = false;
+  let combinator: string | undefined;
   // `do { initialise; Server.serve }`: a bare expression statement executes
   // the action even though there is no `apply` node.
   if (parent.type === 'exp' && parent.namedChildCount === 1) {
@@ -1532,6 +1535,8 @@ function extractHaskellBareCall(
     }
     const functionRef = callee ? normalizedSimpleReference(callee, source) : null;
     const functionBase = functionRef ? haskellReferenceParts(functionRef.name).member : '';
+    if (functionRef && isLexicallyBound(functionRef.name, functionRef.node, source, stateOwner)) return undefined;
+    combinator = functionRef?.name;
     const argumentIndex = applicationArguments.findIndex((argument) =>
       argument.startIndex === node.startIndex && argument.endIndex === node.endIndex);
     eligible = argumentIndex >= 0 && (
@@ -1546,6 +1551,8 @@ function extractHaskellBareCall(
     const operator = getChildByField(parent, 'operator');
     const operatorRef = operator ? normalizedSimpleReference(operator, source) : null;
     const operatorBase = operatorRef ? haskellReferenceParts(operatorRef.name).member : '';
+    if (operatorRef && isLexicallyBound(operatorRef.name, operatorRef.node, source, stateOwner)) return undefined;
+    combinator = operatorRef?.name;
     const isLeft = nodeContains(left, node)
       && left?.startIndex === node.startIndex
       && left?.endIndex === node.endIndex;
@@ -1560,7 +1567,12 @@ function extractHaskellBareCall(
       || (['<&>', '$>', '>>='].includes(operatorBase) && isLeft);
   }
   if (!eligible || isLexicallyBound(reference.name, reference.node, source, stateOwner)) return undefined;
-  return reference.name;
+  return {
+    name: reference.name,
+    referenceKind: 'calls',
+    node: reference.node,
+    ...(combinator ? { candidates: [`${HASKELL_COMBINATOR_PREFIX}${combinator}`] } : {}),
+  };
 }
 
 function extractHaskellBareReference(
@@ -1680,7 +1692,7 @@ function extractHaskellBareReference(
     const directBase = directReference ? haskellReferenceParts(directReference.name).member : '';
     // A known higher-order combinator executes this constructor value, and
     // the call walker emits the semantic call edge. Avoid a second value edge.
-    if (HOF_NAMES.has(directBase)) return undefined;
+    if (HOF_NAMES.has(directBase) && extractHaskellBareCall(node, source, stateOwner)) return undefined;
   }
   const reference = normalizedSimpleReference(node, source);
   if (!reference) return undefined;
@@ -2349,8 +2361,9 @@ export const haskellExtractor: LanguageExtractor = {
   nameField: 'name',
   bodyField: 'declarations',
   paramsField: 'patterns',
-  extractBareCall: extractHaskellBareCall,
-  extractBareReference: extractHaskellBareReference,
+  extractBareReference: (node, source, stateOwner) =>
+    extractHaskellBareReference(node, source, stateOwner)
+      ?? extractHaskellBareCall(node, source, stateOwner),
   isLexicallyBound,
   isPatternPosition: isHaskellPatternPosition,
 
