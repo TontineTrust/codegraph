@@ -35,7 +35,7 @@ import ignore, { Ignore } from 'ignore';
 import { detectFrameworks } from '../resolution/frameworks';
 import type { ResolutionContext } from '../resolution/types';
 import { createYielder, type MaybeYield } from '../resolution/cooperative-yield';
-import { extractImportMappings, extractReExports, parseHaskellReferenceName } from '../resolution/import-resolver';
+import { extractHaskellImportSurface, parseHaskellReferenceName } from '../resolution/import-resolver';
 
 /**
  * Number of files to read in parallel during indexing.
@@ -145,7 +145,9 @@ export interface SyncResult {
   definitionDelta?: string[];
 }
 
-const HASKELL_IMPORT_INVALIDATION_PENDING = 'haskell_import_invalidation_pending';
+/** Durable marker that a Haskell import-topology invalidation is in flight.
+ *  Shared by the orchestrator and `CodeGraph` (its indexFiles cache gating). */
+export const HASKELL_IMPORT_INVALIDATION_PENDING = 'haskell_import_invalidation_pending';
 
 /**
  * Calculate SHA256 hash of file contents
@@ -160,7 +162,6 @@ export function hashContent(content: string): string {
  * comment-only edits do not force a project-wide Haskell replay.
  */
 export function computeHaskellTopologyHash(
-  filePath: string,
   content: string,
   result: ExtractionResult,
 ): string {
@@ -173,11 +174,14 @@ export function computeHaskellTopologyHash(
       exportParents: (node.decorators ?? [])
         .filter((decorator) => decorator.startsWith('haskell-export-parent:')),
     }));
+  // Both import surfaces share one comment strip (the generic dispatchers
+  // would strip three times for the same file).
+  const { imports, reExports } = extractHaskellImportSurface(content);
   const descriptor = {
     version: 'haskell-topology-v1',
     symbols,
-    imports: extractImportMappings(filePath, content, 'haskell'),
-    reExports: extractReExports(content, 'haskell'),
+    imports,
+    reExports,
   };
   const serialized = JSON.stringify(descriptor, (_key, value: unknown) => {
     if (value instanceof Set) return [...value].sort();
@@ -1906,15 +1910,23 @@ export class ExtractionOrchestrator {
     };
 
 
-    const trackedBeforeIndexAll = new Map(
-      this.queries.getAllFiles().map((file) => [file.path, file] as const),
-    );
-    const oldHaskellModulesByFile = this.queries.getHaskellModuleNamesByFile();
+    // Cheap pre-index probe (indexed DISTINCT scan, same pattern as the
+    // synthesizer language gates, #1212): the before/after bookkeeping below
+    // exists only for the Haskell import replay, so a project without
+    // Haskell pays neither the full-file Map nor the module-name index.
+    // Deliberately based on pre-index state — deleting the last .hs must
+    // still arm the guard for this run so removal-side topology changes are
+    // compared against what the DB remembers.
     const recoveringHaskellInvalidation =
       this.queries.getMetadata(HASKELL_IMPORT_INVALIDATION_PENDING) === '1';
-    const hadExistingHaskell = [...trackedBeforeIndexAll.values()]
-      .some((file) => file.language === 'haskell');
+    const hadExistingHaskell = this.queries.getDistinctFileLanguages().has('haskell');
     const guardHaskellReindex = hadExistingHaskell || recoveringHaskellInvalidation;
+    const trackedBeforeIndexAll = guardHaskellReindex
+      ? new Map(this.queries.getAllFiles().map((file) => [file.path, file] as const))
+      : new Map<string, FileRecord>();
+    const oldHaskellModulesByFile = guardHaskellReindex
+      ? this.queries.getHaskellModuleNamesByFile()
+      : new Map<string, string[]>();
     if (hadExistingHaskell && !recoveringHaskellInvalidation) {
       // Arm recovery before healZeroNodeRows or any per-file store can replace
       // Haskell nodes/edges. A throw leaves this durable marker behind so the
@@ -2801,7 +2813,7 @@ export class ExtractionOrchestrator {
     // the unchanged-file early return so untouched files pay nothing.
     const generated = detectGeneratedFile(filePath, content);
     const haskellTopologyHash = language === 'haskell'
-      ? computeHaskellTopologyHash(filePath, content, result)
+      ? computeHaskellTopologyHash(content, result)
       : undefined;
     const haskellTopologyChanged = language === 'haskell'
       && existingFile?.haskellTopologyHash !== haskellTopologyHash;
@@ -2972,7 +2984,7 @@ export class ExtractionOrchestrator {
       indexedAt: Date.now(),
       nodeCount: nodeCountOverride ?? result.nodes.length,
       haskellTopologyHash: language === 'haskell'
-        ? computeHaskellTopologyHash(filePath, content, result)
+        ? computeHaskellTopologyHash(content, result)
         : undefined,
       errors: result.errors.length > 0 ? result.errors : undefined,
       // Decided here, once, while the content is already in memory — never at

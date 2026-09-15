@@ -240,6 +240,7 @@ export class ReferenceResolver {
   private fileLinesCache: LRUCache<string, string[] | null>; // file → split lines cache
   private haskellNodeByIdCache: LRUCache<string, Node | null>;
   private haskellParentCache: LRUCache<string, Node | null>;
+  private haskellModuleNodeCache: LRUCache<string, Node | null>;
   private haskellRecordMembersCache: LRUCache<string, Map<string, Node[]>>;
   private haskellRecordFieldCache: LRUCache<string, Omit<ResolvedRef, 'original'> | null>;
   private methodMatchCache: LRUCache<string, Node[]>; // lang\0Type::method → matching method nodes
@@ -311,6 +312,7 @@ export class ReferenceResolver {
     this.methodMatchCache = new LRUCache(limit);
     this.haskellNodeByIdCache = new LRUCache(limit);
     this.haskellParentCache = new LRUCache(limit);
+    this.haskellModuleNodeCache = new LRUCache(limit);
     this.haskellRecordFieldCache = new LRUCache(limit);
     this.haskellRecordMembersCache = new LRUCache(limit);
 
@@ -411,6 +413,7 @@ export class ReferenceResolver {
     this.methodMatchCache.clear();
     this.haskellNodeByIdCache.clear();
     this.haskellParentCache.clear();
+    this.haskellModuleNodeCache.clear();
     this.haskellRecordFieldCache.clear();
     this.haskellRecordMembersCache.clear();
     this.methodOwnerIndexCache.clear();
@@ -914,6 +917,18 @@ export class ReferenceResolver {
     return parent;
   }
 
+  /** The file's `module X where` namespace node, or null for a headerless
+   *  script. Unique per file, so memoize instead of linearly scanning the
+   *  file's nodes on every lexical-scope query. */
+  private getHaskellModuleNode(filePath: string): Node | null {
+    const cached = this.haskellModuleNodeCache.get(filePath);
+    if (cached !== undefined) return cached;
+    const moduleNode = this.context.getNodesInFile(filePath)
+      .find((node) => node.kind === 'namespace' && node.language === 'haskell') ?? null;
+    this.haskellModuleNodeCache.set(filePath, moduleNode);
+    return moduleNode;
+  }
+
   private getHaskellRecordFields(constructorId: string): Map<string, Node[]> {
     const cached = this.haskellRecordMembersCache.get(constructorId);
     if (cached !== undefined) return cached;
@@ -1171,8 +1186,7 @@ export class ReferenceResolver {
 
     const from = this.getHaskellNodeById(ref.fromNodeId);
     if (!from) return { claimed: false, result: null };
-    const moduleNode = this.context.getNodesInFile(ref.filePath)
-      .find((node) => node.kind === 'namespace' && node.language === 'haskell');
+    const moduleNode = this.getHaskellModuleNode(ref.filePath);
     const moduleScope = moduleNode?.qualifiedName ?? moduleNode?.name;
     const parsedReference = parseHaskellReferenceName(ref.referenceName);
     const localName = parsedReference.member;

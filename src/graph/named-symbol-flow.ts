@@ -229,9 +229,80 @@ export const FLOW_EDGE_KINDS: ReadonlySet<string> = new Set(['calls', 'navigates
  */
 const DYN_KINDS: ReadonlySet<string> = new Set(['constant', 'variable', 'field', 'property']);
 
+/**
+ * Edge kinds that admit a non-callable node as a synthesized endpoint: the
+ * kinds the Traverser can actually walk, so a node joined to the graph by
+ * containment alone never qualifies. Same two indexed edge reads per
+ * candidate as the old version (outgoing + incoming, no opposite-node
+ * hydration); self-loops don't count.
+ */
+const TRAVERSABLE_EDGE_KINDS: ReadonlySet<string> = new Set([
+  'calls', 'references', 'imports', 'instantiates', 'navigates',
+]);
+
 /** Only a REAL file extension is stripped from a token — `Class.method` is kept. */
 const FILE_EXT =
   /\.(?:java|kt|kts|ts|tsx|js|jsx|mjs|cjs|cs|py|go|rb|php|swift|rs|cpp|cc|cxx|c|h|hpp|scala|lua|dart|vue|svelte|astro|erl|hrl|hs)$/i;
+
+/**
+ * English contractions (`app's`, `don't`, `It's`, `Parser's`, `CAN'T`) are
+ * prose, not symbol names. The identifier pattern must keep `'` for Haskell
+ * primes (`xs'`, `hover'`), so these shapes are excluded explicitly: a letter
+ * word ending in a contraction suffix. A trailing prime (`xs'`) and qualified
+ * primed names (`Module'.run'`) never match this shape.
+ */
+const ENGLISH_CONTRACTION = /^[A-Za-z]+'(?:s|t|re|ve|ll|d|m)$/i;
+
+/**
+ * ASCII punctuation that prose and non-Haskell code emit as ordinary operators
+ * far more often than a Haskell query names one: arrows and comparisons
+ * (`->`, `>=`, `==`), logical connectives (`&&`, `||`), separators (`::`, `..`),
+ * markdown (`###`). A bare infix operator survives only by carrying a
+ * character OUTSIDE this alphabet (`<+>`'s `+`, `$$`'s `$`) or by being a
+ * non-prose Unicode symbol (`⊗`); a lone ASCII punctuation run (`$`, `.`, `>`)
+ * never does — matching the old tokenizer, which dropped every bare operator.
+ */
+const PROSE_OPERATOR_BODY = /^[-=<>!&|.:\\/#]+$/;
+
+/**
+ * Unicode shapes with the same prose meaning: arrows (U+2190–U+21FF plus the
+ * supplemental/dingbat arrow blocks U+2794–U+27BF, U+27F0–U+27FF,
+ * U+2900–U+297F, U+2B00–U+2BFF), comparison glyphs (`≠` `≤` `≥` `≈`), and the
+ * typographic dashes/ellipsis agent prose uses between two names
+ * (`mutateElement – renderScene`, `…`). A body made ENTIRELY of these is
+ * refused; `⊗` and `⊕` (math operators block) stay.
+ */
+const PROSE_UNICODE_OPERATOR_BODY =
+  /^[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2bff\u2260\u2264\u2265\u2248\u2010-\u2015\u2026]+$/u;
+
+/** May this whitespace-delimited operator shape be a flow token at all? */
+function isPlausibleBareOperator(body: string): boolean {
+  if (HAS_NON_ASCII.test(body)) return !PROSE_UNICODE_OPERATOR_BODY.test(body);
+  return body.length >= 2 && !PROSE_OPERATOR_BODY.test(body);
+}
+
+/**
+ * A character that may sit immediately OUTSIDE a discovered identifier token:
+ * exactly the boundaries the old whole-word tokenizer split on. `undefined`
+ * is the string edge.
+ */
+const atOldSplitBoundary = (ch: string | undefined): boolean =>
+  ch === undefined || /[\s,()[\]]/u.test(ch);
+
+/** The identifier pattern, anchored — re-checked on each candidate token. */
+const ANCHORED_IDENTIFIER = new RegExp(
+  `^${HASKELL_FLOW_IDENTIFIER_SOURCE}(?:(?:::|\\.)${HASKELL_FLOW_IDENTIFIER_SOURCE})*$`,
+  'u',
+);
+
+/** A non-ASCII codepoint — the pass for Unicode identifiers (`λ`, `函数`). */
+const HAS_NON_ASCII = /[^\x00-\x7f]/u;
+/** A dot/colon run and the run's first following word (`work.` → ``). */
+const DOT_COLON_RUN_BODY = /^[.:]+(\S+)/;
+/** A whole parenthesized body (`(<+>)` → `<+>`). */
+const PAREN_WRAP = /^\(([^()]*)\)$/;
+/** A dot/colon-only body — punctuation, not a qualified-operator spelling. */
+const DOT_COLON_ONLY = /^[.:]+$/;
 
 /** Chain length ceiling, in NODES. Explore's Flow section has always used 7. */
 export const DEFAULT_MAX_HOPS = 7;
@@ -399,25 +470,40 @@ export function flowTokens(query: string): string[] {
     `${HASKELL_FLOW_IDENTIFIER_SOURCE}(?:(?:::|\\.)${HASKELL_FLOW_IDENTIFIER_SOURCE})*`,
     'gu',
   );
+  // The old tokenizer validated each whitespace-delimited token as a WHOLE
+  // (`^[A-Za-z_$][\w$]*(?:(?:::|\.)[\w$]+)*$` after splitting on
+  // `[\s,()[\]]+`), so an identifier glued to any other punctuation was
+  // dropped, never mined for fragments. Keep that contract at the discovery
+  // level: an identifier match is a token only when what sits immediately
+  // OUTSIDE it is one of those old split boundaries — whitespace, `,`, `()`,
+  // `[]`, or the string edge. This drops `stToken` out of `1stToken`, `https`
+  // out of `https://example.com`, each side of `foo;bar` / `key:value`, and
+  // fragments joined to a dash (`\p{Pd}`), `/`, or `\` — agent prose commonly
+  // uses typographic hyphen/en/em dashes rather than ASCII `-`.
   for (const match of query.matchAll(identifier)) {
     const start = match.index!;
     const end = start + match[0].length;
     if (overlapsQualifiedOperator(start, end)) continue;
-    // The old tokenizer validated each whitespace-delimited token as a WHOLE.
-    // Keep that contract for compound words and paths: `higher-order` does not
-    // name `higher` plus `order`, and `/packages/auth/controllers` must not
-    // consume the bounded symbol-token budget one directory segment at a time.
-    // Haskell operators are collected separately above/below, so rejecting an
-    // identifier fragment beside Unicode dash punctuation, `/`, or `\` cannot
-    // hide an operator. `\p{Pd}` matters for agent prose, which commonly uses
-    // typographic hyphen/en/em dashes rather than ASCII `-`.
-    if (/[\p{Pd}/\\]/u.test(query[start - 1] ?? '') || /[\p{Pd}/\\]/u.test(query[end] ?? '')) {
-      continue;
-    }
     // A Template Haskell quote (`'name`) is syntax, not part of the queried
-    // identifier. Likewise reject the valid prefix of an invalid qualified
-    // spelling (`Module.'name`) instead of turning `Module` into a seed.
-    if (query[start - 1] === "'" || (query[end] === '.' && query[end + 1] === "'")) continue;
+    // identifier, and `'` was never a split character — the boundary rule
+    // rejects it on either side.
+    if (!atOldSplitBoundary(query[start - 1])) continue;
+    if (!atOldSplitBoundary(query[end])) {
+      // One escape on the right edge: a dot/colon run followed by an operator
+      // body is the Haskell qualified-operator spelling (`notOps.<+>`,
+      // `M::(<+>)`) — the module half stays a token (the operator half
+      // belongs to the qualified-operator passes above). Anything else after
+      // the run — nothing (`work.`), whitespace (`foo.. bar`), or another
+      // word (`work.: fix`, `e.g.: fix`) — is not a qualified name and drops
+      // whole, exactly as the old whole-word check dropped it.
+      const body = DOT_COLON_RUN_BODY.exec(query.slice(end))?.[1] ?? '';
+      const unparenthesized = body.replace(PAREN_WRAP, '$1');
+      // Test the RAW body: `.`/`:` are legal operator bodies (`M::(.)`), so a
+      // dot/colon-only run is distinguished from a qualified spelling here,
+      // before the operator-body check below.
+      if (DOT_COLON_ONLY.test(body)) continue;
+      if (!isHaskellOperatorBody(unparenthesized)) continue;
+    }
     const token = normalizeToken(match[0]);
     // Haskell identifiers may contain primes (`hover'`, `Module'.run'`).
     // Keep the opening character strict in EVERY qualified segment so a quote
@@ -425,10 +511,9 @@ export function flowTokens(query: string): string[] {
     // Keep the noise floor for short ASCII prose words, but do not discard a
     // valid one- or two-codepoint Unicode identifier (`λ`, `函数`). Exact node
     // lookup plus precise-token ranking still prevents a fuzzy fallback.
-    if ((token.length >= 3 || /[^\x00-\x7f]/u.test(token)) && new RegExp(
-      `^${HASKELL_FLOW_IDENTIFIER_SOURCE}(?:(?:::|\\.)${HASKELL_FLOW_IDENTIFIER_SOURCE})*$`,
-      'u',
-    ).test(token)) {
+    if ((token.length >= 3 || HAS_NON_ASCII.test(token))
+      && !ENGLISH_CONTRACTION.test(token)
+      && ANCHORED_IDENTIFIER.test(token)) {
       found.push({ index: start, token });
     }
   }
@@ -450,6 +535,13 @@ export function flowTokens(query: string): string[] {
     const start = match.index! + match[0].indexOf(match[1]!);
     const end = start + match[1]!.length;
     if (overlapsQualifiedOperator(start, end) || !isHaskellOperatorBody(match[1]!)) continue;
+    // A bare ASCII operator that prose emits as ordinary punctuation (`->` in
+    // "A -> B", `>=`, `::`, a lone `$`) must not be canonicalized into a
+    // token: it would waste the bounded token budget and, on a project that
+    // does define the operator, hijack the query. Backticks and parentheses
+    // state operator intent explicitly and are admitted by their own shape.
+    const backtickWrapped = query[start - 1] === '`' && query[end] === '`';
+    if (!backtickWrapped && !isPlausibleBareOperator(match[1]!)) continue;
     found.push({ index: start, token: normalizeToken(match[1]!) });
   }
 
@@ -479,15 +571,11 @@ export function resolveNamedTokens(
     for (const segment of qualifiedNameSegments(t.toLowerCase())) segPool.add(segment);
   }
 
-  // Match the edge kinds getCallers/getCallees historically considered here,
-  // but inspect raw edges so endpoint admission needs two indexed edge reads and
-  // no opposite-node hydration instead of four traversals plus node lookups.
-  const traversableEdgeKinds = new Set(['calls', 'references', 'imports', 'instantiates', 'navigates']);
   const hasHeuristicEdge = (id: string): boolean => {
     const incident = [...cg.getOutgoingEdges(id), ...cg.getIncomingEdges(id)];
     return incident.some((edge) =>
       edge.provenance === 'heuristic'
-      && traversableEdgeKinds.has(edge.kind)
+      && TRAVERSABLE_EDGE_KINDS.has(edge.kind)
       && edge.source !== edge.target);
   };
 

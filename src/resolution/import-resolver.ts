@@ -189,7 +189,12 @@ function getReExportRouteIndex(reExports: ReExport[]): {
  */
 interface FileExportIndex {
   byName: Map<string, Node>;
-  allByName: Map<string, Node[]>;
+  /**
+   * All exported nodes per name (not just the first). Only the Haskell
+   * ambiguity check needs this multi-candidate view, so it is built lazily
+   * by exportedNodesByName instead of eagerly for every indexed file.
+   */
+  allByName?: Map<string, Node[]>;
   defaultComponent: Node | undefined;
   defaultFnClass: Node | undefined;
   /**
@@ -233,7 +238,6 @@ function getFileExportIndex(filePath: string, context: ResolutionContext): FileE
   if (!idx) {
     idx = {
       byName: new Map(),
-      allByName: new Map(),
       defaultComponent: undefined,
       defaultFnClass: undefined,
       defaultBinding: undefined,
@@ -246,9 +250,6 @@ function getFileExportIndex(filePath: string, context: ResolutionContext): FileE
       if (!declared.has(n.name)) declared.set(n.name, n);
       if (!n.isExported) continue;
       if (!idx.byName.has(n.name)) idx.byName.set(n.name, n);
-      const named = idx.allByName.get(n.name) ?? [];
-      named.push(n);
-      idx.allByName.set(n.name, named);
       if (idx.defaultComponent === undefined && n.kind === 'component') idx.defaultComponent = n;
       if (idx.defaultFnClass === undefined && (n.kind === 'function' || n.kind === 'class')) idx.defaultFnClass = n;
     }
@@ -272,6 +273,29 @@ function getFileExportIndex(filePath: string, context: ResolutionContext): FileE
     perFile.set(filePath, idx);
   }
   return idx;
+}
+
+/**
+ * The lazy multi-candidate view behind FileExportIndex.allByName: every
+ * exported node per name, in the file's node order. Built at most once per
+ * file per context and only when a Haskell ambiguity check asks for it.
+ */
+function exportedNodesByName(
+  exportIndex: FileExportIndex,
+  filePath: string,
+  context: ResolutionContext,
+): Map<string, Node[]> {
+  if (!exportIndex.allByName) {
+    const allByName = new Map<string, Node[]>();
+    for (const n of context.getNodesInFile(filePath)) {
+      if (!n.isExported) continue;
+      const named = allByName.get(n.name) ?? [];
+      named.push(n);
+      allByName.set(n.name, named);
+    }
+    exportIndex.allByName = allByName;
+  }
+  return exportIndex.allByName;
 }
 
 /** Drop the per-context memo tables (see ReferenceResolver.clearCaches). */
@@ -1653,9 +1677,6 @@ export function normalizeHaskellReferenceName(referenceName: string): string {
   if (dotted) {
     return `${dotted[1]}::${canonicalHaskellQualifiedMember(dotted[2]!)}`;
   }
-  // Accept the extractor's historical `M::<op>` form as input and normalize
-  // it too. Match the FIRST delimiter after a syntactically valid module,
-  // never the last `::` in the whole string: that may belong to the operator.
   return value;
 }
 
@@ -1813,9 +1834,14 @@ function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
     const close = cleaned.lastIndexOf(')');
     if (open >= 0 && close > open) childList = cleaned.slice(open + 1, close).trim();
   }
-  const typeName = operatorHead ? name.startsWith(':') : HASKELL_CONID_START_RE.test(name);
-  const typeOnly = explicitType || (!explicitPattern && typeName);
-  const valueOnly = explicitPattern || (!explicitType && !typeName);
+  // Haskell2010 §5.3: a bare uppercase item imports BOTH the type and its
+  // data constructors (dual namespace) — neither flag, matching the
+  // conservative child semantics of parseHaskellImportChild. Lowercase
+  // identifiers are necessarily values, and a bare operator item — including
+  // any `:`-headed constructor operator — can only denote a value;
+  // type-level operators require an explicit `type` qualifier.
+  const typeOnly = explicitType;
+  const valueOnly = explicitPattern || (!explicitType && !HASKELL_CONID_START_RE.test(name));
   return {
     name,
     children: childList === null ? null : childList === '..' ? '*'
@@ -1862,9 +1888,30 @@ function haskellImportDeclarationHasModule(declaration: string): boolean {
   return HASKELL_IMPORT_DECLARATION_RE.test(body);
 }
 
-function extractHaskellImports(content: string): ImportMapping[] {
-  const mappings: ImportMapping[] = [];
+/** Strip Haskell comments once, then derive both import surfaces from the
+ *  shared text. The generic dispatchers below each strip independently, so a
+ *  caller that needs both (the topology hash) re-parsed the same file three
+ *  times. Both consumers take already-stripped text as their input contract,
+ *  so the shared result is byte-identical to what the old one-strip-each
+ *  path produced. */
+export function extractHaskellImportSurface(content: string): {
+  imports: ImportMapping[];
+  reExports: ReExport[];
+} {
   const stripped = stripHaskellComments(content);
+  const imports = extractHaskellImportsFromStripped(stripped);
+  return {
+    imports,
+    reExports: extractHaskellReExportsFromStripped(stripped, imports),
+  };
+}
+
+function extractHaskellImports(content: string): ImportMapping[] {
+  return extractHaskellImportsFromStripped(stripHaskellComments(content));
+}
+
+function extractHaskellImportsFromStripped(stripped: string): ImportMapping[] {
+  const mappings: ImportMapping[] = [];
   const lines = stripped.split(/\r?\n/);
 
   const declarations: string[] = [];
@@ -2175,7 +2222,11 @@ export function extractReExports(content: string, language: Language): ReExport[
  * also forward a symbol that was explicitly imported into the facade.
  */
 function extractHaskellReExports(content: string): ReExport[] {
-  const cleaned = stripHaskellComments(content);
+  const stripped = stripHaskellComments(content);
+  return extractHaskellReExportsFromStripped(stripped, extractHaskellImportsFromStripped(stripped));
+}
+
+function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMapping[]): ReExport[] {
   const header = cleaned.match(new RegExp(
     `\\bmodule\\s+(${HASKELL_MODULE_NAME_SOURCE})\\s*`,
     'u',
@@ -2201,7 +2252,6 @@ function extractHaskellReExports(content: string): ReExport[] {
   const items = splitHaskellList(cleaned.slice(open + 1, close));
 
   const out: ReExport[] = [];
-  const imports = extractHaskellImports(content);
   const reExportKeys = new Set<string>();
   const pushUnique = (reExport: ReExport): void => {
     const key = JSON.stringify(reExport);
@@ -3967,10 +4017,20 @@ function resolveGoCrossPackageReference(
   return null;
 }
 
-/** Recursive depth cap for re-export chain following. It is deliberately
- *  high enough for generated/deep facade chains while still bounding
- *  malformed acyclic graphs; cycles are stopped separately by `visited`. */
-const REEXPORT_MAX_DEPTH = 64;
+/** Recursive depth caps for re-export chain following.
+ *
+ *  Non-Haskell keeps the base cap (8) and a SHARED visited set: real
+ *  codebases rarely chain barrels more than 2–3 deep, and sharing the set
+ *  between sibling alternatives is what keeps diamond barrel fan-out linear
+ *  instead of exponential.
+ *
+ *  Haskell facade chains (`module Facade (module M1, module M2) where`
+ *  towers) legitimately run much deeper, and a shared set would let a
+ *  restricted/denied first branch poison a later valid route converging on
+ *  the same origin module — so Haskell gets a higher cap with per-branch
+ *  visited copies instead. */
+const REEXPORT_MAX_DEPTH = 8;
+const HASKELL_REEXPORT_MAX_DEPTH = 64;
 
 /**
  * Find an exported symbol in `filePath`, following `export { x } from
@@ -4042,9 +4102,14 @@ function findExportedSymbolWalk(
   visited: Set<string>,
   depth: number
 ): ExportedSymbolWalkResult {
-  if (depth > REEXPORT_MAX_DEPTH) return undefined;
+  const haskellMode = language === 'haskell';
+  if (depth > (haskellMode ? HASKELL_REEXPORT_MAX_DEPTH : REEXPORT_MAX_DEPTH)) return undefined;
   if (visited.has(filePath)) return undefined;
   visited.add(filePath);
+  // Cycle detection is path-local for Haskell only (per the depth-cap note
+  // above); every other language shares the mutable set across sibling
+  // alternatives, which bounds diamond barrels linearly.
+  const branchVisited = (): Set<string> => (haskellMode ? new Set(visited) : visited);
 
   const exportIndex = getFileExportIndex(filePath, context);
   const exportedNames = language === 'haskell'
@@ -4080,7 +4145,7 @@ function findExportedSymbolWalk(
   } else {
     for (const name of exportedNames) {
       if (language === 'haskell') {
-        const candidates = (exportIndex.allByName.get(name) ?? [])
+        const candidates = (exportedNodesByName(exportIndex, filePath, context).get(name) ?? [])
           .filter((node) => !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
           .filter((node) => want.haskellNamespace === 'value'
             ? haskellValueNode(node)
@@ -4132,10 +4197,7 @@ function findExportedSymbolWalk(
       },
       language,
       context,
-      // Cycle detection is path-local. Sharing the mutable set between
-      // sibling alternatives lets a restricted/denied first branch poison a
-      // later valid route that converges on the same origin module.
-      new Set(visited),
+      branchVisited(),
       depth + 1
     );
     if (chained === HASKELL_EXPORT_AMBIGUOUS) {
@@ -4198,7 +4260,7 @@ function findExportedSymbolWalk(
         },
         language,
         context,
-        new Set(visited),
+        branchVisited(),
         depth + 1
       );
       if (chained === HASKELL_EXPORT_AMBIGUOUS) {

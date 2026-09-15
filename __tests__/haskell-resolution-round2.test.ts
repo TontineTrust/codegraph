@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { CodeGraph } from '../src';
 import { initGrammars, loadAllGrammars } from '../src/extraction/grammars';
-import { extractReExports } from '../src/resolution/import-resolver';
+import { extractImportMappings, extractReExports } from '../src/resolution/import-resolver';
 
 beforeAll(async () => {
   await initGrammars();
@@ -1555,8 +1555,13 @@ describe('Haskell resolution round 2', () => {
       expect(outgoingTargets(graph, 'runOperator', 'Consumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: originOperator.id }) }));
       expect(constructor).toBeDefined();
-      expect(outgoingTargets(graph, 'notAConstructor', 'Consumer.hs')
-        .some(({ target }) => target.name === 'T')).toBe(false);
+      // A bare uppercase facade item (`O.T`) re-exports BOTH namespaces
+      // (Haskell2010 §5.3), so the value-position `T` is the constructor.
+      expect(outgoingTargets(graph, 'notAConstructor', 'Consumer.hs'))
+        .toContainEqual(expect.objectContaining({
+          edge: expect.objectContaining({ kind: 'references' }),
+          target: expect.objectContaining({ id: constructor!.id }),
+        }));
       expect(outgoingTargets(graph, 'runGrouped', 'GroupedConsumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: constructor!.id }) }));
 
@@ -1569,7 +1574,7 @@ describe('Haskell resolution round 2', () => {
       kind: 'wildcard',
       source: 'Origin',
       includedNames: ['foo', 'T', '<+>'],
-      haskellTypeOnlyNames: ['T'],
+      // `O.T` is dual-namespace, so it appears in neither Only list.
       haskellValueOnlyNames: ['foo', '<+>'],
       haskellClearParent: true,
     }));
@@ -2673,5 +2678,171 @@ describe('Haskell resolution round 2', () => {
       }]);
 
       expect(edges.map((edge) => edge.target)).toEqual([jsTarget.id]);
+  });
+
+  it('resolves dual-namespace bare uppercase import items in value and type positions', async () => {
+    const graph = await createGraph({
+      'Origin.hs': [
+        'module Origin (Maybe(..), C) where',
+        'data Maybe a = Nothing | Just a',
+        'class C a where',
+        '  method :: a -> a',
+      ].join('\n'),
+      'ValueConsumer.hs': [
+        'module ValueConsumer where',
+        'import Origin (Just)',
+        'make x = Just x',
+      ].join('\n'),
+      'TypeConsumer.hs': [
+        'module TypeConsumer where',
+        'import Origin (C)',
+        'data T = T',
+        'instance C T where',
+        '  method x = x',
+      ].join('\n'),
+    });
+      const constructor = graph.getNodesByName('Just')
+        .find((node) => node.filePath === 'Origin.hs' && node.kind === 'enum_member')!;
+      expect(constructor).toBeDefined();
+      expect(outgoingTargets(graph, 'make', 'ValueConsumer.hs'))
+        .toContainEqual(expect.objectContaining({
+          edge: expect.objectContaining({ kind: 'calls' }),
+          target: expect.objectContaining({ id: constructor.id }),
+        }));
+      const clazz = nodeAt(graph, 'C', 'Origin.hs');
+      const instance = graph.getNodesByKind('class')
+        .find((node) => node.filePath === 'TypeConsumer.hs'
+          && node.decorators?.includes('haskell-instance'))!;
+      expect(instance).toBeDefined();
+      expect(graph.getOutgoingEdges(instance.id)).toContainEqual(expect.objectContaining({
+        kind: 'implements',
+        target: clazz.id,
+      }));
+
+      // Haskell2010 §5.3: a bare uppercase item occupies both namespaces, a
+      // bare operator item is a value, and only an explicit `type` qualifier
+      // makes an item type-only.
+      const dualMappings = extractImportMappings('C.hs', [
+        'module C where',
+        'import Origin (Just)',
+        'import Origin (type Maybe)',
+      ].join('\n'), 'haskell');
+      const just = dualMappings.find((m) => m.localName === 'Just' && !m.isNamespace)!;
+      expect(just.haskellTypeOnly).toBeUndefined();
+      expect(just.haskellValueOnly).toBeUndefined();
+      const maybeType = dualMappings.find((m) => m.localName === 'Maybe' && !m.isNamespace)!;
+      expect(maybeType.haskellTypeOnly).toBe(true);
+      expect(maybeType.haskellValueOnly).toBeUndefined();
+  });
+
+  it('resolves colon-headed constructor operators imported as bare value items', async () => {
+    const graph = await createGraph({
+      'Origin.hs': [
+        'module Origin (Seq(..)) where',
+        'data Seq a = a :< [a]',
+      ].join('\n'),
+      'Cons.hs': [
+        'module Cons where',
+        'import Origin ((:<))',
+        'cons a b = a :< b',
+        'section values = map (:<) values',
+      ].join('\n'),
+    });
+      const constructor = graph.getNodesByName('(:<)')
+        .find((node) => node.filePath === 'Origin.hs')!;
+      expect(constructor).toBeDefined();
+      expect(outgoingTargets(graph, 'cons', 'Cons.hs'))
+        .toContainEqual(expect.objectContaining({
+          edge: expect.objectContaining({ kind: 'calls' }),
+          target: expect.objectContaining({ id: constructor.id }),
+        }));
+      expect(outgoingTargets(graph, 'section', 'Cons.hs')
+        .some(({ target }) => target.id === constructor.id)).toBe(true);
+
+      // The cons spelling is the canonical `:`-headed item: value-only.
+      const mappings = extractImportMappings('C.hs', [
+        'module C where',
+        'import Origin ((:))',
+        'import Origin (type (+.:))',
+      ].join('\n'), 'haskell');
+      const cons = mappings.find((m) => m.localName === ':' && !m.isNamespace)!;
+      expect(cons.haskellValueOnly).toBe(true);
+      expect(cons.haskellTypeOnly).toBeUndefined();
+      const typeOperator = mappings.find((m) => m.localName === '+.:' && !m.isNamespace)!;
+      expect(typeOperator.haskellTypeOnly).toBe(true);
+      expect(typeOperator.haskellValueOnly).toBeUndefined();
+  });
+
+  it('keeps non-Haskell re-export walks on shared-visited base semantics', async () => {
+    // A JS diamond barrel must not inherit the Haskell walk's per-branch
+    // visited copies + 64-deep cap: that turns a diamond into worst-case
+    // exponential expansion and resolves chains base deliberately stops at
+    // depth 8. The rename at the head (`originValue as deepTarget`) keeps the
+    // name-matcher from connecting the consumer on its own, so the edge can
+    // only come from the re-export walk.
+    const buildDiamond = (levels: number): Record<string, string> => {
+      const files: Record<string, string> = {
+        'origin.ts': 'export function originFn(): number { return 1; }\n',
+        'head.ts': `export { originFn as deepTarget } from './d1a';\n`,
+        'main.ts': [
+          "import { deepTarget } from './head';",
+          'export function use(): number { return deepTarget(); }',
+        ].join('\n'),
+      };
+      for (let i = 1; i <= levels; i++) {
+        for (const side of ['a', 'b'] as const) {
+          files[`d${i}${side}.ts`] = i < levels
+            ? `export * from './d${i + 1}a';\nexport * from './d${i + 1}b';\n`
+            : "export * from './origin';\n";
+        }
+      }
+      return files;
+    };
+
+    const shallow = await createGraph(buildDiamond(6));
+      const origin = nodeAt(shallow, 'originFn', 'origin.ts');
+      expect(outgoingTargets(shallow, 'use', 'main.ts'))
+        .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: origin.id }) }));
+
+    const started = Date.now();
+    const deep = await createGraph(buildDiamond(12));
+      const deepOrigin = nodeAt(deep, 'originFn', 'origin.ts');
+      const elapsed = Date.now() - started;
+      // Base semantics: the 12-hop chain exceeds the depth-8 cap, so the
+      // walk gives up instead of fanning through the diamond.
+      expect(outgoingTargets(deep, 'use', 'main.ts')
+        .some(({ target }) => target.id === deepOrigin.id)).toBe(false);
+      expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('claims record-dot projections on lines with non-ASCII prefixes', async () => {
+    // Native tree-sitter's Point.column is a byte offset, but web-tree-sitter
+    // 0.25.x reports UTF-16 code units — the same units String.slice counts —
+    // so the projection detector's sourceLine.slice(ref.column) stays aligned
+    // even past multi-byte text, and no byte→UTF-16 conversion is needed.
+    // This pins that alignment: if the binding ever reports byte columns,
+    // the projection below is no longer claimed and the import fallback
+    // fabricates an edge for the bare selector, failing the first assertion.
+    const graph = await createGraph({
+      'Origin.hs': [
+        'module Origin (B(..)) where',
+        'data B = B { ascii :: Int }',
+      ].join('\n'),
+      'Consumer.hs': [
+        '{-# LANGUAGE OverloadedRecordDot #-}',
+        'module Consumer where',
+        'import Origin (B(..))',
+        'shiftedUnknown 中文 value = value.ascii',
+        'shiftedAnnotated :: B -> Int',
+        'shiftedAnnotated 值 = 值.ascii',
+      ].join('\n'),
+    });
+      const asciiField = graph.getNodesByName('ascii')
+        .find((node) => node.filePath === 'Origin.hs' && node.kind === 'field')!;
+      expect(asciiField).toBeDefined();
+      expect(outgoingTargets(graph, 'shiftedUnknown', 'Consumer.hs')
+        .some(({ target }) => target.id === asciiField.id)).toBe(false);
+      expect(outgoingTargets(graph, 'shiftedAnnotated', 'Consumer.hs')
+        .some(({ target }) => target.id === asciiField.id)).toBe(true);
   });
 });

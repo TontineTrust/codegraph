@@ -20,7 +20,8 @@ interface HaskellExtractionState {
   localTypeNames?: Set<string>;
   lexicalBindings: Map<string, Map<string, LexicalBinding[]>>;
   signatureIndexes: Map<string, Map<string, SyntaxNode[]>>;
-  scopeNodes: Map<string, ExtractedNode | undefined>;
+  /** id → node index over the extraction's append-only nodes array. */
+  nodeIndex: Map<string, ExtractedNode>;
 }
 
 interface LexicalBinding {
@@ -37,7 +38,7 @@ function extractionState(owner: object): HaskellExtractionState {
       declarationGroups: new Map(),
       lexicalBindings: new Map(),
       signatureIndexes: new Map(),
-      scopeNodes: new Map(),
+      nodeIndex: new Map(),
     };
     extractionStates.set(owner, state);
   }
@@ -48,14 +49,20 @@ function declarationGroupMap(ctx: ExtractorContext): Map<string, ExtractedNode> 
   return extractionState(ctx.nodes as object).declarationGroups;
 }
 
+/**
+ * Resolve a node id to its extracted node. The nodes array only ever grows
+ * during an extraction and ids are unique, so an incrementally-extended
+ * Map<id, Node> answers in O(1) where a linear find was O(n) per lookup.
+ */
 function scopeOwner(ctx: ExtractorContext, id?: string): ExtractedNode | undefined {
   const ownerId = id ?? ctx.nodeStack[ctx.nodeStack.length - 1];
   if (!ownerId) return undefined;
-  const state = extractionState(ctx.nodes as object);
-  if (state.scopeNodes.has(ownerId)) return state.scopeNodes.get(ownerId);
-  const owner = ctx.nodes.find((candidate) => candidate.id === ownerId);
-  state.scopeNodes.set(ownerId, owner);
-  return owner;
+  const index = extractionState(ctx.nodes as object).nodeIndex;
+  for (let i = index.size; i < ctx.nodes.length; i++) {
+    const candidate = ctx.nodes[i];
+    if (candidate) index.set(candidate.id, candidate);
+  }
+  return index.get(ownerId);
 }
 
 function collapseWhitespace(text: string): string {
@@ -72,6 +79,11 @@ const HASKELL_MODULE_NAME_SOURCE = String.raw`${HASKELL_CONID_SOURCE}(?:\.${HASK
 const HASKELL_IDENTIFIER_RE = new RegExp(`^${HASKELL_IDENTIFIER_SOURCE}$`, 'u');
 export const HASKELL_CONID_START_RE = /^[\p{Lu}\p{Lt}]/u;
 const HASKELL_VARID_START_RE = /^[\p{Ll}\p{Lo}_]/u;
+// Qualified-name splitting patterns are static; precompile them so reference
+// normalization never allocates a RegExp per call.
+const QUALIFIED_MODULE_PREFIX_RE = new RegExp(`^(?:${HASKELL_CONID_SOURCE}\\.)+`, 'u');
+const QUALIFIED_NAME_RE = new RegExp(`^((?:${HASKELL_CONID_SOURCE}\\.)+)(.+)$`, 'u');
+const QUALIFIED_REFERENCE_RE = new RegExp(`^(${HASKELL_MODULE_NAME_SOURCE})::(.+)$`, 'u');
 
 function firstDescendant(node: SyntaxNode, types: ReadonlySet<string>): SyntaxNode | null {
   if (types.has(node.type)) return node;
@@ -223,12 +235,9 @@ export function normalizeReferenceText(text: string): string {
   // unqualified operator declaration keeps its conventional `(+)` node name.
   if (compact.startsWith('(') && compact.endsWith(')')) {
     const inner = compact.slice(1, -1);
-    if (new RegExp(`^(?:${HASKELL_CONID_SOURCE}\\.)+`, 'u').test(inner)) compact = inner;
+    if (QUALIFIED_MODULE_PREFIX_RE.test(inner)) compact = inner;
   }
-  const qualified = compact.match(new RegExp(
-    `^((?:${HASKELL_CONID_SOURCE}\\.)+)(.+)$`,
-    'u',
-  ));
+  const qualified = compact.match(QUALIFIED_NAME_RE);
   if (!qualified) return compact;
   const member = qualified[2]!;
   return `${qualified[1]!.slice(0, -1)}::${
@@ -238,10 +247,7 @@ export function normalizeReferenceText(text: string): string {
 
 /** Split a normalized reference at its module delimiter, never inside an op. */
 export function haskellReferenceParts(name: string): { qualifier: string | null; member: string } {
-  const qualified = name.match(new RegExp(
-    `^(${HASKELL_MODULE_NAME_SOURCE})::(.+)$`,
-    'u',
-  ));
+  const qualified = name.match(QUALIFIED_REFERENCE_RE);
   const rawMember = qualified?.[2] ?? name;
   const member = rawMember.startsWith('(') && rawMember.endsWith(')')
     ? rawMember.slice(1, -1)
@@ -573,12 +579,15 @@ function isRecursiveDo(node: SyntaxNode): boolean {
     || (keyword?.type === 'do_module' && keyword.lastChild?.type === 'mdo');
 }
 
+/** Scope kinds a lexical-range decorator reports the span of. */
+const LEXICAL_RANGE_CONTAINERS = new Set(['let_in', 'alternative', 'function', 'do', 'list_comprehension']);
+
 function lexicalRangeDecorator(node: SyntaxNode): string | null {
   let ancestor = node.parent;
   let bindingStatement: SyntaxNode | null = null;
   while (ancestor) {
     if (ancestor.type === 'let' || ancestor.type === 'rec') bindingStatement = ancestor;
-    if (['let_in', 'alternative', 'function', 'do', 'list_comprehension'].includes(ancestor.type)) {
+    if (LEXICAL_RANGE_CONTAINERS.has(ancestor.type)) {
       // A do-let declaration scopes over its own RHS and later statements,
       // including its enclosing recursive group when present. An mdo keeps
       // every declaration recursive across the whole block.
@@ -1129,11 +1138,11 @@ function declarationBindings(
 function lexicalBindingIndex(
   container: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): Map<string, LexicalBinding[]> {
   const key = `${container.type}:${container.startIndex}:${container.endIndex}`;
-  const state = stateOwner ? extractionState(stateOwner) : undefined;
-  const cached = state?.lexicalBindings.get(key);
+  const state = extractionState(stateOwner);
+  const cached = state.lexicalBindings.get(key);
   if (cached) return cached;
 
   const index = new Map<string, LexicalBinding[]>();
@@ -1141,15 +1150,15 @@ function lexicalBindingIndex(
     for (const [name, materializedNode, scopeStartIndex] of declarationBindings(
       child,
       source,
-      stateOwner ?? container,
+      stateOwner,
     )) {
-      const key = lexicalBindingName(name);
-      const occurrences = index.get(key) ?? [];
+      const bindingKey = lexicalBindingName(name);
+      const occurrences = index.get(bindingKey) ?? [];
       occurrences.push({ startIndex: scopeStartIndex ?? child.startIndex, materializedNode });
-      index.set(key, occurrences);
+      index.set(bindingKey, occurrences);
     }
   }
-  state?.lexicalBindings.set(key, index);
+  state.lexicalBindings.set(key, index);
   return index;
 }
 
@@ -1158,7 +1167,7 @@ function bindingAt(
   name: string,
   source: string,
   beforeIndex: number | null,
-  stateOwner?: object,
+  stateOwner: object,
 ): LexicalBinding | undefined {
   const occurrences = lexicalBindingIndex(container, source, stateOwner)
     .get(lexicalBindingName(name));
@@ -1175,7 +1184,7 @@ function isLexicallyBound(
   name: string,
   node: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): boolean {
   if (!name || haskellReferenceParts(name).qualifier !== null) return false;
   let branch = node;
@@ -1303,6 +1312,92 @@ function isHaskellPatternPosition(node: SyntaxNode): boolean {
     ancestor = ancestor.parent;
   }
   return false;
+}
+
+/** Containers whose subtrees are declaration heads/types, never runtime code. */
+const NON_RUNTIME_CONTAINERS = new Set([
+  'header', 'import', 'data_type', 'newtype', 'type_synomym',
+  'type_family', 'type_instance', 'data_family', 'class', 'instance',
+]);
+
+/**
+ * Whether a node sits in a runtime expression rather than a type, signature,
+ * import/export list, or declaration head. The walk terminates at the nearest
+ * expression-bearing ancestor (a match/bind RHS, guard, view-pattern
+ * expression, annotated expression, or constructor-synonym builder); a
+ * declaration-signature `signature` node has no `expression` field, so its
+ * type subtree classifies as non-runtime. Shared by the bare-constructor
+ * walker and the bare-variable data-position walker so both classify
+ * positions identically.
+ */
+function isRuntimeExpressionPosition(node: SyntaxNode): boolean {
+  let branch = node;
+  let ancestor: SyntaxNode | null = node.parent;
+  while (ancestor) {
+    if (ancestor.type === 'view_pattern') {
+      return nodeContains(getChildByField(ancestor, 'expression'), branch);
+    }
+    if (ancestor.type === 'guards') return true;
+    if (ancestor.type === 'match' || ancestor.type === 'bind') {
+      return nodeContains(getChildByField(ancestor, 'expression'), branch)
+        || nodeContains(getChildByField(ancestor, 'guards'), branch);
+    }
+    if (ancestor.type === 'constructor_synonym') {
+      return nodeContains(getChildByField(ancestor, 'match'), branch);
+    }
+    if (ancestor.type === 'signature') {
+      // An expression annotation (`value :: Type`) shares the same grammar
+      // node as a declaration signature. Its expression remains runtime
+      // code, but the annotation type does not.
+      return nodeContains(getChildByField(ancestor, 'expression'), branch);
+    }
+    if (ancestor.type === 'type_application') {
+      // Visible type applications (`callee @Type`) place their type in an
+      // expression tree, but names below this node still belong to the type
+      // namespace. The runtime callee is a sibling of the type_application
+      // node, so it continues through the normal call walk.
+      return false;
+    }
+    if (NON_RUNTIME_CONTAINERS.has(ancestor.type)) return false;
+    branch = ancestor;
+    ancestor = ancestor.parent;
+  }
+  return false;
+}
+
+/**
+ * A bare lowercase name stored in a pure-data position — a tuple/list literal
+ * element or a record field's value expression — is a value dependency on the
+ * named function: `pair = (helper, helper)`, `handlers = [onSave, onLoad]`,
+ * `T { cb = onClick }`. The call walker only visits application spines, so
+ * without this branch these positions produced no reference at all. Redundant
+ * parentheses around the element are classified by the nearest significant
+ * parent. Pattern positions are excluded, and the strict `function_ref`
+ * matcher (exact name, callable targets only) keeps a data-shaped value that
+ * happens to share a name with a constant from fabricating an edge.
+ */
+function extractHaskellDataPositionReference(
+  node: SyntaxNode,
+  source: string,
+  stateOwner: object,
+): BareReferenceInfo | undefined {
+  if (node.type !== 'variable') return undefined;
+  let container: SyntaxNode | null = node.parent;
+  while (container?.type === 'parens' && container.namedChildCount === 1) {
+    container = container.parent;
+  }
+  if (!container) return undefined;
+  let inDataPosition = container.type === 'tuple' || container.type === 'list';
+  if (container.type === 'field_update') {
+    // The updated label lives under the `field` child; a variable reached
+    // here (paren-hoisted) occupies the value slot instead.
+    inDataPosition = !nodeContains(getChildByField(container, 'field'), node);
+  }
+  if (!inDataPosition) return undefined;
+  if (isHaskellPatternPosition(node) || !isRuntimeExpressionPosition(node)) return undefined;
+  const name = getNodeText(node, source).trim();
+  if (!name || isLexicallyBound(name, node, source, stateOwner)) return undefined;
+  return { name, referenceKind: 'function_ref', node };
 }
 
 function normalizedSimpleReference(node: SyntaxNode, source: string): { name: string; node: SyntaxNode } | null {
@@ -1464,7 +1559,7 @@ function emitPointFreeReference(node: SyntaxNode, ownerId: string, ctx: Extracto
 function extractHaskellBareCall(
   node: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): string | undefined {
   const reference = normalizedSimpleReference(node, source);
   if (!reference) return undefined;
@@ -1566,8 +1661,11 @@ function extractHaskellBareCall(
 function extractHaskellBareReference(
   node: SyntaxNode,
   source: string,
-  stateOwner?: object,
+  stateOwner: object,
 ): BareReferenceInfo | BareReferenceInfo[] | undefined {
+  const dataPosition = extractHaskellDataPositionReference(node, source, stateOwner);
+  if (dataPosition) return dataPosition;
+
   if (node.type === 'left_section' || node.type === 'right_section') {
     const operator = getChildByField(node, 'operator')
       ?? node.namedChildren.find((child) => [
@@ -1704,49 +1802,7 @@ function extractHaskellBareReference(
 
     // Bare constructor values are semantic references only in expressions,
     // never in signatures, type heads, imports, or export lists.
-    let branch = node;
-    let ancestor: SyntaxNode | null = node.parent;
-    let expressionPosition = false;
-    while (ancestor) {
-      if (ancestor.type === 'view_pattern') {
-        expressionPosition = nodeContains(getChildByField(ancestor, 'expression'), branch);
-        break;
-      }
-      if (ancestor.type === 'guards') {
-        expressionPosition = true;
-        break;
-      }
-      if (ancestor.type === 'match' || ancestor.type === 'bind') {
-        expressionPosition = nodeContains(getChildByField(ancestor, 'expression'), branch)
-          || nodeContains(getChildByField(ancestor, 'guards'), branch);
-        break;
-      }
-      if (ancestor.type === 'constructor_synonym') {
-        expressionPosition = nodeContains(getChildByField(ancestor, 'match'), branch);
-        break;
-      }
-      if (ancestor.type === 'signature') {
-        // An expression annotation (`value :: Type`) shares the same grammar
-        // node as a declaration signature. Its expression remains runtime
-        // code, but the annotation type does not.
-        expressionPosition = nodeContains(getChildByField(ancestor, 'expression'), branch);
-        break;
-      }
-      if (ancestor.type === 'type_application') {
-        // Visible type applications (`callee @Type`) place their type in an
-        // expression tree, but constructor-shaped names below this node still
-        // belong to the type namespace. The runtime callee is a sibling of the
-        // type_application node, so it continues through the normal call walk.
-        break;
-      }
-      if (['header', 'import', 'data_type', 'newtype', 'type_synomym',
-        'type_family', 'type_instance', 'data_family', 'class', 'instance'].includes(ancestor.type)) {
-        break;
-      }
-      branch = ancestor;
-      ancestor = ancestor.parent;
-    }
-    if (!expressionPosition) return undefined;
+    if (!isRuntimeExpressionPosition(node)) return undefined;
   }
   return { name: reference.name, referenceKind: 'references' };
 }
@@ -1767,12 +1823,24 @@ function derivedClassNames(node: SyntaxNode, source: string): Array<{ name: stri
   return result;
 }
 
+/**
+ * Text of a value binding's left-hand side (name + parameter patterns),
+ * located through the AST rather than string-splitting on `=`: an operator
+ * name may itself contain `=` (`(=<<)`, `(==)`), which would truncate the
+ * split-based extraction mid-parenthesis. The `match` child starts at the
+ * defining `=` token (or at `|` when guards precede it), so the slice up to
+ * its start is exactly the binding head.
+ */
+function bindingLhsText(node: SyntaxNode, source: string): string {
+  const match = getChildByField(node, 'match');
+  return source.substring(node.startIndex, match ? match.startIndex : node.endIndex);
+}
+
 function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
   // A `bind` under `do` is a monadic pattern bind (`x <- action`), not a named
   // declaration. Local value binds stay attributed to their enclosing symbol;
   // only function-valued local binds become their own graph nodes.
-  const scopeId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const owner = scopeOwner(ctx, scopeId);
+  const owner = scopeOwner(ctx);
   const isMethod = !!owner && (owner.kind === 'trait' || owner.decorators?.includes('haskell-instance'));
   const isTopLevel = !owner || owner.kind === 'file' || owner.kind === 'namespace';
   const nameNode = getChildByField(node, 'name');
@@ -1822,7 +1890,7 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
   }
   const signature = signatureNode
     ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
-    : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
+    : collapseWhitespace(bindingLhsText(node, ctx.source)).slice(0, 240);
   const bindingNode = ctx.createNode(kind, name, node, {
     signature: signature || undefined,
     docstring: bindingDocstring(node, signatureNode, ctx.source),
@@ -1852,8 +1920,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
   }
   if (!name) return true;
 
-  const scopeId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const parent = scopeOwner(ctx, scopeId);
+  const parent = scopeOwner(ctx);
   const kind = parent && (parent.kind === 'trait' || parent.decorators?.includes('haskell-instance'))
     ? 'method'
     : 'function';
@@ -1870,7 +1937,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const signatureNode = associatedSignature(node, name, ctx.source, ctx.nodes as object);
   const signature = signatureNode
     ? collapseWhitespace(getNodeText(signatureNode, ctx.source)).slice(0, 400)
-    : collapseWhitespace(getNodeText(node, ctx.source).split('=', 1)[0] ?? '').slice(0, 240);
+    : collapseWhitespace(bindingLhsText(node, ctx.source)).slice(0, 240);
   const functionNode = ctx.createNode(kind, name, node, {
     signature: signature || undefined,
     docstring: bindingDocstring(node, signatureNode, ctx.source),
@@ -2001,8 +2068,7 @@ function handleDataFamily(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const head = declarationHead(node, ctx.source);
   if (!head) return true;
   const name = head.baseName;
-  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const owner = scopeOwner(ctx, ownerId);
+  const owner = scopeOwner(ctx);
   ctx.createNode('enum', name, node, {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
     docstring: getHaskellPrecedingDocstring(node, ctx.source),
@@ -2020,8 +2086,7 @@ function handleDataInstance(node: SyntaxNode, ctx: ExtractorContext): boolean {
   const head = declarationHead(declaration, ctx.source);
   if (!head) return true;
   const baseName = head.baseName;
-  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1];
-  const owner = scopeOwner(ctx, ownerId);
+  const owner = scopeOwner(ctx);
   const instanceName = owner && (owner.kind === 'trait' || owner.decorators?.includes('haskell-instance'))
     ? baseName
     : head.displayName;
@@ -2167,8 +2232,7 @@ function handleTypeFamily(node: SyntaxNode, ctx: ExtractorContext): boolean {
   if (!head) return true;
   const baseName = head.baseName;
   const name = node.type === 'type_instance' ? head.displayName : baseName;
-  const ownerId = ctx.nodeStack[ctx.nodeStack.length - 1] ?? '';
-  const owner = scopeOwner(ctx, ownerId);
+  const owner = scopeOwner(ctx);
   ctx.createNode('type_alias', name, node, {
     signature: collapseWhitespace(getNodeText(node, ctx.source)).slice(0, 400),
     docstring: getHaskellPrecedingDocstring(node, ctx.source),
