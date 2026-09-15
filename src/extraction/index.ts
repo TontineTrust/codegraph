@@ -3183,11 +3183,8 @@ export class ExtractionOrchestrator {
     // rebind to the same target is a clean no-op, but leaving the old row in
     // place for a rebind ELSEWHERE would keep both, turning drift into
     // duplication.
-    return this.queries.transaction(() => {
-      this.queries.deleteEdgesByIds(edgeIds);
-      this.queries.insertUnresolvedRefsBatch(refs);
-      return refs.length;
-    });
+    this.queries.replaceResolutionEdgesWithUnresolvedRefs(edgeIds, refs);
+    return refs.length;
   }
 
   /**
