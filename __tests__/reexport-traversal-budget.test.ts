@@ -3,7 +3,7 @@ import type { Language, Node } from '../src/types';
 import type { ResolutionContext, UnresolvedRef } from '../src/resolution/types';
 import {
   extractImportMappings, extractReExports, haskellEffectHeadHasCanonicalOrigin,
-  haskellNameHasCanonicalOrigin, resolveViaImport,
+  haskellNameHasCanonicalOrigin, resolveViaImport, resolveImportPath, clearImportResolverMemos,
 } from '../src/resolution/import-resolver';
 
 function fixture(language: Language, sources: Record<string, string>, declarations: Node[] = []) {
@@ -37,6 +37,7 @@ function fixture(language: Language, sources: Record<string, string>, declaratio
     },
   };
   return {
+    context,
     visits: () => visits,
     canonicalOrigin: (filePath: string, namespace: 'type' | 'value') => namespace === 'type'
       ? haskellEffectHeadHasCanonicalOrigin(filePath, 'IO', context)
@@ -167,6 +168,92 @@ describe('bounded re-export traversal', () => {
     expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(target.id);
   });
 
+  it.each(['module Origin, module Other, module A0', 'wanted'])(
+    'stops after proving ambiguity through %s exports', (exports) => {
+      const graph = fixture('haskell', {
+        ...diamond('haskell'),
+        'Origin.hs': 'module Origin where\nwanted x = x',
+        'Other.hs': 'module Other where\nwanted x = x',
+        'Entry.hs': `module Entry (${exports}) where\nimport Origin\nimport Other\nimport A0`,
+        'Consumer.hs': 'module Consumer where\nimport Entry (wanted)\nrun = wanted 1',
+      }, [declaration('wanted', 'Origin.hs', 'haskell'), declaration('wanted', 'Other.hs', 'haskell')]);
+      expect(graph.resolve('Consumer.hs')).toBeNull();
+      // Both visible definitions have already disproved uniqueness. Visiting
+      // the exponential sibling cannot change that answer and must be skipped.
+      expect(graph.visits()).toBeLessThan(50);
+    },
+  );
+
+  it.each([
+    { reason: 'ambiguous module', imports: 'import Ambiguous', explicit: false },
+    { reason: 'ambiguous module', imports: 'import Ambiguous', explicit: true },
+    { reason: 'distinct imported entities', imports: 'import Origin\nimport Other', explicit: false },
+    { reason: 'distinct imported entities', imports: 'import Origin\nimport Other', explicit: true },
+  ])(
+    'skips later wildcard imports after $reason (explicit target: $explicit)', ({ imports, explicit }) => {
+      const graph = fixture('haskell', {
+        ...diamond('haskell'),
+        'Origin.hs': 'module Origin where\nwanted x = x',
+        'Other.hs': 'module Other where\nwanted x = x',
+        'Ambiguous.hs': 'module Ambiguous (module Origin, module Other) where\nimport Origin\nimport Other',
+        'Consumer.hs': `module Consumer where\n${explicit ? 'import Origin (wanted)\n' : ''}${imports}\nimport A0\nrun = wanted 1`,
+      }, [declaration('wanted', 'Origin.hs', 'haskell'), declaration('wanted', 'Other.hs', 'haskell')]);
+      expect(graph.resolve('Consumer.hs')).toBeNull();
+      expect(graph.visits()).toBeLessThan(50);
+      const visits = graph.visits();
+      // The incomplete target list is safe to memoize only with its definitive
+      // ambiguity marker, never as one selected target on the next call.
+      expect(graph.resolve('Consumer.hs')).toBeNull();
+      if (!explicit) expect(graph.visits()).toBe(visits);
+      else expect(graph.visits()).toBeLessThan(50);
+    },
+  );
+
+  it('does not confuse duplicate or hidden wildcard routes with distinct entities', () => {
+    const target = declaration('wanted', 'Origin.hs', 'haskell');
+    const graph = fixture('haskell', {
+      'Origin.hs': 'module Origin where\nwanted x = x',
+      'Other.hs': 'module Other where\nwanted x = x',
+      'Same.hs': 'module Same (module Origin) where\nimport Origin',
+      'Consumer.hs': 'module Consumer where\nimport Origin\nimport Same\nimport Other hiding (wanted)\nrun = wanted 1',
+      'AmbiguousConsumer.hs': 'module AmbiguousConsumer where\nimport Origin\nimport Same\nimport Other\nrun = wanted 1',
+    }, [target, declaration('wanted', 'Other.hs', 'haskell')]);
+    expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(target.id);
+    // Two routes to Origin must not terminate the search before Other adds a
+    // genuinely distinct binding.
+    expect(graph.resolve('AmbiguousConsumer.hs')).toBeNull();
+  });
+
+  it('keeps inherited exclusions across unrestricted wildcard facades', () => {
+    const permitted = declaration('wanted', 'Allowed.hs', 'haskell', 'field');
+    permitted.qualifiedName = 'Allowed::B::wanted';
+    const excluded = declaration('wanted', 'Origin.hs', 'haskell', 'field');
+    excluded.qualifiedName = 'Origin::A::wanted';
+    const graph = fixture('haskell', {
+      'Origin.hs': 'module Origin where\ndata A = A { wanted :: Int }',
+      'Allowed.hs': 'module Allowed where\ndata B = B { wanted :: Int }',
+      'Bridge.hs': 'module Bridge (module Origin) where\nimport Origin',
+      'Denied.hs': 'module Denied (module Bridge) where\nimport Bridge hiding (A(..))',
+      'Entry.hs': 'module Entry (module Denied, module Allowed) where\nimport Denied\nimport Allowed',
+      'Consumer.hs': 'module Consumer where\nimport Entry (wanted)\nrun = wanted x',
+    }, [excluded, permitted]);
+    expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(permitted.id);
+  });
+
+  it('distinguishes parents while traversing a shared unrestricted facade', () => {
+    const permitted = declaration('wanted', 'Origin.hs', 'haskell', 'field');
+    permitted.qualifiedName = 'Origin::B::wanted';
+    const excluded = { ...declaration('wanted', 'Origin.hs', 'haskell', 'field'), id: 'Origin:A:wanted' };
+    excluded.qualifiedName = 'Origin::A::wanted';
+    const graph = fixture('haskell', {
+      'Origin.hs': 'module Origin where\ndata A = A { wanted :: Int }\ndata B = B { wanted :: Int }',
+      'Bridge.hs': 'module Bridge (module Origin) where\nimport Origin',
+      'Facade.hs': 'module Facade (B(..)) where\nimport Bridge',
+      'Consumer.hs': 'module Consumer where\nimport Facade (wanted)\nrun = wanted x',
+    }, [excluded, permitted]);
+    expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(permitted.id);
+  });
+
   it('keeps restrictions local to converging Haskell branches', () => {
     const target = declaration('wanted', 'Origin.hs', 'haskell', 'field');
     target.qualifiedName = 'Origin::B::wanted';
@@ -207,5 +294,23 @@ describe('bounded re-export traversal', () => {
     expect(graph.canonicalOrigin('Consumer.hs', namespace)).toBe(false);
     expect(graph.visits()).toBeLessThan(100);
     expect(graph.canonicalOrigin('SafeConsumer.hs', namespace)).toBe(true);
+  });
+});
+
+describe('import-path memo key isolation', () => {
+  it('keeps the importer and language separate, including cached misses', () => {
+    const sources: Record<string, string> = {
+      'left/Consumer.ts': '', 'right/Consumer.ts': '',
+      'left/shared.ts': '', 'right/shared.ts': '', 'left/shared.js': '',
+    };
+    const { context } = fixture('typescript', sources);
+    expect(resolveImportPath('./shared', 'left/Consumer.ts', 'typescript', context)).toBe('left/shared.ts');
+    expect(resolveImportPath('./shared', 'right/Consumer.ts', 'typescript', context)).toBe('right/shared.ts');
+    expect(resolveImportPath('./shared', 'left/Consumer.ts', 'javascript', context)).toBe('left/shared.js');
+    expect(resolveImportPath('./later', 'left/Consumer.ts', 'typescript', context)).toBeNull();
+    sources['left/later.ts'] = '';
+    expect(resolveImportPath('./later', 'left/Consumer.ts', 'typescript', context)).toBeNull();
+    clearImportResolverMemos(context);
+    expect(resolveImportPath('./later', 'left/Consumer.ts', 'typescript', context)).toBe('left/later.ts');
   });
 });

@@ -76,7 +76,12 @@ export function isNixPathImportRef(ref: UnresolvedRef): boolean {
 // given a stable file set + node table, which is exactly the window between
 // ReferenceResolver.clearCaches() calls — clearImportResolverMemos() is invoked
 // there, so the staleness discipline matches the resolver's own caches.
-const importPathMemos = new WeakMap<ResolutionContext, Map<string, string | null>>();
+// Keep each already-hashed specifier/file string as a structural key. Building
+// one composite key per re-export hop dominated Haskell facade resolution.
+const importPathMemos = new WeakMap<
+  ResolutionContext,
+  Map<Language, Map<string, Map<string, string | null>>>
+>();
 /** Internal-only result: unlike `undefined` (not found), ambiguity must survive recursion. */
 const HASKELL_EXPORT_AMBIGUOUS = Symbol('haskell-export-ambiguous');
 type ExportedSymbolWalkResult = Node | typeof HASKELL_EXPORT_AMBIGUOUS | undefined;
@@ -91,6 +96,13 @@ const haskellWildcardTargetMemos = new WeakMap<
   ResolutionContext,
   LRUCache<string, HaskellWildcardTargets>
 >();
+const HASKELL_ORIGIN_MEMO_LIMIT = 50_000;
+interface HaskellOriginMemo {
+  results: LRUCache<string, boolean>;
+  policyIds: WeakMap<object, number>;
+  nextPolicyId: number;
+}
+const haskellOriginMemos = new WeakMap<ResolutionContext, HaskellOriginMemo>();
 
 type NamedReExport = Extract<ReExport, { kind: 'named' }>;
 type WildcardReExport = Extract<ReExport, { kind: 'wildcard' }>;
@@ -280,6 +292,7 @@ export function clearImportResolverMemos(context: ResolutionContext): void {
   exportedSymbolMemos.delete(context);
   haskellWildcardTargetMemos.delete(context);
   haskellLocalConflictMemos.delete(context);
+  haskellOriginMemos.delete(context);
   fileExportIndexes.delete(context);
   haskellModuleIndexes.delete(context);
   luaFileBasenameIndexes.delete(context);
@@ -292,16 +305,25 @@ export function resolveImportPath(
   language: Language,
   context: ResolutionContext
 ): string | null {
-  let memo = importPathMemos.get(context);
+  let languages = importPathMemos.get(context);
+  if (!languages) {
+    languages = new Map();
+    importPathMemos.set(context, languages);
+  }
+  let files = languages.get(language);
+  if (!files) {
+    files = new Map();
+    languages.set(language, files);
+  }
+  let memo = files.get(fromFile);
   if (!memo) {
     memo = new Map();
-    importPathMemos.set(context, memo);
+    files.set(fromFile, memo);
   }
-  const key = `${language}\0${fromFile}\0${importPath}`;
-  const hit = memo.get(key);
-  if (hit !== undefined || memo.has(key)) return hit ?? null;
+  const hit = memo.get(importPath);
+  if (hit !== undefined) return hit;
   const resolved = resolveImportPathUncached(importPath, fromFile, language, context);
-  memo.set(key, resolved);
+  memo.set(importPath, resolved);
   return resolved;
 }
 
@@ -3018,11 +3040,18 @@ function resolveHaskellImportedReference(
       const target = findInModuleResult(imp.source, referenceName, imp);
       if (target === HASKELL_EXPORT_AMBIGUOUS) {
         ambiguous = true;
-        continue;
+        break;
       }
       if (!target || seen.has(target.id)) continue;
       seen.add(target.id);
       targetIds.push(target.id);
+      if (targetIds.length > 1) {
+        // Both consumers reject an ambiguous wildcard scope. Later imports
+        // cannot remove either visible target, so their facade walks add no
+        // information. Count distinct entities, not routes to the same one.
+        ambiguous = true;
+        break;
+      }
     }
     const result = { targetIds, ambiguous };
     memo.set(key, result);
@@ -3271,16 +3300,47 @@ export function haskellEffectHeadHasCanonicalOrigin(
   });
 }
 
+interface HaskellCanonicalOriginOptions {
+  canonicalModules: ReadonlySet<string>;
+  canonicalPackages: ReadonlyMap<string, ReadonlySet<string>>;
+  namespace: 'type' | 'value';
+  implicitPrelude: boolean;
+}
+
 export function haskellNameHasCanonicalOrigin(
   filePath: string,
   rawHead: string,
   context: ResolutionContext,
-  options: {
-    canonicalModules: ReadonlySet<string>;
-    canonicalPackages: ReadonlyMap<string, ReadonlySet<string>>;
-    namespace: 'type' | 'value';
-    implicitPrelude: boolean;
-  },
+  options: HaskellCanonicalOriginOptions,
+): boolean {
+  let memo = haskellOriginMemos.get(context);
+  if (!memo) {
+    memo = { results: new LRUCache(HASKELL_ORIGIN_MEMO_LIMIT), policyIds: new WeakMap(), nextPolicyId: 0 };
+    haskellOriginMemos.set(context, memo);
+  }
+  // The callers' allow-lists are immutable for a cache generation, but each
+  // call constructs a fresh options object. Identify BOTH policy collections,
+  // not that wrapper object or only the spelling of the queried member.
+  const policyId = (policy: object): number => {
+    let id = memo.policyIds.get(policy);
+    if (id === undefined) { id = memo.nextPolicyId++; memo.policyIds.set(policy, id); }
+    return id;
+  };
+  const key = `${policyId(options.canonicalModules)}\0${policyId(options.canonicalPackages)}\0${options.namespace}\0${options.implicitPrelude ? 1 : 0}\0${filePath}\0${normalizeHaskellReferenceName(rawHead)}`;
+  const cached = memo.results.get(key);
+  if (cached !== undefined) return cached;
+  // Only a whole proof may be reused. Recursive results depend on ancestry,
+  // depth, and the remaining shared budget, so they are never memoized here.
+  const result = haskellNameHasCanonicalOriginUncached(filePath, rawHead, context, options);
+  memo.results.set(key, result);
+  return result;
+}
+
+function haskellNameHasCanonicalOriginUncached(
+  filePath: string,
+  rawHead: string,
+  context: ResolutionContext,
+  options: HaskellCanonicalOriginOptions,
 ): boolean {
   const parsedHead = parseHaskellReferenceName(rawHead);
   const qualifier = parsedHead.qualifier;
@@ -3288,8 +3348,12 @@ export function haskellNameHasCanonicalOrigin(
   const { canonicalModules, canonicalPackages, namespace } = options;
 
   const mappings = context.getImportMappings(filePath, 'haskell');
+  const mappingIndex = getHaskellImportRouteIndex(mappings);
   type ModuleRoute = Pick<ImportMapping, 'source' | 'packageQualifier'>;
-  const sourceRoutes: ModuleRoute[] = mappings
+  const relevantMappings = qualifier === null
+    ? [...(mappingIndex.explicitByLocalName.get(leaf) ?? []), ...mappingIndex.wildcards]
+    : mappingIndex.namespacesByLocalName.get(qualifier) ?? [];
+  const sourceRoutes: ModuleRoute[] = relevantMappings
     .filter((mapping) => {
       if (namespace === 'value' ? mapping.haskellTypeOnly : mapping.haskellValueOnly) return false;
       if (qualifier !== null) {
@@ -3307,7 +3371,7 @@ export function haskellNameHasCanonicalOrigin(
     }));
   if (options.implicitPrelude && qualifier === null) {
     const source = context.readFile(filePath) ?? '';
-    const explicitPrelude = mappings.some((mapping) => mapping.source === 'Prelude');
+    const explicitPrelude = mappingIndex.bySource.has('Prelude');
     const noImplicitPrelude = /\{\-#\s*LANGUAGE\b[^#]*\bNoImplicitPrelude\b[^#]*#-\}/s.test(source)
       || /^\s*{-#\s*OPTIONS_GHC\b[^#]*-XNoImplicitPrelude\b[^#]*#-}/m.test(source);
     if (!explicitPrelude && !noImplicitPrelude) sourceRoutes.push({ source: 'Prelude' });
@@ -3368,7 +3432,11 @@ export function haskellNameHasCanonicalOrigin(
         : haskellValueNode(node))
     )) return 'noncanonical';
 
-    const routes = (context.getReExports?.(localPath, 'haskell') ?? [])
+    const reExportIndex = getReExportRouteIndex(context.getReExports?.(localPath, 'haskell') ?? []);
+    const routes = [
+      ...(reExportIndex.namedByExportedName.get(leaf) ?? []),
+      ...reExportIndex.wildcards,
+    ]
       .flatMap((reExport): ModuleRoute[] => {
         if (reExport.kind === 'named') {
           if (namespace === 'value' ? reExport.haskellTypeOnly : reExport.haskellValueOnly) return [];
@@ -3395,20 +3463,27 @@ export function haskellNameHasCanonicalOrigin(
       nextRoute,
     ])).values()];
     if (unique.length === 0) return 'absent';
-    const origins = unique.map((nextRoute) => routeOrigin(nextRoute, localPath, nextVisited))
-      .filter((origin) => origin !== 'absent');
-    if (origins.length === 0) return 'absent';
-    return origins.every((origin) => origin === 'canonical')
-      ? 'canonical'
-      : 'noncanonical';
+    let foundCanonical = false;
+    for (const nextRoute of unique) {
+      const origin = routeOrigin(nextRoute, localPath, nextVisited);
+      // A competing origin already disproves the claim; traversing its
+      // siblings cannot restore it, even when they contain canonical names.
+      if (origin === 'noncanonical') return 'noncanonical';
+      if (origin === 'canonical') foundCanonical = true;
+    }
+    return foundCanonical ? 'canonical' : 'absent';
   };
 
   // Multiple imports exposing the same head are safe only when every route
   // reaches the same canonical family. A custom competitor therefore demotes
   // the alias rather than exploiting resolver ordering.
-  const origins = uniqueRoutes.map((route) => routeOrigin(route, filePath, new Set()))
-    .filter((origin) => origin !== 'absent');
-  return !exhausted && origins.length > 0 && origins.every((origin) => origin === 'canonical');
+  let foundCanonical = false;
+  for (const route of uniqueRoutes) {
+    const origin = routeOrigin(route, filePath, new Set());
+    if (origin === 'noncanonical') return false;
+    if (origin === 'canonical') foundCanonical = true;
+  }
+  return !exhausted && foundCanonical;
 }
 
 /**
@@ -4017,6 +4092,8 @@ type ExportedSymbolWant = {
   haskellNamespace?: 'type' | 'value';
   /** Path-local Haskell export-list restrictions accumulated by wildcard re-exports. */
   haskellAllows?: (node: Node) => boolean;
+  /** Pure spelling variants shared by wildcard hops; named renames start fresh. */
+  haskellNameVariants?: string[];
 };
 
 function findExportedSymbol(
@@ -4095,18 +4172,20 @@ function findExportedSymbolWalk(
 
   const exportIndex = getFileExportIndex(filePath, context);
   const exportedNames = language === 'haskell'
-    ? haskellNodeNameVariants(want.exportedName)
+    ? want.haskellNameVariants ?? haskellNodeNameVariants(want.exportedName)
     : [want.exportedName];
   // Haskell can expose the same value name from a local declaration and one
   // or more `module X` re-exports. All authorized candidates participate in
   // the ambiguity check; a direct declaration must not win merely because it
   // is visited first.
-  const haskellCandidates: Node[] = [];
+  let haskellCandidate: Node | undefined;
   let haskellAmbiguous = false;
+  const addHaskellCandidate = (node: Node): void => {
+    if (haskellCandidate && haskellCandidate.id !== node.id) haskellAmbiguous = true;
+    else haskellCandidate = node;
+  };
   const uniqueHaskellCandidate = (): ExportedSymbolWalkResult => {
-    const unique = [...new Map(haskellCandidates.map((node) => [node.id, node])).values()];
-    if (haskellAmbiguous || unique.length > 1) return HASKELL_EXPORT_AMBIGUOUS;
-    return unique.length === 1 ? unique[0] : undefined;
+    return haskellAmbiguous ? HASKELL_EXPORT_AMBIGUOUS : haskellCandidate;
   };
 
   // 1. Direct hit: the symbol is declared in this file.
@@ -4135,7 +4214,8 @@ function findExportedSymbolWalk(
               ? haskellTypeNode(node)
               : true)
           .filter((node) => !want.haskellAllows || want.haskellAllows(node));
-        haskellCandidates.push(...candidates);
+        for (const candidate of candidates) addHaskellCandidate(candidate);
+        if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
       } else {
         const direct = exportIndex.byName.get(name);
         if (direct) return direct;
@@ -4185,9 +4265,12 @@ function findExportedSymbolWalk(
     );
     if (traversal.exhausted) return undefined;
     if (chained === HASKELL_EXPORT_AMBIGUOUS) {
-      haskellAmbiguous = true;
+      return HASKELL_EXPORT_AMBIGUOUS;
     } else if (chained) {
-      if (language === 'haskell') haskellCandidates.push(chained);
+      if (language === 'haskell') {
+        addHaskellCandidate(chained);
+        if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
+      }
       else return chained;
     }
   }
@@ -4205,6 +4288,7 @@ function findExportedSymbolWalk(
     const next = resolveImportPath(rex.source, filePath, language, context);
     if (!next) continue;
     const restrictedParents = language === 'haskell'
+      && ((rex.includedParentExports?.length ?? 0) > 0 || (rex.includedParentChildren?.length ?? 0) > 0)
       ? [...new Set([
           ...(rex.includedParentExports ?? []),
           ...(rex.includedParentChildren ?? [])
@@ -4224,23 +4308,34 @@ function findExportedSymbolWalk(
       : restrictedParents.length > 0
         ? restrictedParents.filter((parent) => !want.haskellParent || parent === want.haskellParent)
         : [want.haskellParent];
-    const haskellAllows = language === 'haskell'
+    const restrictsHaskellNode = language === 'haskell' && (
+      rex.includedNames !== undefined
+      || rex.includedParentExports !== undefined
+      || rex.includedParentChildren !== undefined
+      || (rex.excludedNames?.length ?? 0) > 0
+      || (rex.excludedParentExports?.length ?? 0) > 0
+      || (rex.excludedParentChildren?.length ?? 0) > 0
+    );
+    // An unrestricted wildcard is the identity predicate. Retain the inherited
+    // restrictions without growing a closure chain at every facade hop.
+    const haskellAllows = restrictsHaskellNode
       ? (node: Node): boolean => (
           (!want.haskellAllows || want.haskellAllows(node))
           && haskellReExportAllows(rex, want.exportedName, node)
         )
       : want.haskellAllows;
-    const candidates = parentVariants.flatMap((parent) => {
+    for (const parent of parentVariants) {
       const chained = findExportedSymbolWalk(
         next,
         {
-          ...want,
-          ...(parent
-            ? { haskellParent: parent }
-            : clearsParent || rex.haskellCollapsedParents
-              ? { haskellParent: undefined }
-              : {}),
-          ...(haskellAllows ? { haskellAllows } : {}),
+          isDefault: want.isDefault,
+          isNamespace: want.isNamespace,
+          exportedName: want.exportedName,
+          memberName: want.memberName,
+          haskellParent: parent || (clearsParent || rex.haskellCollapsedParents ? undefined : want.haskellParent),
+          haskellNamespace: want.haskellNamespace,
+          haskellAllows,
+          haskellNameVariants: exportedNames,
         },
         language,
         context,
@@ -4248,22 +4343,18 @@ function findExportedSymbolWalk(
         depth + 1,
         traversal,
       );
+      if (traversal.exhausted) return undefined;
       if (chained === HASKELL_EXPORT_AMBIGUOUS) {
-        haskellAmbiguous = true;
-        return [];
+        return HASKELL_EXPORT_AMBIGUOUS;
       }
-      return chained ? [chained] : [];
-    });
-    if (traversal.exhausted) return undefined;
-    const unique = [...new Map(candidates.map((node) => [node.id, node])).values()];
-    if (language === 'haskell' && unique.length > 1) haskellAmbiguous = true;
-    const chained = unique.length === 1 ? unique[0] : undefined;
-    if (chained && (
-      language !== 'haskell'
-      || haskellReExportAllows(rex, want.exportedName, chained)
-    )) {
-      if (language === 'haskell') haskellCandidates.push(chained);
-      else return chained;
+      if (chained && (!restrictsHaskellNode || haskellReExportAllows(rex, want.exportedName, chained))) {
+        if (language === 'haskell') {
+          addHaskellCandidate(chained);
+          // Every candidate has passed the complete path predicate and parent
+          // namespace checks; later routes cannot make two targets unique.
+          if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
+        } else return chained;
+      }
     }
   }
 

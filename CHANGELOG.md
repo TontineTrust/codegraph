@@ -265,6 +265,8 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 #### Haskell indexing
 
+- Large Haskell projects index and refresh exported definitions faster while preserving import visibility and ambiguity checks. (#1337)
+
 - Haskell local functions keep their callers when they shadow a parameter with the same name. (#1337)
 
 - Custom Haskell functions named like standard combinators no longer create calls to arguments they do not execute. (#1337)
