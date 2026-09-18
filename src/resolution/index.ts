@@ -32,6 +32,7 @@ import { loadGoModule, type GoModule } from './go-module';
 import { loadWorkspacePackages, type WorkspacePackages } from './workspace-packages';
 import { logDebug } from '../errors';
 import { lexicalPathWithinRoot } from '../utils';
+import { MAX_FILE_SIZE, readSourceSync } from '../source-reader';
 import type { ReExport } from './types';
 import { LRUCache } from './lru-cache';
 import { JS_BUILT_INS } from './js-builtins';
@@ -437,9 +438,13 @@ export class ReferenceResolver {
     if (this.fileCache.has(filePath)) {
       return this.fileCache.get(filePath)!;
     }
-    const fullPath = path.join(this.projectRoot, filePath);
+    // Resolution shares indexing's deliberate support for in-root symlinks
+    // to external source trees, but module strings must not escape lexically.
+    const fullPath = lexicalPathWithinRoot(this.projectRoot, filePath);
+    if (!fullPath) return null;
     try {
-      const content = fs.readFileSync(fullPath, 'utf-8');
+      const source = readSourceSync(fullPath);
+      const content = source.stats.size > MAX_FILE_SIZE ? null : source.content;
       this.fileCache.set(filePath, content);
       return content;
     } catch (error) {
@@ -1288,10 +1293,17 @@ export class ReferenceResolver {
     };
     const withinLexicalRange = (node: Node): boolean => {
       const range = lexicalRange(node);
-      return range === null || (
-        (ref.line > range[0] || (ref.line === range[0] && ref.column >= range[1]))
-        && (ref.line < range[2] || (ref.line === range[2] && ref.column < range[3]))
+      const exclusion = lexicalExclusion(node);
+      const inRange = (span: [number, number, number, number]): boolean => (
+        (ref.line > span[0] || (ref.line === span[0] && ref.column >= span[1]))
+        && (ref.line < span[2] || (ref.line === span[2] && ref.column < span[3]))
       );
+      return (range === null || inRange(range)) && !(exclusion && inRange(exclusion));
+    };
+    const lexicalExclusion = (node: Node): [number, number, number, number] | null => {
+      const decorator = node.decorators?.find((value) => value.startsWith('haskell-lexical-exclusion:'));
+      const match = decorator?.match(/^haskell-lexical-exclusion:(\d+):(\d+):(\d+):(\d+)$/);
+      return match ? [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4])] : null;
     };
 
     const ranked = candidates.flatMap((node): Array<{ node: Node; rank: number }> => {
@@ -1380,7 +1392,20 @@ export class ReferenceResolver {
             if (!inner) return false;
             const start = inner[0] - outer[0] || inner[1] - outer[1];
             const end = inner[2] - outer[2] || inner[3] - outer[3];
-            return start >= 0 && end <= 0 && (start > 0 || end < 0);
+            if (start >= 0 && end <= 0 && (start > 0 || end < 0)) return true;
+            if (start !== 0 || end !== 0) return false;
+            // Sequential comprehension lets share the whole comprehension
+            // envelope, but the later binding excludes more of its qualifiers.
+            // That smaller effective scope also wins in the leading output.
+            const innerExclusion = lexicalExclusion(other);
+            if (!innerExclusion) return false;
+            const outerExclusion = lexicalExclusion(node);
+            if (!outerExclusion) return true;
+            const excludedStart = innerExclusion[0] - outerExclusion[0]
+              || innerExclusion[1] - outerExclusion[1];
+            const excludedEnd = innerExclusion[2] - outerExclusion[2]
+              || innerExclusion[3] - outerExclusion[3];
+            return excludedStart <= 0 && excludedEnd >= 0 && (excludedStart < 0 || excludedEnd > 0);
           });
         });
 

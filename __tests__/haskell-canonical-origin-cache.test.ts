@@ -138,6 +138,18 @@ describe('Haskell canonical origin proof cache', () => {
     expect(canonical.origin()).toBe(true);
   });
 
+  it('separates canonical parent policies when proving class-child visibility', () => {
+    const graph = fixture({
+      'Consumer.hs': 'module Consumer where\nimport Prelude (Functor(..))',
+    });
+    const canonicalParents = new Map([['Prelude', 'Functor']]);
+    const unrelatedParents = new Map([['Prelude', 'Maybe']]);
+    expect(graph.origin('Consumer.hs', 'fmap', { ...policy, canonicalParents })).toBe(true);
+    expect(graph.origin('Consumer.hs', 'fmap', { ...policy, canonicalParents: unrelatedParents })).toBe(false);
+    expect(graph.origin('Consumer.hs', 'fmap', policy)).toBe(false);
+    expect(graph.origin('Consumer.hs', 'fmap', { ...policy, canonicalParents })).toBe(true);
+  });
+
   it('invalidates true and false proofs when a facade or local module changes', () => {
     const graph = fixture({
       'Consumer.hs': 'module Consumer where\nimport Facade (map)',

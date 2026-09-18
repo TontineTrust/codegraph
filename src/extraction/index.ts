@@ -5,7 +5,6 @@
  */
 
 import * as fs from 'fs';
-import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
@@ -25,6 +24,7 @@ import { extractFromSource } from './tree-sitter';
 import { ParseWorkerPool, resolveParsePoolSize, resolveParseTimeoutMs } from './parse-pool';
 import { StoreWriter, StoreBundle, finalizeStoreBundle } from './store-writer';
 import { materializeKernelResult } from './kernel';
+import { MAX_FILE_SIZE, readSource, readSourceSync } from '../source-reader';
 import { detectGeneratedFile } from './generated-detection';
 import { detectLanguage, isSourceFile, isLanguageSupported, isFileLevelOnlyLanguage, initGrammars, loadGrammarsForLanguages, readGrammarWasmBytes } from './grammars';
 import { loadExtensionOverrides, loadIncludeIgnoredPatterns, loadExcludePatterns, loadIncludePatterns, PROJECT_CONFIG_FILENAME } from '../project-config';
@@ -196,12 +196,12 @@ export function computeHaskellTopologyHash(
   return hashContent(serialized);
 }
 
-/**
- * Skip files larger than this (bytes). Generated bundles, minified JS, and
- * vendored blobs blow the WASM heap and the worker-recycle budget for no useful
- * symbols. 1 MB covers essentially all hand-written source.
- */
-const MAX_FILE_SIZE = 1024 * 1024;
+/** Oversized sources have no content snapshot: retain a stable stat marker instead. */
+function sourceContentHash(content: string, stats: fs.Stats): string {
+  return stats.size > MAX_FILE_SIZE
+    ? `oversized:${stats.size}:${stats.mtimeMs}`
+    : hashContent(content);
+}
 
 /**
  * Directory names that are dependency, build, cache, or tooling output across the
@@ -1893,7 +1893,8 @@ export class ExtractionOrchestrator {
         const full = validatePathWithinRoot(rootDir, relativePath);
         if (!full) return null;
         try {
-          return fs.readFileSync(full, 'utf-8');
+          const source = readSourceSync(full);
+          return source.stats.size > MAX_FILE_SIZE ? null : source.content;
         } catch {
           return null;
         }
@@ -2331,8 +2332,7 @@ export class ExtractionOrchestrator {
               logWarn('Path traversal blocked in batch reader', { filePath: fp });
               return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: new Error('Path traversal blocked') };
             }
-            const content = await fsp.readFile(fullPath, 'utf-8');
-            const stats = await fsp.stat(fullPath);
+            const { content, stats } = await readSource(fullPath);
             return { filePath: fp, content, stats, error: null as Error | null };
           } catch (err) {
             return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: err as Error };
@@ -2467,10 +2467,12 @@ export class ExtractionOrchestrator {
         if (signal?.aborted) break;
 
         let content: string;
+        let stats: fs.Stats;
         try {
           const fullPath = validatePathWithinRoot(this.rootDir, filePath);
           if (!fullPath) continue;
-          content = await fsp.readFile(fullPath, 'utf-8');
+          ({ content, stats } = await readSource(fullPath));
+          if (stats.size > MAX_FILE_SIZE) continue;
         } catch {
           continue;
         }
@@ -2493,7 +2495,6 @@ export class ExtractionOrchestrator {
         result = materializeKernelResult(result, filePath, language);
 
         if (result.nodes.length > 0 || result.errors.length === 0) {
-          const stats = await fsp.stat(path.join(this.rootDir, filePath));
           await this.storeExtractionResult(filePath, content, language, stats, result, commitYield);
 
           const idx = errors.indexOf(errEntry);
@@ -2519,10 +2520,12 @@ export class ExtractionOrchestrator {
           if (signal?.aborted) break;
 
           let fullContent: string;
+          let stats: fs.Stats;
           try {
             const fullPath = validatePathWithinRoot(this.rootDir, filePath);
             if (!fullPath) continue;
-            fullContent = await fsp.readFile(fullPath, 'utf-8');
+            ({ content: fullContent, stats } = await readSource(fullPath));
+            if (stats.size > MAX_FILE_SIZE) continue;
           } catch {
             continue;
           }
@@ -2546,7 +2549,6 @@ export class ExtractionOrchestrator {
           result = materializeKernelResult(result, filePath, language);
 
           if (result.nodes.length > 0 || result.errors.length === 0) {
-            const stats = await fsp.stat(path.join(this.rootDir, filePath));
             await this.storeExtractionResult(filePath, fullContent, language, stats, result, commitYield);
 
             // Salvaged from comment-stripped source: keep a visible trace in
@@ -2744,8 +2746,7 @@ export class ExtractionOrchestrator {
     let content: string;
     let stats: fs.Stats;
     try {
-      stats = await fsp.stat(fullPath);
-      content = await fsp.readFile(fullPath, 'utf-8');
+      ({ content, stats } = await readSource(fullPath));
     } catch (error) {
       return {
         nodes: [],
@@ -2881,11 +2882,11 @@ export class ExtractionOrchestrator {
     // Bulk inserts run in bounded sub-transactions with a yield between, so a
     // giant generated file (tens of thousands of symbols) can't block the
     // event loop — and the #850 watchdog heartbeat — for the whole store.
-    // The file was NEVER one atomic transaction (each insert call has its
-    // own), and the files-table record still lands last, so crash recovery
-    // is unchanged: a partially-stored file has no record and re-indexes.
+    // The file spans several transactions. A durable incomplete file record
+    // below forces recovery, including when the source disappears before the
+    // next sync; the normal file record replaces it only after all chunks land.
     const STORE_CHUNK = 2000;
-    const contentHash = hashContent(content);
+    const contentHash = sourceContentHash(content, stats);
 
     // Check if file already exists and hasn't changed. A skip/failure MARKER
     // row (zero nodes + recorded errors, #1557) never blocks a store carrying
@@ -2961,7 +2962,9 @@ export class ExtractionOrchestrator {
       // Snapshot/re-resolution of cross-file incoming edges (below) still runs
       // for the sync path; on a fresh bulk index crossFileIncomingEdges is [].
       this.queries.transaction(() => {
-        if (existingFile) this.queries.deleteFile(filePath);
+        // An interrupted chunked store has nodes but no final file record.
+        // Delete those too: the source may have changed before recovery.
+        this.queries.deleteFile(filePath);
         this.queries.storeFileBundle({
           nodes: validNodes,
           edges: validEdges,
@@ -2991,7 +2994,35 @@ export class ExtractionOrchestrator {
       return;
     }
 
-    if (existingFile) this.queries.deleteFile(filePath);
+    // The chunked path deliberately yields between commits. Persist incoming
+    // references in the SAME transaction as deletion, so interruption cannot
+    // lose unchanged callers after their target's nodes cascade away.
+    const recoverableIncoming = crossFileIncomingEdges
+      .map((edge) => resurrectRefFromDroppedEdge(edge))
+      .filter((ref): ref is UnresolvedReference => ref !== null);
+    const previousIndexState = this.queries.getMetadata('index_state');
+    this.queries.transaction(() => {
+      this.queries.deleteFile(filePath);
+      if (recoverableIncoming.length > 0) {
+        this.queries.insertUnresolvedRefsBatch(recoverableIncoming);
+      }
+      this.queries.upsertFile({
+        path: filePath,
+        contentHash: 'incomplete',
+        language,
+        size: -1, // cannot match the stat pre-filter, even for unchanged bytes
+        modifiedAt: stats.mtimeMs,
+        indexedAt: Date.now(),
+        nodeCount: 0,
+        errors: [{
+          message: 'File storage is incomplete; sync will retry or remove it.',
+          filePath,
+          severity: 'error',
+          code: 'store_incomplete',
+        }],
+      });
+      this.queries.setMetadata('index_state', 'indexing');
+    });
 
     // Insert nodes (chunked — see STORE_CHUNK above)
     for (let i = 0; i < validNodes.length; i += STORE_CHUNK) {
@@ -3025,9 +3056,12 @@ export class ExtractionOrchestrator {
     // the stamp existed, or synthesized) still drop silently: reconstructing
     // a ref from the target's plain name would strip receiver/qualifier
     // context and risk a rebind a full re-index would never make.
-    if (crossFileIncomingEdges.length > 0) {
+    // Stamped resolution edges are already durable pending refs. Only legacy
+    // or synthesized edges without reconstructible refs need the old remap.
+    const incomingToRemap = crossFileIncomingEdges.filter((edge) => !resurrectRefFromDroppedEdge(edge));
+    if (incomingToRemap.length > 0) {
       this.reattachCrossFileEdges(
-        crossFileIncomingEdges,
+        incomingToRemap,
         validNodes,
         language,
         haskellTopologyChanged,
@@ -3053,7 +3087,10 @@ export class ExtractionOrchestrator {
       errors: result.errors.length > 0 ? result.errors : undefined,
       generated,
     };
-    this.queries.upsertFile(fileRecord);
+    this.queries.transaction(() => {
+      this.queries.upsertFile(fileRecord);
+      this.queries.setMetadata('index_state', previousIndexState ?? '');
+    });
   }
 
   /**
@@ -3072,7 +3109,7 @@ export class ExtractionOrchestrator {
   ): FileRecord {
     return {
       path: filePath,
-      contentHash: hashContent(content),
+      contentHash: sourceContentHash(content, stats),
       language,
       size: stats.size,
       modifiedAt: stats.mtimeMs,
@@ -3509,14 +3546,15 @@ export class ExtractionOrchestrator {
 
       // New, or size/mtime changed — read + hash to confirm a real content change.
       let content: string;
+      let sourceStats: fs.Stats;
       try {
-        content = fs.readFileSync(fullPath, 'utf-8');
+        ({ content, stats: sourceStats } = readSourceSync(fullPath));
       } catch (error) {
         logDebug('Skipping unreadable file during sync', { filePath, error: String(error) });
         failedFilePaths.push(filePath);
         continue;
       }
-      const contentHash = hashContent(content);
+      const contentHash = sourceContentHash(content, sourceStats);
 
       if (!tracked) {
         filesToIndex.push(filePath);
@@ -3729,13 +3767,14 @@ export class ExtractionOrchestrator {
           continue;
         }
         let content: string;
-        try { content = fs.readFileSync(fullPath, 'utf-8'); }
+        let sourceStats: fs.Stats;
+        try { ({ content, stats: sourceStats } = readSourceSync(fullPath)); }
         catch (error) {
           logDebug('Skipping unreadable file while detecting changes', { filePath, error: String(error) });
           continue;
         }
         if (!tracked) added.push(filePath);
-        else if (tracked.contentHash !== hashContent(content)) modified.push(filePath);
+        else if (tracked.contentHash !== sourceContentHash(content, sourceStats)) modified.push(filePath);
       }
 
       return { added, modified, removed };
@@ -3766,14 +3805,15 @@ export class ExtractionOrchestrator {
     for (const filePath of currentFiles) {
       const fullPath = path.join(this.rootDir, filePath);
       let content: string;
+      let sourceStats: fs.Stats;
       try {
-        content = fs.readFileSync(fullPath, 'utf-8');
+        ({ content, stats: sourceStats } = readSourceSync(fullPath));
       } catch (error) {
         logDebug('Skipping unreadable file while detecting changes', { filePath, error: String(error) });
         continue;
       }
 
-      const contentHash = hashContent(content);
+      const contentHash = sourceContentHash(content, sourceStats);
       const tracked = trackedMap.get(filePath);
 
       if (!tracked) {

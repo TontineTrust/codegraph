@@ -1524,8 +1524,8 @@ describe('Haskell resolution round 2', () => {
         '(<+>) left _ = left',
       ].join('\n'),
       'Facade.hs': [
-        '{-# LANGUAGE TypeOperators #-}',
-        'module Facade (O.foo, O.T, (O.<+>)) where',
+        '{-# LANGUAGE TypeOperators, PatternSynonyms #-}',
+        'module Facade (O.foo, O.T, pattern O.T, (O.<+>)) where',
         'import qualified Origin as O',
       ].join('\n'),
       'GroupedFacade.hs': [
@@ -1555,8 +1555,8 @@ describe('Haskell resolution round 2', () => {
       expect(outgoingTargets(graph, 'runOperator', 'Consumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: originOperator.id }) }));
       expect(constructor).toBeDefined();
-      // A bare uppercase facade item (`O.T`) re-exports BOTH namespaces
-      // (Haskell2010 §5.3), so the value-position `T` is the constructor.
+      // Type and constructor are distinct exports. `pattern O.T` adds the
+      // constructor explicitly; the bare `O.T` exports only the type.
       expect(outgoingTargets(graph, 'notAConstructor', 'Consumer.hs'))
         .toContainEqual(expect.objectContaining({
           edge: expect.objectContaining({ kind: 'references' }),
@@ -1566,15 +1566,15 @@ describe('Haskell resolution round 2', () => {
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: constructor!.id }) }));
 
     const routes = extractReExports([
-      '{-# LANGUAGE TypeOperators #-}',
-      'module Facade (O.foo, O.T, (O.<+>)) where',
+      '{-# LANGUAGE TypeOperators, PatternSynonyms #-}',
+      'module Facade (O.foo, O.T, pattern O.T, (O.<+>)) where',
       'import qualified Origin as O',
     ].join('\n'), 'haskell');
     expect(routes).toContainEqual(expect.objectContaining({
       kind: 'wildcard',
       source: 'Origin',
       includedNames: ['foo', 'T', '<+>'],
-      // `O.T` is dual-namespace, so it appears in neither Only list.
+      // Separate type and pattern exports union both namespaces for T.
       haskellValueOnlyNames: ['foo', '<+>'],
       haskellClearParent: true,
     }));
@@ -2681,7 +2681,7 @@ describe('Haskell resolution round 2', () => {
       expect(edges.map((edge) => edge.target)).toEqual([jsTarget.id]);
   });
 
-  it('resolves dual-namespace bare uppercase import items in value and type positions', async () => {
+  it('resolves explicit constructor imports alongside bare class imports', async () => {
     const graph = await createGraph({
       'Origin.hs': [
         'module Origin (Maybe(..), C) where',
@@ -2690,8 +2690,9 @@ describe('Haskell resolution round 2', () => {
         '  method :: a -> a',
       ].join('\n'),
       'ValueConsumer.hs': [
+        '{-# LANGUAGE PatternSynonyms #-}',
         'module ValueConsumer where',
-        'import Origin (Just)',
+        'import Origin (pattern Just)',
         'make x = Just x',
       ].join('\n'),
       'TypeConsumer.hs': [
@@ -2720,17 +2721,16 @@ describe('Haskell resolution round 2', () => {
         target: clazz.id,
       }));
 
-      // Haskell2010 §5.3: a bare uppercase item occupies both namespaces, a
-      // bare operator item is a value, and only an explicit `type` qualifier
-      // makes an item type-only.
+      // A constructor imported without its parent needs `pattern`; bare
+      // uppercase imports select only the type/class namespace.
       const dualMappings = extractImportMappings('C.hs', [
         'module C where',
-        'import Origin (Just)',
+        'import Origin (pattern Just)',
         'import Origin (type Maybe)',
       ].join('\n'), 'haskell');
       const just = dualMappings.find((m) => m.localName === 'Just' && !m.isNamespace)!;
       expect(just.haskellTypeOnly).toBeUndefined();
-      expect(just.haskellValueOnly).toBeUndefined();
+      expect(just.haskellValueOnly).toBe(true);
       const maybeType = dualMappings.find((m) => m.localName === 'Maybe' && !m.isNamespace)!;
       expect(maybeType.haskellTypeOnly).toBe(true);
       expect(maybeType.haskellValueOnly).toBeUndefined();

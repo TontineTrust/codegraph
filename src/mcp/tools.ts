@@ -36,10 +36,10 @@ import { groupDefinitions, lastQualifierPart, matchesSymbol } from '../graph/sym
 import { extractQueryPaths, queryMightContainPaths } from '../search/query-paths';
 import {
   existsSync,
-  readFileSync,
   statSync,
 } from 'fs';
 import { createHash } from 'crypto';
+import { MAX_FILE_SIZE, readSourceTextSync } from '../source-reader';
 import { clamp, validatePathWithinRoot, validateProjectPath, isConfigLeafNode, CONFIG_LEAF_LANGUAGES } from '../utils';
 import { guardLabel, guardsForFileSync, siteKey, supportsBranchGuards, warmBranchGuardGrammars } from '../graph/branch-guards';
 import { findDynamicBoundaries, type BoundarySite } from '../graph/dynamic-boundary-report';
@@ -1986,12 +1986,12 @@ export class ToolHandler {
         // Same freshness test as the sync fast path (extraction/index.ts):
         // equal size + equal floored mtime ⇒ unchanged, no read needed.
         if (st.size !== rec.size || Math.floor(st.mtimeMs) !== Math.floor(rec.modifiedAt)) {
-          const data = content ?? readFileSync(absPath, 'utf-8');
+          const data = content ?? (st.size > MAX_FILE_SIZE ? null : readSourceTextSync(absPath));
           // Must stay byte-identical to extraction's `hashContent` (sha256 over
           // the utf-8 string) — the identical-rewrite test in
           // mcp-stale-slice.test.ts pins the parity. Inlined (not imported)
           // to keep the extraction module off the MCP startup path.
-          stale = createHash('sha256').update(data).digest('hex') !== rec.contentHash;
+          stale = data === null || createHash('sha256').update(data).digest('hex') !== rec.contentHash;
         }
       }
     } catch {
@@ -4611,7 +4611,7 @@ export class ToolHandler {
 
       let fileContent: string;
       try {
-        fileContent = readFileSync(absPath, 'utf-8');
+        fileContent = readSourceTextSync(absPath);
       } catch {
         diag?.recordSkip(filePath, 'unreadable');
         continue;
@@ -6337,7 +6337,7 @@ export class ToolHandler {
     const abs = validatePathWithinRoot(cg.getProjectRoot(), filePath);
     let content: string | null = null;
     if (abs) {
-      try { content = readFileSync(abs, 'utf-8'); } catch { content = null; }
+      try { content = readSourceTextSync(abs); } catch { content = null; }
     }
     if (content === null) {
       const out = [`**${filePath}** — could not read from disk (it may have moved since indexing). ${depSummary}`, ''];
@@ -6449,7 +6449,7 @@ export class ToolHandler {
       try {
         const absPath = validatePathWithinRoot(cg.getProjectRoot(), node.filePath);
         if (absPath && existsSync(absPath) && !isConfigLeafNode(node)) {
-          const content = readFileSync(absPath, 'utf-8');
+          const content = readSourceTextSync(absPath);
           const body = content.replace(/\n+$/, '');
           if (
             body.length <= ToolHandler.STALE_WHOLE_FILE_MAX_CHARS &&

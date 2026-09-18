@@ -734,6 +734,12 @@ export class CodeGraph {
         } catch { /* metadata is advisory — never fail an index over it */ }
 
         return result;
+      } catch (error) {
+        // A re-index may have committed files before failing, including the
+        // Haskell invalidation replay. Recovery can have no filesystem delta,
+        // so it must not reuse caches from before those committed writes.
+        this.resolver.clearCaches();
+        throw error;
       } finally {
         // Restore the auto-checkpoint interval AFTER the fold-up above so the
         // next ordinary write doesn't inherit a giant inline checkpoint. On
@@ -1086,6 +1092,13 @@ export class CodeGraph {
         this.orchestrator.finishGitIndexState(gitState, fullReconcile, result.failedFilePaths);
 
         return result;
+      } catch (error) {
+        // Extraction can commit before a later callback/checkpoint fails. Its
+        // Haskell invalidation marker may already be cleared, and the next
+        // sync may have no filesystem delta. Its orphan sweep must not reuse
+        // the pre-write known-name/import/canonical-origin caches.
+        this.resolver.clearCaches();
+        throw error;
       } finally {
         // Mirror indexAll's teardown: stop the valve, then restore the
         // auto-checkpoint interval (runMaintenance above already folded the
