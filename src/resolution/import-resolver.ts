@@ -105,6 +105,7 @@ interface HaskellOriginMemo {
 const haskellOriginMemos = new WeakMap<ResolutionContext, HaskellOriginMemo>();
 
 type NamedReExport = Extract<ReExport, { kind: 'named' }>;
+type HaskellNamedRoute = { route: NamedReExport; parents?: readonly string[] };
 type WildcardReExport = Extract<ReExport, { kind: 'wildcard' }>;
 type HaskellVisibilityRoute = ImportMapping | WildcardReExport;
 interface HaskellChildParentIndex {
@@ -250,11 +251,13 @@ function getHaskellImportRouteIndex(imports: ImportMapping[]): {
  */
 const reExportRouteIndexes = new WeakMap<ReExport[], {
   namedByExportedName: Map<string, NamedReExport[]>;
+  haskellNamedByExportedName?: Map<string, HaskellNamedRoute[]>;
   wildcards: WildcardReExport[];
 }>();
 
 function getReExportRouteIndex(reExports: ReExport[]): {
   namedByExportedName: Map<string, NamedReExport[]>;
+  haskellNamedByExportedName?: Map<string, HaskellNamedRoute[]>;
   wildcards: WildcardReExport[];
 } {
   const cached = reExportRouteIndexes.get(reExports);
@@ -275,6 +278,47 @@ function getReExportRouteIndex(reExports: ReExport[]): {
   }
   reExportRouteIndexes.set(reExports, index);
   return index;
+}
+
+/**
+ * Parent-qualified named routes for one imported child differ only in which
+ * owner is accepted at the next hop. Share that walk using an OR of owners;
+ * leave the original routes intact for canonical-origin proofs. This stores
+ * route metadata only, never a recursive answer or traversal budget.
+ */
+function getHaskellNamedRoutes(
+  index: ReturnType<typeof getReExportRouteIndex>,
+  name: string,
+): readonly HaskellNamedRoute[] {
+  const named = index.namedByExportedName.get(name);
+  if (!named?.length) return [];
+  let byName = index.haskellNamedByExportedName;
+  if (!byName) index.haskellNamedByExportedName = byName = new Map();
+  const cached = byName.get(name);
+  if (cached) return cached;
+  const routes: HaskellNamedRoute[] = [];
+  const groups = new Map<string, { item: { route: NamedReExport; parents: string[] }; seen: Set<string> }>();
+  for (const route of named) {
+    if (!route.parentExport) {
+      routes.push({ route });
+      continue;
+    }
+    const key = JSON.stringify([
+      route.source, route.packageQualifier, route.exportedName, route.originalName,
+      route.haskellTypeOnly === true, route.haskellValueOnly === true,
+    ]);
+    let group = groups.get(key);
+    if (!group) {
+      group = { item: { route, parents: [route.parentExport] }, seen: new Set([route.parentExport]) };
+      groups.set(key, group);
+      routes.push(group.item);
+    } else if (!group.seen.has(route.parentExport)) {
+      group.seen.add(route.parentExport);
+      group.item.parents.push(route.parentExport);
+    }
+  }
+  byName.set(name, routes);
+  return routes;
 }
 
 /**
@@ -4344,6 +4388,8 @@ type ExportedSymbolWant = {
   exportedName: string;
   memberName: string | null;
   haskellParent?: string;
+  /** OR of equivalent named-route owners; a later named hop replaces it. */
+  haskellParentAlternatives?: readonly string[];
   /** Haskell names inhabit disjoint type and value namespaces. */
   haskellNamespace?: 'type' | 'value';
   /** Path-local Haskell export-list restrictions accumulated by wildcard re-exports. */
@@ -4384,7 +4430,7 @@ function findExportedSymbolResult(
   // Every ref to the same imported symbol repeats this exact walk, so the
   // top-level memo removes the re-export chase + per-file linear scans from
   // all but the first occurrence.
-  if (depth === 0 && visited.size === 0 && !want.haskellAllows) {
+  if (depth === 0 && visited.size === 0 && !want.haskellAllows && !want.haskellParentAlternatives) {
     let memo = exportedSymbolMemos.get(context);
     if (!memo) {
       memo = new Map();
@@ -4463,7 +4509,9 @@ function findExportedSymbolWalk(
     for (const name of exportedNames) {
       if (language === 'haskell') {
         const candidates = (exportedNodesByName(exportIndex, filePath, context).get(name) ?? [])
-          .filter((node) => !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
+          .filter((node) => want.haskellParentAlternatives
+            ? want.haskellParentAlternatives.some((parent) => haskellNodeOwnedBy(node, parent))
+            : !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
           .filter((node) => want.haskellNamespace === 'value'
             ? haskellValueNode(node)
             : want.haskellNamespace === 'type'
@@ -4488,7 +4536,12 @@ function findExportedSymbolWalk(
 
   // Look for explicit `export { want } from './other'` (with optional rename).
   const targetName = want.isDefault ? 'default' : want.exportedName;
-  for (const rex of reExportIndex.namedByExportedName.get(targetName) ?? []) {
+  const namedRoutes = language === 'haskell'
+    ? getHaskellNamedRoutes(reExportIndex, targetName)
+    : reExportIndex.namedByExportedName.get(targetName) ?? [];
+  for (const entry of namedRoutes) {
+    const rex = 'route' in entry ? entry.route : entry;
+    const parentAlternatives = 'route' in entry ? entry.parents : undefined;
     // Haskell PackageImports cannot forward into a same-named home module.
     // External package contents are not indexed, so fail closed here.
     if (language === 'haskell' && rex.packageQualifier !== undefined) continue;
@@ -4509,7 +4562,9 @@ function findExportedSymbolWalk(
         isNamespace: false,
         exportedName: rex.originalName,
         memberName: null,
-        ...(rex.parentExport ? { haskellParent: rex.parentExport } : {}),
+        ...(parentAlternatives && parentAlternatives.length > 1
+          ? { haskellParentAlternatives: parentAlternatives }
+          : rex.parentExport ? { haskellParent: rex.parentExport } : {}),
         ...(want.haskellNamespace ? { haskellNamespace: want.haskellNamespace } : {}),
         ...(want.haskellAllows ? { haskellAllows: want.haskellAllows } : {}),
       },
@@ -4552,13 +4607,30 @@ function findExportedSymbolWalk(
       && (visibility
         ? visibility.includedNames?.has(want.exportedName) === true
         : rex.includedNames?.includes(want.exportedName) === true);
-    const parentVariants = clearsParent
+    const parentAlternativeSet = want.haskellParentAlternatives && restrictedParents.length > 0
+      ? new Set(want.haskellParentAlternatives)
+      : undefined;
+    let parentVariants = clearsParent
       ? [undefined, ...restrictedParents]
       : rex.haskellCollapsedParents
         ? [want.haskellParent]
       : restrictedParents.length > 0
-        ? restrictedParents.filter((parent) => !want.haskellParent || parent === want.haskellParent)
+        ? restrictedParents.filter((parent) => parentAlternativeSet
+          ? parentAlternativeSet.has(parent)
+          : !want.haskellParent || parent === want.haskellParent)
         : [want.haskellParent];
+    // Unrestricted and collapsed wildcards retain the same owner OR. Explicit
+    // selections intersect it above; a compact named route clears it exactly
+    // as an ordinary named hop does. Scalar-only paths keep their old behavior.
+    let inheritedParentAlternatives = !clearsParent
+      && (rex.haskellCollapsedParents || restrictedParents.length === 0)
+      ? want.haskellParentAlternatives
+      : undefined;
+    if (want.haskellParentAlternatives && !clearsParent && !rex.haskellCollapsedParents
+      && restrictedParents.length > 0 && parentVariants.length > 1) {
+      inheritedParentAlternatives = parentVariants as string[];
+      parentVariants = [undefined];
+    }
     const restrictsHaskellNode = visibility?.restrictsNode === true;
     // An unrestricted wildcard is the identity predicate. Retain the inherited
     // restrictions without growing a closure chain at every facade hop.
@@ -4577,6 +4649,7 @@ function findExportedSymbolWalk(
           exportedName: want.exportedName,
           memberName: want.memberName,
           haskellParent: parent || (clearsParent || rex.haskellCollapsedParents ? undefined : want.haskellParent),
+          ...(inheritedParentAlternatives ? { haskellParentAlternatives: inheritedParentAlternatives } : {}),
           haskellNamespace: want.haskellNamespace,
           haskellAllows,
           haskellNameVariants: exportedNames,
