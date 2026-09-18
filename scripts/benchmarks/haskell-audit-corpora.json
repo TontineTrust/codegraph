@@ -109,7 +109,8 @@
         "hscSimplify hscSimplify' core2core"
       ],
       "editFile": "compiler/GHC/Cmm/InitFini.hs",
-      "explicitExports": true
+      "explicitExports": true,
+      "skipSyncEdits": true
     }
   }
 ]

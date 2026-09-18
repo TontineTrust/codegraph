@@ -106,6 +106,90 @@ const haskellOriginMemos = new WeakMap<ResolutionContext, HaskellOriginMemo>();
 
 type NamedReExport = Extract<ReExport, { kind: 'named' }>;
 type WildcardReExport = Extract<ReExport, { kind: 'wildcard' }>;
+type HaskellVisibilityRoute = ImportMapping | WildcardReExport;
+interface HaskellChildParentIndex {
+  any: readonly string[];
+  type: readonly string[];
+  value: readonly string[];
+}
+interface HaskellVisibilityIndex {
+  includedNames?: ReadonlySet<string>;
+  excludedNames?: ReadonlySet<string>;
+  typeOnlyNames?: ReadonlySet<string>;
+  valueOnlyNames?: ReadonlySet<string>;
+  hasAllowList: boolean;
+  restrictsNode: boolean;
+  includedParents: readonly string[];
+  childParents: ReadonlyMap<string, HaskellChildParentIndex>;
+}
+
+/**
+ * Compile immutable route metadata, never a recursive walk's answer. Weak
+ * ownership follows the bounded import/re-export LRUs: replacement routes
+ * after cache invalidation receive a fresh index. Parent lists retain their
+ * original order, with wide parents stored once rather than copied per child.
+ */
+const haskellVisibilityIndexes = new WeakMap<HaskellVisibilityRoute, HaskellVisibilityIndex>();
+
+function getHaskellVisibilityIndex(route: HaskellVisibilityRoute): HaskellVisibilityIndex {
+  const cached = haskellVisibilityIndexes.get(route);
+  if (cached) return cached;
+
+  const includedParents = new Set(route.includedParentExports);
+  const childParentSets = new Map<string, {
+    any: Set<string>; type: Set<string>; value: Set<string>;
+  }>();
+  for (const child of route.includedParentChildren ?? []) {
+    // The wide-parent prefix already admits this parent in every namespace.
+    if (includedParents.has(child.parent)) continue;
+    let parents = childParentSets.get(child.child);
+    if (!parents) {
+      parents = { any: new Set(), type: new Set(), value: new Set() };
+      childParentSets.set(child.child, parents);
+    }
+    parents.any.add(child.parent);
+    if (haskellChildAllowsNamespace(child, 'type')) parents.type.add(child.parent);
+    if (haskellChildAllowsNamespace(child, 'value')) parents.value.add(child.parent);
+  }
+  const childParents = new Map<string, HaskellChildParentIndex>();
+  for (const [child, parents] of childParentSets) {
+    childParents.set(child, {
+      any: [...parents.any], type: [...parents.type], value: [...parents.value],
+    });
+  }
+  const nameSet = (names: string[] | undefined): ReadonlySet<string> | undefined =>
+    names?.length ? new Set(names) : undefined;
+  // An explicitly empty allow-list rejects every name; an absent one does not.
+  const hasAllowList = route.includedNames !== undefined
+    || route.includedParentExports !== undefined
+    || route.includedParentChildren !== undefined;
+  const index: HaskellVisibilityIndex = {
+    includedNames: nameSet(route.includedNames),
+    excludedNames: nameSet(route.excludedNames),
+    typeOnlyNames: nameSet(route.haskellTypeOnlyNames),
+    valueOnlyNames: nameSet(route.haskellValueOnlyNames),
+    hasAllowList,
+    restrictsNode: hasAllowList
+      || (route.excludedNames?.length ?? 0) > 0
+      || (route.excludedParentExports?.length ?? 0) > 0
+      || (route.excludedParentChildren?.length ?? 0) > 0,
+    includedParents: [...includedParents],
+    childParents,
+  };
+  haskellVisibilityIndexes.set(route, index);
+  return index;
+}
+
+function haskellRestrictedParents(
+  index: HaskellVisibilityIndex,
+  name: string,
+  namespace: 'type' | 'value' | undefined,
+): readonly string[] {
+  const children = index.childParents.get(name)?.[namespace ?? 'any'];
+  if (!children?.length) return index.includedParents;
+  if (index.includedParents.length === 0) return children;
+  return [...index.includedParents, ...children];
+}
 
 /**
  * Haskell explicit import lists can contain thousands of per-name mappings.
@@ -4451,28 +4535,23 @@ function findExportedSymbolWalk(
   //    forwarding source. This is the barrel-of-barrels case.
   for (const rex of reExportIndex.wildcards) {
     if (language === 'haskell' && rex.packageQualifier !== undefined) continue;
+    const visibility = language === 'haskell' ? getHaskellVisibilityIndex(rex) : undefined;
     if (language === 'haskell'
       && !haskellReExportCouldExposeName(
         rex,
         want.exportedName,
         want.haskellNamespace,
+        visibility,
       )) continue;
     const next = resolveImportPath(rex.source, filePath, language, context);
     if (!next) continue;
-    const restrictedParents = language === 'haskell'
-      && ((rex.includedParentExports?.length ?? 0) > 0 || (rex.includedParentChildren?.length ?? 0) > 0)
-      ? [...new Set([
-          ...(rex.includedParentExports ?? []),
-          ...(rex.includedParentChildren ?? [])
-            .filter((item) =>
-              item.child === want.exportedName
-              && haskellChildAllowsNamespace(item, want.haskellNamespace)
-            )
-            .map((item) => item.parent),
-        ])]
+    const restrictedParents = visibility
+      ? haskellRestrictedParents(visibility, want.exportedName, want.haskellNamespace)
       : [];
     const clearsParent = rex.haskellClearParent === true
-      && rex.includedNames?.includes(want.exportedName) === true;
+      && (visibility
+        ? visibility.includedNames?.has(want.exportedName) === true
+        : rex.includedNames?.includes(want.exportedName) === true);
     const parentVariants = clearsParent
       ? [undefined, ...restrictedParents]
       : rex.haskellCollapsedParents
@@ -4480,14 +4559,7 @@ function findExportedSymbolWalk(
       : restrictedParents.length > 0
         ? restrictedParents.filter((parent) => !want.haskellParent || parent === want.haskellParent)
         : [want.haskellParent];
-    const restrictsHaskellNode = language === 'haskell' && (
-      rex.includedNames !== undefined
-      || rex.includedParentExports !== undefined
-      || rex.includedParentChildren !== undefined
-      || (rex.excludedNames?.length ?? 0) > 0
-      || (rex.excludedParentExports?.length ?? 0) > 0
-      || (rex.excludedParentChildren?.length ?? 0) > 0
-    );
+    const restrictsHaskellNode = visibility?.restrictsNode === true;
     // An unrestricted wildcard is the identity predicate. Retain the inherited
     // restrictions without growing a closure chain at every facade hop.
     const haskellAllows = restrictsHaskellNode
@@ -4535,26 +4607,22 @@ function findExportedSymbolWalk(
 
 /** Cheap name-only rejection before a recursive Haskell wildcard walk. */
 function haskellReExportCouldExposeName(
-  reExport: ImportMapping | WildcardReExport,
+  reExport: HaskellVisibilityRoute,
   name: string,
   namespace: 'type' | 'value' | undefined,
+  visibility = getHaskellVisibilityIndex(reExport),
 ): boolean {
   const namespaceMismatch = namespace === 'value'
-    ? reExport.haskellTypeOnlyNames?.includes(name) === true
+    ? visibility.typeOnlyNames?.has(name) === true
     : namespace === 'type'
-      ? reExport.haskellValueOnlyNames?.includes(name) === true
+      ? visibility.valueOnlyNames?.has(name) === true
       : false;
-  if (reExport.excludedNames?.includes(name) && !namespaceMismatch) return false;
-  const hasAllowList = reExport.includedNames !== undefined
-    || reExport.includedParentExports !== undefined
-    || reExport.includedParentChildren !== undefined;
-  if (!hasAllowList) return true;
-  return (reExport.includedNames?.includes(name) === true && !namespaceMismatch)
+  if (visibility.excludedNames?.has(name) && !namespaceMismatch) return false;
+  if (!visibility.hasAllowList) return true;
+  return (visibility.includedNames?.has(name) === true && !namespaceMismatch)
     // Parent-wide entries need the upstream node before they can be rejected.
-    || (reExport.includedParentExports?.length ?? 0) > 0
-    || reExport.includedParentChildren?.some((item) =>
-      item.child === name && haskellChildAllowsNamespace(item, namespace)
-    ) === true;
+    || visibility.includedParents.length > 0
+    || (visibility.childParents.get(name)?.[namespace ?? 'any'].length ?? 0) > 0;
 }
 
 function haskellReExportAllows(
