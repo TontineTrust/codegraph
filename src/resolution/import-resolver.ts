@@ -1621,22 +1621,20 @@ function stripHaskellComments(content: string): string {
       } else {
         out += ch;
       }
-    } else if (
-      ch === '-'
-      && next === '-'
-      // A comment may start with any run of at least two dashes. Its
-      // disambiguating character is the one *after the complete run*, not
-      // necessarily the third character (`--- Haddock` is still a comment).
-      // Conversely `-->` and `---+` are symbolic operators and must survive.
-      && (() => {
-        let afterDashes = i + 2;
-        while (content[afterDashes] === '-') afterDashes++;
-        return !isHaskellSymbolChar(content[afterDashes] ?? '');
-      })()
-    ) {
-      lineComment = true;
-      out += '  ';
-      i++;
+    } else if (ch === '-' && next === '-') {
+      // Inspect and consume the complete run once. Leaving an operator's
+      // dashes to later iterations rescans every suffix and makes a legal
+      // long `-----+` token quadratic before the bounded parser runs.
+      let afterDashes = i + 2;
+      while (content[afterDashes] === '-') afterDashes++;
+      if (isHaskellSymbolChar(content[afterDashes] ?? '')) {
+        out += content.slice(i, afterDashes);
+      } else {
+        // `--- Haddock` is a comment, whereas `-->` and `---+` are operators.
+        lineComment = true;
+        out += ' '.repeat(afterDashes - i);
+      }
+      i = afterDashes - 1;
     } else if (ch === '{' && next === '-') {
       depth = 1;
       out += '  ';
@@ -1661,9 +1659,49 @@ function hasWholeOuterParens(candidate: string): boolean {
 }
 
 function unwrapWholeParens(value: string): string {
-  let unwrapped = value.trim();
-  while (hasWholeOuterParens(unwrapped)) unwrapped = unwrapped.slice(1, -1).trim();
-  return unwrapped;
+  const trimmed = value.trim();
+  // Validate once. Removing balanced outer pairs cannot repair malformed
+  // parentheses, so preserve the original trimmed spelling in that case.
+  if (!hasWholeOuterParens(trimmed)) return trimmed;
+
+  let contentStart = 0;
+  let leadingDepth = 0;
+  while (contentStart < trimmed.length) {
+    const char = trimmed[contentStart]!;
+    if (char === '(') leadingDepth++;
+    else if (char.trim() !== '') break;
+    contentStart++;
+  }
+  let contentEnd = trimmed.length;
+  let trailingDepth = 0;
+  while (contentEnd > contentStart) {
+    const char = trimmed[contentEnd - 1]!;
+    if (char === ')') trailingDepth++;
+    else if (char.trim() !== '') break;
+    contentEnd--;
+  }
+
+  // The shallowest point between the leading opens and trailing closes is
+  // the number of wrappers common to the whole expression. For example,
+  // ((foo)(bar)) has two leading opens but only one enclosing pair. This
+  // scan avoids rechecking the entire remaining string for every wrapper.
+  let layers = Math.min(leadingDepth, trailingDepth);
+  let depth = leadingDepth;
+  for (let i = contentStart; i < contentEnd; i++) {
+    if (trimmed[i] === '(') depth++;
+    else if (trimmed[i] === ')') depth--;
+    layers = Math.min(layers, depth);
+  }
+
+  let start = 0;
+  let end = trimmed.length;
+  for (let layer = 0; layer < layers; layer++) {
+    while (trimmed[start] !== '(') start++;
+    while (trimmed[end - 1] !== ')') end--;
+    start++;
+    end--;
+  }
+  return trimmed.slice(start, end).trim();
 }
 
 function canonicalHaskellQualifiedMember(member: string): string {
@@ -1856,13 +1894,12 @@ function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
     const close = cleaned.lastIndexOf(')');
     if (open >= 0 && close > open) childList = cleaned.slice(open + 1, close).trim();
   }
-  // Haskell2010 §5.3: a bare uppercase item imports BOTH the type and its
-  // data constructors (dual namespace) — neither flag, matching the
-  // conservative child semantics of parseHaskellImportChild. Lowercase
-  // identifiers are necessarily values, and a bare operator item — including
-  // any `:`-headed constructor operator — can only denote a value;
-  // type-level operators require an explicit `type` qualifier.
-  const typeOnly = explicitType;
+  // Haskell2010 §5.3: a bare uppercase item names only the type/class.
+  // Constructors need a parent selection or an explicit `pattern` item.
+  // Hiding lists deliberately discard this type-only flag below: hiding (T)
+  // excludes both the type and a same-spelled constructor. Bare operators
+  // inhabit the value namespace unless prefixed with `type`.
+  const typeOnly = explicitType || (!explicitPattern && HASKELL_CONID_START_RE.test(name));
   const valueOnly = explicitPattern || (!explicitType && !HASKELL_CONID_START_RE.test(name));
   return {
     name,
@@ -2337,13 +2374,30 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
     qualifier?: string,
   ): ImportMapping[] => {
     const seen = new Set<string>();
-    return imports.filter((imp) => {
-      if (!mappingExposes(imp, name, parent, namespace, qualifier)) return false;
-      const key = `${imp.source}\0${imp.packageQualifier ?? ''}\0${imp.parentExport ?? ''}\0${imp.localName}\0${imp.haskellTypeOnly ? 1 : 0}\0${imp.haskellValueOnly ? 1 : 0}`;
-      if (seen.has(key)) return false;
+    const exposed: ImportMapping[] = [];
+    for (const imp of imports) {
+      if (!mappingExposes(imp, name, parent, namespace, qualifier)) continue;
+      // Namespace routes carry per-name restrictions, while named re-exports
+      // carry scalar flags. Preserve that intersection when forwarding O.T;
+      // otherwise `import qualified Origin as O (type T)` also exports T's
+      // same-spelled constructor. Separate selections of one alias still union.
+      const typeOnly = !mappingExposes(imp, name, parent, 'value', qualifier);
+      const valueOnly = !mappingExposes(imp, name, parent, 'type', qualifier);
+      const key = `${imp.source}\0${imp.packageQualifier ?? ''}\0${imp.parentExport ?? ''}\0${imp.localName}\0${typeOnly ? 1 : 0}\0${valueOnly ? 1 : 0}`;
+      if (seen.has(key)) continue;
       seen.add(key);
-      return true;
-    });
+      // Most routes already carry the right scalar flags. Preserve their
+      // immutable mapping instead of allocating one copy per exported name.
+      exposed.push(typeOnly === (imp.haskellTypeOnly === true)
+        && valueOnly === (imp.haskellValueOnly === true)
+        ? imp
+        : {
+            ...imp,
+            ...(typeOnly ? { haskellTypeOnly: true } : {}),
+            ...(valueOnly ? { haskellValueOnly: true } : {}),
+          });
+    }
+    return exposed;
   };
 
   for (const rawItem of items) {
@@ -2409,12 +2463,39 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
         if (qualifier !== undefined) {
           if (!imp.isNamespace || imp.localName !== qualifier) continue;
         } else if (imp.isNamespace) continue;
-        if (imp.parentExport === item.name && imp.localName !== '*') {
+        // A qualified import stores selections on its namespace route. T(..)
+        // also exports children imported individually (`pattern A`, a method,
+        // or an associated type), whose ownership is checked by the walker.
+        if (qualifier !== undefined) {
+          const selected = [
+            ...(imp.includedParentChildren ?? []).filter((child) => child.parent === item.name),
+            ...(imp.includedNames ?? []).map((child) => ({
+              child,
+              haskellTypeOnly: imp.haskellTypeOnlyNames?.includes(child),
+              haskellValueOnly: imp.haskellValueOnlyNames?.includes(child),
+            })),
+          ];
+          for (const child of selected) {
+            pushUnique({
+              kind: 'named',
+              exportedName: child.child,
+              originalName: child.child,
+              source: imp.source,
+              ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
+              parentExport: item.name,
+              ...(child.haskellTypeOnly ? { haskellTypeOnly: true } : {}),
+              ...(child.haskellValueOnly ? { haskellValueOnly: true } : {}),
+            });
+          }
+        }
+        if (!imp.isNamespace && imp.localName !== '*'
+          && (!imp.parentExport || imp.parentExport === item.name)) {
           pushUnique({
             kind: 'named',
             exportedName: imp.localName,
             originalName: imp.exportedName,
             source: imp.source,
+            parentExport: item.name,
             ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
             ...(imp.haskellTypeOnly ? { haskellTypeOnly: true } : {}),
             ...(imp.haskellValueOnly ? { haskellValueOnly: true } : {}),
@@ -3355,6 +3436,8 @@ interface HaskellCanonicalOriginOptions {
   canonicalPackages: ReadonlyMap<string, ReadonlySet<string>>;
   namespace: 'type' | 'value';
   implicitPrelude: boolean;
+  /** Class owning this member in each canonical module; absent for free values/types. */
+  canonicalParents?: ReadonlyMap<string, string>;
 }
 
 export function haskellNameHasCanonicalOrigin(
@@ -3369,14 +3452,14 @@ export function haskellNameHasCanonicalOrigin(
     haskellOriginMemos.set(context, memo);
   }
   // The callers' allow-lists are immutable for a cache generation, but each
-  // call constructs a fresh options object. Identify BOTH policy collections,
+  // call constructs a fresh options object. Identify every policy collection,
   // not that wrapper object or only the spelling of the queried member.
   const policyId = (policy: object): number => {
     let id = memo.policyIds.get(policy);
     if (id === undefined) { id = memo.nextPolicyId++; memo.policyIds.set(policy, id); }
     return id;
   };
-  const key = `${policyId(options.canonicalModules)}\0${policyId(options.canonicalPackages)}\0${options.namespace}\0${options.implicitPrelude ? 1 : 0}\0${filePath}\0${normalizeHaskellReferenceName(rawHead)}`;
+  const key = `${policyId(options.canonicalModules)}\0${policyId(options.canonicalPackages)}\0${options.canonicalParents ? policyId(options.canonicalParents) : ''}\0${options.namespace}\0${options.implicitPrelude ? 1 : 0}\0${filePath}\0${normalizeHaskellReferenceName(rawHead)}`;
   const cached = memo.results.get(key);
   if (cached !== undefined) return cached;
   // Only a whole proof may be reused. Recursive results depend on ancestry,
@@ -3399,7 +3482,22 @@ function haskellNameHasCanonicalOriginUncached(
 
   const mappings = context.getImportMappings(filePath, 'haskell');
   const mappingIndex = getHaskellImportRouteIndex(mappings);
-  type ModuleRoute = Pick<ImportMapping, 'source' | 'packageQualifier'>;
+  type OriginRestriction = ImportMapping | ReExport;
+  type ModuleRoute = Pick<ImportMapping, 'source' | 'packageQualifier'> & {
+    /** Alternative import/export selections leading to the same module. */
+    restrictions: OriginRestriction[];
+  };
+  const mergeRoutes = (routes: ModuleRoute[]): ModuleRoute[] => {
+    const bySource = new Map<string, ModuleRoute>();
+    for (const route of routes) {
+      const key = `${route.source}\0${route.packageQualifier ?? ''}`;
+      const existing = bySource.get(key);
+      if (!existing) bySource.set(key, route);
+      else if (route.restrictions.length === 0) existing.restrictions = [];
+      else if (existing.restrictions.length > 0) existing.restrictions.push(...route.restrictions);
+    }
+    return [...bySource.values()];
+  };
   const relevantMappings = qualifier === null
     ? [...(mappingIndex.explicitByLocalName.get(leaf) ?? []), ...mappingIndex.wildcards]
     : mappingIndex.namespacesByLocalName.get(qualifier) ?? [];
@@ -3417,6 +3515,7 @@ function haskellNameHasCanonicalOriginUncached(
     })
     .map((mapping) => ({
       source: mapping.source,
+      restrictions: [mapping],
       ...(mapping.packageQualifier ? { packageQualifier: mapping.packageQualifier } : {}),
     }));
   if (options.implicitPrelude && qualifier === null) {
@@ -3424,12 +3523,11 @@ function haskellNameHasCanonicalOriginUncached(
     const explicitPrelude = mappingIndex.bySource.has('Prelude');
     const noImplicitPrelude = /\{\-#\s*LANGUAGE\b[^#]*\bNoImplicitPrelude\b[^#]*#-\}/s.test(source)
       || /^\s*{-#\s*OPTIONS_GHC\b[^#]*-XNoImplicitPrelude\b[^#]*#-}/m.test(source);
-    if (!explicitPrelude && !noImplicitPrelude) sourceRoutes.push({ source: 'Prelude' });
+    if (!explicitPrelude && !noImplicitPrelude) sourceRoutes.push({ source: 'Prelude', restrictions: [] });
   }
-  const uniqueRoutes = [...new Map(sourceRoutes.map((route) => [
-    `${route.source}\0${route.packageQualifier ?? ''}`,
-    route,
-  ])).values()];
+  // Two imports of one module can expose disjoint parent/namespace selections.
+  // Merge their union without dropping restrictions or repeating the walk.
+  const uniqueRoutes = mergeRoutes(sourceRoutes);
   if (uniqueRoutes.length === 0) return false;
 
   // Share one budget across the entire proof, not one budget per branch.
@@ -3441,16 +3539,40 @@ function haskellNameHasCanonicalOriginUncached(
     route: ModuleRoute,
     fromFile: string,
     visited: ReadonlySet<string>,
+    inheritedRestrictions: OriginRestriction[][] = [],
   ): Origin => {
     if (--remainingRoutes < 0 || visited.size >= 64) {
       exhausted = true;
       return 'noncanonical';
     }
     const { source: moduleName, packageQualifier } = route;
+    const restrictions = route.restrictions.length === 0
+      ? inheritedRestrictions
+      : [...inheritedRestrictions, route.restrictions];
+    const allows = (node: Node): boolean => restrictions.every((alternatives) =>
+      alternatives.some((restriction) => {
+        if ('kind' in restriction && restriction.kind === 'named') {
+          return !restriction.parentExport || haskellNodeOwnedBy(node, restriction.parentExport);
+        }
+        return haskellReExportAllows(restriction, leaf, node);
+      })
+    );
+    const canonicalVisible = (): boolean => {
+      const parent = options.canonicalParents?.get(moduleName);
+      // The policy's member/owner pair is the evidence needed to evaluate
+      // parent-scoped lists even when the canonical package is not indexed.
+      const canonicalNode: Node = {
+        id: '', name: leaf, qualifiedName: `${moduleName}::${parent ? `${parent}::` : ''}${leaf}`,
+        kind: namespace === 'type' ? 'type_alias' : parent ? 'method' : 'function',
+        language: 'haskell', filePath: '', isExported: true,
+        startLine: 0, endLine: 0, startColumn: 0, endColumn: 0, updatedAt: 0,
+      };
+      return allows(canonicalNode);
+    };
     if (packageQualifier) {
       if (!canonicalModules.has(moduleName)) return 'noncanonical';
       return canonicalPackages.get(moduleName)?.has(packageQualifier) === true
-        ? 'canonical'
+        ? canonicalVisible() ? 'canonical' : 'absent'
         : 'noncanonical';
     }
     const localPath = resolveImportPath(moduleName, fromFile, 'haskell', context);
@@ -3462,7 +3584,7 @@ function haskellNameHasCanonicalOriginUncached(
       );
       return localPath === null
         && localModules.length === 0
-        ? 'canonical'
+        ? canonicalVisible() ? 'canonical' : 'absent'
         : 'noncanonical';
     }
     // An unindexed custom/external module might export the same name. Without
@@ -3477,6 +3599,7 @@ function haskellNameHasCanonicalOriginUncached(
       node.language === 'haskell'
       && parseHaskellReferenceName(node.name).member === leaf
       && node.isExported === true
+      && allows(node)
       && (namespace === 'type'
         ? HASKELL_TYPE_DECLARATION_KINDS.has(node.kind)
         : haskellValueNode(node))
@@ -3493,6 +3616,7 @@ function haskellNameHasCanonicalOriginUncached(
           return reExport.exportedName === leaf && reExport.originalName === leaf
             ? [{
                 source: reExport.source,
+                restrictions: [reExport],
                 ...(reExport.packageQualifier
                   ? { packageQualifier: reExport.packageQualifier }
                   : {}),
@@ -3502,20 +3626,18 @@ function haskellNameHasCanonicalOriginUncached(
         return haskellReExportCouldExposeName(reExport, leaf, namespace)
           ? [{
               source: reExport.source,
+              restrictions: [reExport],
               ...(reExport.packageQualifier
                 ? { packageQualifier: reExport.packageQualifier }
                 : {}),
             }]
           : [];
       });
-    const unique = [...new Map(routes.map((nextRoute) => [
-      `${nextRoute.source}\0${nextRoute.packageQualifier ?? ''}`,
-      nextRoute,
-    ])).values()];
+    const unique = mergeRoutes(routes);
     if (unique.length === 0) return 'absent';
     let foundCanonical = false;
     for (const nextRoute of unique) {
-      const origin = routeOrigin(nextRoute, localPath, nextVisited);
+      const origin = routeOrigin(nextRoute, localPath, nextVisited, restrictions);
       // A competing origin already disproves the claim; traversing its
       // siblings cannot restore it, even when they contain canonical names.
       if (origin === 'noncanonical') return 'noncanonical';

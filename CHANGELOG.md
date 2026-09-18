@@ -147,9 +147,17 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- Oversized or nonregular source files are rejected before unbounded reads during indexing and MCP retrieval.
+- Haskell operators containing long runs of dashes and deeply parenthesized names no longer stall import analysis.
+
 - Indexing now bounds re-export searches so deeply interconnected modules cannot cause exponential work and block the process. (#1337)
 
 ### Fixes
+
+- Haskell local helpers respect guards, comprehensions, view patterns, and alternative-specific `where` scopes.
+- Haskell imports and re-exports preserve constructor visibility and distinguish type names from value names.
+- Haskell callback flows require the combinator to remain visible through class-scoped imports and exports.
+- Interrupted indexing and synchronization recover current references and remove partial symbols when source files change.
 
 - Rust calls on `self` now stay with the enclosing type instead of linking to an unrelated type’s same-named method. Thanks @L4XB. (#1861)
 

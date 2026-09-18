@@ -38,17 +38,38 @@ for (const [moduleName, names] of MODULE_COMBINATORS) {
   }
 }
 const PACKAGES = new Map(MODULE_COMBINATORS.map(([moduleName]) => [moduleName, new Set(['base'])]));
+// Parent-scoped import/export lists require the defining class, not just the
+// module spelling. Data.List's folds are list functions, whereas the same
+// names from Prelude/Data.Foldable are Foldable methods.
+const CLASS_METHODS: ReadonlyArray<readonly [string, readonly string[], readonly string[]]> = [
+  ['Functor', ['fmap', '<$'], ['Prelude', 'Data.Functor', 'Control.Applicative', 'Control.Monad']],
+  ['Applicative', ['<*>', '*>', '<*'], ['Prelude', 'Control.Applicative', 'Control.Monad']],
+  ['Monad', ['>>', '>>='], ['Prelude', 'Control.Monad']],
+  ['Alternative', ['<|>'], ['Control.Applicative']],
+  ['Foldable', ['foldr', 'foldl', "foldl'", 'foldr1', 'foldl1'], ['Prelude', 'Data.Foldable']],
+  ['Traversable', ['mapM', 'traverse'], ['Prelude', 'Data.Traversable', 'Control.Monad']],
+];
+const PARENTS_BY_NAME = new Map<string, Map<string, string>>();
+for (const [parent, names, modules] of CLASS_METHODS) {
+  for (const name of names) {
+    const parents = PARENTS_BY_NAME.get(name) ?? new Map<string, string>();
+    for (const moduleName of modules) parents.set(moduleName, parent);
+    PARENTS_BY_NAME.set(name, parents);
+  }
+}
 
 export function haskellCombinatorHasCanonicalOrigin(
   filePath: string,
   name: string,
   context: ResolutionContext,
 ): boolean {
-  const modules = MODULES_BY_NAME.get(parseHaskellReferenceName(name).member);
+  const member = parseHaskellReferenceName(name).member;
+  const modules = MODULES_BY_NAME.get(member);
   return modules !== undefined && haskellNameHasCanonicalOrigin(filePath, name, context, {
     canonicalModules: modules,
     canonicalPackages: PACKAGES,
     namespace: 'value',
     implicitPrelude: modules.has('Prelude'),
+    canonicalParents: PARENTS_BY_NAME.get(member),
   });
 }
