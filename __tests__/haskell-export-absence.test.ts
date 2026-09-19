@@ -178,37 +178,34 @@ describe('Haskell export absence proofs', () => {
     expect(graph.reads()).toBeLessThan(2_000);
   });
 
-  it('falls back after more than 8192 auxiliary route checks without hiding a late target', () => {
-    const target = declaration('Origin');
+  it.each([
+    { repetitions: 8_193, exactVisits: 8_197, resolves: true },
+    { repetitions: 9_988, exactVisits: 9_992, resolves: true },
+    { repetitions: 9_998, exactVisits: 10_002, resolves: false },
+  ])('keeps the exact $exactVisits-visit result after a converging proof exhausts 8192 auxiliary checks', ({ repetitions, exactVisits, resolves }) => {
+    const target = declaration('Origin', 'wanted', 'B', 'field');
     const graph = fixture({
-      Facade: [...Array.from({ length: 8_193 }, () => wildcard('Empty')), wildcard('Origin')],
+      Facade: [wildcard('Shared', { includedParentExports: ['A'] }), wildcard('Shared', { includedParentExports: ['B'] })],
+      Shared: [
+        ...Array.from({ length: repetitions }, () => wildcard('Empty', { includedParentExports: ['B'] })),
+        wildcard('Origin', { includedParentExports: ['B'] }),
+      ],
       Empty: [], Origin: [],
     }, [target]);
-    // There are only three distinct modules, but every route costs proof
-    // work, including duplicates. The root proof is incomplete before it
-    // reaches Origin; the exact walk still fits in its independent budget.
-    expect(graph.resolve()).toBe(target.id);
-    expect(graph.reads()).toBeGreaterThan(8_192);
-    expect(graph.reads()).toBeLessThanOrEqual(18_192);
-  });
-
-  it.each([
-    { repetitions: 3_848, exactVisits: 9_992, resolves: true },
-    { repetitions: 3_858, exactVisits: 10_002, resolves: false },
-  ])('keeps the exact $exactVisits-visit result independent of auxiliary proof work', ({ repetitions, exactVisits, resolves }) => {
-    const target = declaration('Origin');
-    const graph = fixture({
-      Facade: [wildcard('A0'), ...Array.from({ length: repetitions }, () => wildcard('Origin'))],
-      ...diamond(12, 'Origin'),
-    }, [target]);
-    // The twelve-level diamond costs 4095 internal + 2048 terminal visits.
-    // Every path has the same possible target, so negative pruning cannot
-    // shrink this exact walk:
-    // 1 facade + 6143 diamond visits + the repeated direct-origin routes.
-    // The root oracle additionally examines many routes before seeing its
-    // positive witness; charging those to the exact budget loses the first
-    // valid result. The second case must still exhaust the unchanged cap.
+    // Shared's first path requires A: every B-only route has an empty parent
+    // intersection, so that path neither recurses nor finds a witness. The
+    // second path requires B and must trigger a genuine converging proof.
+    // Every duplicate Empty route costs auxiliary work; the proof exhausts
+    // 8192 checks before reaching Origin and cannot cache a partial absence.
+    // The exact walk independently costs 1 facade + 2 Shared + repetitions
+    // Empty + 1 Origin. The 9992-visit case must retain the old valid result;
+    // the 10002-visit case must still fail closed at the unchanged exact cap.
     expect(graph.resolve()).toBe(resolves ? target.id : undefined);
+    // Two path-local walks plus the converging proof read Shared. Afterwards
+    // the exhausted auxiliary budget cannot prune the repeated Empty visits.
+    expect(graph.visits('Shared')).toBe(3);
+    expect(graph.visits('Empty')).toBeGreaterThanOrEqual(Math.min(repetitions, 9_997));
+    expect(graph.visits('Origin')).toBe(resolves ? 1 : 0);
     expect(graph.reads()).toBeGreaterThanOrEqual(Math.min(exactVisits, 10_000));
     expect(graph.reads()).toBeLessThanOrEqual(18_192);
   });

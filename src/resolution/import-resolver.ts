@@ -4421,7 +4421,8 @@ function haskellAbsenceKey(filePath: string, name: string, namespace: ExportedSy
  * namespace checks. Only a completely drained worklist proves absence. In
  * particular, seeing a cycle is not itself a negative result for that state.
  *
- * Run at the root or a converging state, where negative walks are expensive.
+ * Run at a converging state, where repeated negative walks are expensive.
+ * A completed cached absence can also skip the first visit to a root.
  * Completed negatives live in a bounded context cache. Worklists and proof
  * work have one auxiliary budget for the whole lookup (not one per hop). Never cache
  * a candidate or partial proof; an unsuccessful proof leaves the exact
@@ -4446,7 +4447,7 @@ function proveHaskellExportAbsent(
   if (absent.get(key)) return true;
   if (!state.seen.has(key)) {
     state.seen.add(key);
-    if (depth !== 0) return false;
+    return false;
   }
   if (state.remaining <= 0 || state.attempted.has(key)) return false;
   state.attempted.add(key);
