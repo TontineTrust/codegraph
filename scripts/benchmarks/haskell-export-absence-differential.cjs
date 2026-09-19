@@ -228,11 +228,13 @@ function makeContext(input) {
     return result;
   };
   const byFile = index('filePath'), byName = index('name'), byQualified = index('qualifiedName'), byKind = index('kind');
+  const byId = new Map(nodes.map(node => [node.id, node]));
   const known = new Set(files);
   const imports = graph.queries.map(query => [{ localName: query.name, exportedName: query.name,
     source: query.root, isDefault: false, isNamespace: false }]);
   let routeReads = 0;
   const context = {
+    getNodeById: id => byId.get(id) || null,
     getNodesInFile: file => byFile.get(file) || [], getNodesByName: name => byName.get(name) || [],
     getNodesByQualifiedName: name => byQualified.get(name) || [], getNodesByKind: kind => byKind.get(kind) || [],
     getNodesByLowerName: name => nodes.filter(node => node.name.toLowerCase() === name),

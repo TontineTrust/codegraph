@@ -4393,6 +4393,9 @@ interface ReExportTraversal {
    * hashed by the runtime; repeatedly concatenating long paths dominates
    * cached-negative hits. Bounded by this lookup's exact/auxiliary budgets. */
   haskellKeys?: (Map<string, Map<string, string>> | undefined)[];
+  /** Optional NodeId reads for path-local singleton rejection. Never retain
+   * nodes globally or repeat a SQL lookup on each converging path. */
+  haskellBoundNodes?: Map<string, Node | null>;
   haskellAbsence?: {
     seen: Set<string>;
     attempted: Set<string>;
@@ -4660,6 +4663,16 @@ function findExportedSymbolWalk(
     ? haskellAbsenceKey(filePath, want.exportedName, want.haskellNamespace, traversal) : undefined;
   const bound = haskellKey === undefined ? undefined : traversal.haskellAbsence?.nonempty.get(haskellKey);
   const haskellSingleton = typeof bound === 'string' ? bound : undefined;
+  if (haskellSingleton !== undefined && want.haskellAllows && context.getNodeById) {
+    const nodes = traversal.haskellBoundNodes ??= new Map();
+    if (!nodes.has(haskellSingleton)) nodes.set(haskellSingleton, context.getNodeById(haskellSingleton));
+    const candidate = nodes.get(haskellSingleton);
+    // Every named hop retains this predicate and wildcards only strengthen it.
+    // If it rejects the sole possible ID, this path is empty. Owner constraints
+    // do NOT have this property (named hops can reset them). Never publish this
+    // path-specific rejection as a global ABSENT proof or return a cached node.
+    if (candidate?.id === haskellSingleton && !want.haskellAllows(candidate)) return undefined;
+  }
   visited.add(filePath);
   try {
     // Haskell uses this set as a synchronous recursion stack; finally restores
