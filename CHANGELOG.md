@@ -159,6 +159,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Haskell callback flows require the combinator to remain visible through class-scoped imports and exports.
 - Interrupted indexing and synchronization recover current references and remove partial symbols when source files change.
 - Haskell re-export searches reuse compiled visibility constraints and combine equivalent parent alternatives while preserving namespace, ambiguity, and work-limit checks.
+- Haskell call paths can cross large networks of re-exports by skipping branches proven to contain no matching definition, while ambiguous or incomplete searches remain unresolved.
 
 - Rust calls on `self` now stay with the enclosing type instead of linking to an unrelated type’s same-named method. Thanks @L4XB. (#1861)
 

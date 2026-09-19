@@ -37,7 +37,7 @@ function fixture(routes: Record<string, ReExport[]>, values: Node[], sources: Re
     getImportMappings: file => imports.get(file) ?? [],
     getReExports: file => {
       visits.set(file, (visits.get(file) ?? 0) + 1);
-      if ([...visits.values()].reduce((a, b) => a + b, 0) > 10_000) throw new Error('Traversal budget exceeded');
+      if ([...visits.values()].reduce((a, b) => a + b, 0) > 18_192) throw new Error('Traversal plus auxiliary proof budgets exceeded');
       return exports.get(file) ?? [];
     },
   };
@@ -128,7 +128,7 @@ describe('Haskell unions of parent-qualified named routes', () => {
     for (let level = 0; level < 20; level++) {
       for (const side of ['A', 'B']) {
         const name = `${side}${level}`;
-        sources[`${name}.hs`] = level === 19 ? `module ${name} where`
+        sources[`${name}.hs`] = level === 19 ? `module ${name} (module Origin) where\nimport Origin`
           : `module ${name} (module A${level + 1}, module B${level + 1}) where\nimport A${level + 1}\nimport B${level + 1}`;
       }
     }

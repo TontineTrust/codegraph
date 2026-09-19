@@ -117,7 +117,7 @@ describe('bounded re-export traversal', () => {
     expect(graph.visits()).toBeLessThan(100);
   });
 
-  it.each(['absent', 'early', 'leaf'] as const)('fails closed on an expensive Haskell diamond with %s target', (placement) => {
+  it.each(['absent', 'early', 'leaf'] as const)('prunes only proven-negative Haskell diamonds with %s target', (placement) => {
     const target = declaration('wanted', 'Origin.hs', 'haskell');
     const graph = fixture('haskell', {
       ...diamond('haskell', 20, placement === 'leaf'),
@@ -128,12 +128,16 @@ describe('bounded re-export traversal', () => {
       'Consumer.hs': 'module Consumer where\nimport Entry (wanted)\nrun = wanted 1',
       'SafeConsumer.hs': 'module SafeConsumer where\nimport Origin (wanted)\nrun = wanted 1',
     }, [target]);
-    expect(graph.resolve('Consumer.hs')).toBeNull();
-    const exhaustedVisits = graph.visits();
-    expect(exhaustedVisits).toBeLessThanOrEqual(10_000);
-    // Memoizing an incomplete search must never promote its early candidate.
-    expect(graph.resolve('Consumer.hs')).toBeNull();
-    expect(graph.visits()).toBe(exhaustedVisits);
+    const expected = placement === 'early' ? target.id : undefined;
+    expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(expected);
+    const visits = graph.visits();
+    // The exact walker retains 10k visits; at most 8192 separate state/route
+    // checks may try (and fail) to prove absence without reducing that budget.
+    expect(visits).toBeLessThanOrEqual(placement === 'leaf' ? 18_192 : 200);
+    // The leaf-bearing diamond remains incomplete: a possible candidate can
+    // never be discarded by the negative oracle or promoted by memoization.
+    expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(expected);
+    expect(graph.visits()).toBe(visits);
     expect(graph.resolve('SafeConsumer.hs')?.targetNodeId).toBe(target.id);
   });
 
