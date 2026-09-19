@@ -207,13 +207,21 @@ describe('Haskell singleton export upper bounds', () => {
     const graph = fixture({
       Probe: [selected('Shared', 'A'), selected('Shared')],
       Shared: [selected('Origin'), selected('Wide')],
-      Wide: [...Array.from({ length: 8_193 }, () => wildcard('Empty')), wildcard('Rival')],
-      Origin: [], Rival: [], Empty: [],
+      Wide: [
+        ...Array.from({ length: 8_192 }, () => wildcard('Filtered', {
+          includedNames: ['wanted'], haskellTypeOnlyNames: ['wanted'],
+        })),
+        ...Array.from({ length: 8_193 }, () => wildcard('Empty')), wildcard('Rival'),
+      ],
+      Origin: [], Rival: [], Empty: [], Filtered: [],
     }, [first, late]);
-    // BFS sees Origin before processing Wide's duplicate routes. Its 8192
-    // allowance expires before closure, while the independent exact walk
-    // still has enough visits to reach Rival and discover true ambiguity.
+    // BFS sees Origin before Wide. All type-only routes cost auxiliary work
+    // before filtering, so its 16384 allowance expires before closure. Those
+    // routes add no exact visits: the independent walk still reaches Rival
+    // after 8193 Empty visits and discovers a real competing candidate.
     expect(graph.resolve('Probe')).toBeUndefined();
+    expect(graph.visits('Filtered')).toBe(0);
+    expect(graph.visits('Rival')).toBe(1);
   });
 
   describe('path-local rejection of a complete singleton', () => {

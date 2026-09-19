@@ -182,21 +182,26 @@ describe('Haskell export absence proofs', () => {
     { repetitions: 8_193, exactVisits: 8_197, resolves: true },
     { repetitions: 9_988, exactVisits: 9_992, resolves: true },
     { repetitions: 9_998, exactVisits: 10_002, resolves: false },
-  ])('keeps the exact $exactVisits-visit result after a converging proof exhausts 8192 auxiliary checks', ({ repetitions, exactVisits, resolves }) => {
+  ])('keeps the exact $exactVisits-visit result after a converging proof exhausts 16384 auxiliary checks', ({ repetitions, exactVisits, resolves }) => {
     const target = declaration('Origin', 'wanted', 'B', 'field');
     const graph = fixture({
       Facade: [wildcard('Shared', { includedParentExports: ['A'] }), wildcard('Shared', { includedParentExports: ['B'] })],
       Shared: [
+        ...Array.from({ length: 8_192 }, () => wildcard('Filtered', {
+          includedNames: ['wanted'], haskellTypeOnlyNames: ['wanted'],
+        })),
         ...Array.from({ length: repetitions }, () => wildcard('Empty', { includedParentExports: ['B'] })),
         wildcard('Origin', { includedParentExports: ['B'] }),
       ],
-      Empty: [], Origin: [],
+      Empty: [], Origin: [], Filtered: [],
     }, [target]);
     // Shared's first path requires A: every B-only route has an empty parent
     // intersection, so that path neither recurses nor finds a witness. The
     // second path requires B and must trigger a genuine converging proof.
-    // Every duplicate Empty route costs auxiliary work; the proof exhausts
-    // 8192 checks before reaching Origin and cannot cache a partial absence.
+    // The 8192 type-only routes cost auxiliary work before namespace filtering
+    // but add no exact visits to either value lookup. Together with the
+    // duplicate Empty routes they exhaust 16384 checks before reaching Origin,
+    // so the proof cannot cache a partial absence.
     // The exact walk independently costs 1 facade + 2 Shared + repetitions
     // Empty + 1 Origin. The 9992-visit case must retain the old valid result;
     // the 10002-visit case must still fail closed at the unchanged exact cap.
@@ -207,7 +212,8 @@ describe('Haskell export absence proofs', () => {
     expect(graph.visits('Empty')).toBeGreaterThanOrEqual(Math.min(repetitions, 9_997));
     expect(graph.visits('Origin')).toBe(resolves ? 1 : 0);
     expect(graph.reads()).toBeGreaterThanOrEqual(Math.min(exactVisits, 10_000));
-    expect(graph.reads()).toBeLessThanOrEqual(18_192);
+    expect(graph.visits('Filtered')).toBe(0);
+    expect(graph.reads()).toBeLessThanOrEqual(26_384);
   });
 
   it('does not accept a sibling when a possible candidate still exhausts the walk', () => {
@@ -222,7 +228,35 @@ describe('Haskell export absence proofs', () => {
     expect(graph.resolve()).toBeUndefined();
     // The auxiliary proof has its own bound; it does not consume or reset
     // the exact walk's 10000 visits.
-    expect(graph.reads()).toBeLessThanOrEqual(18_192);
+    expect(graph.reads()).toBeLessThanOrEqual(26_384);
+  });
+
+  it.each([
+    { proofOnlyRoutes: 9_000, resolves: true },
+    { proofOnlyRoutes: 17_000, resolves: false },
+  ])('bounds a converging closure with $proofOnlyRoutes auxiliary-only routes', ({ proofOnlyRoutes, resolves }) => {
+    const target = declaration('Origin', 'wanted', 'B', 'field');
+    const graph = fixture({
+      Facade: [wildcard('Shared', { includedParentExports: ['A'] }), wildcard('Shared', { includedParentExports: ['B'] })],
+      Shared: [
+        ...Array.from({ length: proofOnlyRoutes }, () => wildcard('Padding', { includedParentExports: ['C'] })),
+        wildcard('A0', { includedParentExports: ['B'] }),
+      ],
+      Padding: [], Origin: [], ...diamond(20, 'Origin'),
+    }, [target]);
+    // Neither exact parent accepts C. The second Shared visit nevertheless
+    // counts every Padding route in its owner-agnostic proof. With 9000
+    // routes, closure exceeds the former 8192 allowance but fits 16384; its
+    // singleton bound lets the exact walk accept the real B-owned target.
+    // With 17000 routes the proof stops before processing Padding. Without
+    // a completed bound, the deep diamond must still hit the exact cap and
+    // return unknown instead of accepting its first reachable declaration.
+    expect(graph.resolve()).toBe(resolves ? target.id : undefined);
+    expect(graph.visits('Padding')).toBe(resolves ? 1 : 0);
+    expect(graph.visits('Origin')).toBeGreaterThan(0);
+    if (resolves) expect(graph.reads()).toBeLessThan(1_000);
+    else expect(graph.reads()).toBeGreaterThanOrEqual(10_000);
+    expect(graph.reads()).toBeLessThanOrEqual(26_384);
   });
 
   it('invalidates a warm missing-competitor result when an unchanged route gains an export', () => {

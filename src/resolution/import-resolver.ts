@@ -4391,7 +4391,10 @@ const REEXPORT_MAX_VISITS = 10_000;
 /** One lookup may spend this many auxiliary state/route checks proving
  * absence. Keep it separate from the exact walk's unchanged budget: a failed
  * optimization must never make a previously complete search run out early. */
-const HASKELL_ABSENCE_PROOF_MAX_VISITS = 8_192;
+// Measured GHC facade closures exceed 8192 state/route checks. Allow those
+// lookup-local proofs to complete without changing the exact 10000-visit or
+// depth-64 limits; an incomplete auxiliary proof still yields no bound.
+const HASKELL_ABSENCE_PROOF_MAX_VISITS = 16_384;
 interface ReExportTraversal {
   remaining: number;
   exhausted: boolean;

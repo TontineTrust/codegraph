@@ -37,7 +37,7 @@ function fixture(routes: Record<string, ReExport[]>, values: Node[], sources: Re
     getImportMappings: file => imports.get(file) ?? [],
     getReExports: file => {
       visits.set(file, (visits.get(file) ?? 0) + 1);
-      if ([...visits.values()].reduce((a, b) => a + b, 0) > 18_192) throw new Error('Traversal plus auxiliary proof budgets exceeded');
+      if ([...visits.values()].reduce((a, b) => a + b, 0) > 26_384) throw new Error('Traversal plus auxiliary proof budgets exceeded');
       return exports.get(file) ?? [];
     },
   };
