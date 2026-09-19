@@ -276,4 +276,44 @@ describe('Haskell export absence proofs', () => {
     graph.clear();
     expect(graph.resolve()).toBeUndefined();
   });
+
+  describe('long absence keys', () => {
+    it.each([
+      { label: 'export name', name: 'w'.repeat(4_097), shared: 'Shared' },
+      { label: 'module path', name: 'wanted', shared: `Shared${'x'.repeat(4_097)}` },
+    ])('preserves the exact result after convergence with a long $label', ({ name, shared }) => {
+      const target = declaration('Origin', name, 'B', 'field');
+      const graph = fixture({
+        Facade: [wildcard(shared, { includedParentExports: ['A'] }), wildcard(shared, { includedParentExports: ['B'] })],
+        [shared]: [wildcard('Origin', { includedParentExports: ['B'] })],
+        Origin: [],
+      }, [target]);
+      // These are bounded, synthetic module paths: no filesystem path is
+      // created. The first A-only path cannot recurse through the B-only
+      // route. The second path converges and must still resolve through B.
+      // An oversized oracle key bypasses proof work, not the exact walk.
+      expect(graph.resolve(name)).toBe(target.id);
+      expect(graph.visits(shared)).toBe(2);
+      expect(graph.visits('Origin')).toBe(1);
+    });
+
+    it('preserves a competitor reached by a long rename after convergence', () => {
+      const renamed = 'w'.repeat(4_097);
+      const local = declaration('Facade');
+      const competitor = declaration('Origin', renamed, 'B', 'field');
+      const graph = fixture({
+        Facade: [wildcard('Shared', { excludedParentExports: ['B'] }), wildcard('Shared', { includedParentExports: ['B'] })],
+        Shared: [named('Origin', renamed)], Origin: [],
+      }, [local, competitor]);
+      // The first path reaches but rejects the renamed B-owned candidate.
+      // On the second path, Shared's short key permits a proof attempt, but
+      // its named transition exceeds the key guard. That must abort the
+      // whole proof as unknown, never skip the transition and cache absence.
+      // The exact second path then exposes a real competitor to the local
+      // declaration, so the result must remain ambiguous.
+      expect(graph.resolve()).toBeUndefined();
+      expect(graph.visits('Shared')).toBe(3);
+      expect(graph.visits('Origin')).toBe(2);
+    });
+  });
 });

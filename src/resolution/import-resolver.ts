@@ -93,6 +93,13 @@ const exportedSymbolMemos = new WeakMap<
  * other context caches whenever nodes, files or re-export routes change. */
 const haskellAbsentExportMemos = new WeakMap<ResolutionContext, LRUCache<string, true>>();
 const HASKELL_ABSENT_EXPORT_MEMO_LIMIT = 50_000;
+/** A witness only disables the negative oracle; it never supplies a result
+ * to the exact walk. Keep these separate so they cannot evict proven absences. */
+const haskellPossibleExportMemos = new WeakMap<ResolutionContext, LRUCache<string, true>>();
+const HASKELL_POSSIBLE_EXPORT_MEMO_LIMIT = 4_096;
+/** Limit retained key lengths as well as entry count; oversized states fall
+ * back to the exact walk without entering any auxiliary cache or worklist. */
+const HASKELL_ABSENCE_MAX_KEY_LENGTH = 4_096;
 const HASKELL_WILDCARD_TARGET_MEMO_LIMIT = 50_000;
 const haskellLocalConflictMemos = new WeakMap<ResolutionContext, LRUCache<string, boolean>>();
 type HaskellWildcardTargets = { targetIds: string[]; ambiguous: boolean };
@@ -447,6 +454,7 @@ export function clearImportResolverMemos(context: ResolutionContext): void {
   importPathMemos.delete(context);
   exportedSymbolMemos.delete(context);
   haskellAbsentExportMemos.delete(context);
+  haskellPossibleExportMemos.delete(context);
   haskellWildcardTargetMemos.delete(context);
   haskellLocalConflictMemos.delete(context);
   haskellOriginMemos.delete(context);
@@ -4379,9 +4387,14 @@ const HASKELL_ABSENCE_PROOF_MAX_VISITS = 8_192;
 interface ReExportTraversal {
   remaining: number;
   exhausted: boolean;
+  /** Reuse composite keys on converging paths. File/name strings are already
+   * hashed by the runtime; repeatedly concatenating long paths dominates
+   * cached-negative hits. Bounded by this lookup's exact/auxiliary budgets. */
+  haskellKeys?: (Map<string, Map<string, string>> | undefined)[];
   haskellAbsence?: {
     seen: Set<string>;
     attempted: Set<string>;
+    absent: Set<string>;
     remaining: number;
   };
 }
@@ -4412,8 +4425,30 @@ type ExportedSymbolWant = {
   haskellNameVariants?: string[];
 };
 
-function haskellAbsenceKey(filePath: string, name: string, namespace: ExportedSymbolWant['haskellNamespace']): string {
-  return `${filePath}\0${name}\0${namespace ?? ''}`;
+function haskellAbsenceKey(filePath: string, name: string, namespace: ExportedSymbolWant['haskellNamespace'], traversal: ReExportTraversal): string | undefined {
+  if (filePath.length + name.length + (namespace?.length ?? 0) + 2 > HASKELL_ABSENCE_MAX_KEY_LENGTH) return undefined;
+  const byNamespace = traversal.haskellKeys ??= [];
+  const byFile = byNamespace[namespace === 'type' ? 1 : namespace === 'value' ? 2 : 0] ??= new Map();
+  let byName = byFile.get(filePath);
+  if (!byName) {
+    byName = new Map();
+    byFile.set(filePath, byName);
+  }
+  let key = byName.get(name);
+  if (key === undefined) {
+    key = `${filePath}\0${name}\0${namespace ?? ''}`;
+    byName.set(name, key);
+  }
+  return key;
+}
+
+function rememberHaskellPossibleExport(context: ResolutionContext, key: string): void {
+  let memo = haskellPossibleExportMemos.get(context);
+  if (!memo) {
+    memo = new LRUCache(HASKELL_POSSIBLE_EXPORT_MEMO_LIMIT);
+    haskellPossibleExportMemos.set(context, memo);
+  }
+  if (!memo.has(key)) memo.set(key, true);
 }
 
 /** Prove absence in a SUPERSET of the path-local export graph. Ignore owners,
@@ -4424,8 +4459,9 @@ function haskellAbsenceKey(filePath: string, name: string, namespace: ExportedSy
  * Run at a converging state, where repeated negative walks are expensive.
  * A completed cached absence can also skip the first visit to a root.
  * Completed negatives live in a bounded context cache. Worklists and proof
- * work have one auxiliary budget for the whole lookup (not one per hop). Never cache
- * a candidate or partial proof; an unsuccessful proof leaves the exact
+ * work have one auxiliary budget for the whole lookup (not one per hop). A
+ * separately cached witness can only disable the oracle; a partial proof
+ * never establishes absence. An unsuccessful proof leaves the exact
  * walk's visit/depth budget intact. */
 function proveHaskellExportAbsent(
   filePath: string,
@@ -4435,16 +4471,22 @@ function proveHaskellExportAbsent(
   traversal: ReExportTraversal,
 ): boolean {
   if (want.isDefault || want.isNamespace || want.memberName) return false;
+  const key = haskellAbsenceKey(filePath, want.exportedName, want.haskellNamespace, traversal);
+  if (key === undefined) return false;
   let absent = haskellAbsentExportMemos.get(context);
   if (!absent) {
     absent = new LRUCache(HASKELL_ABSENT_EXPORT_MEMO_LIMIT);
     haskellAbsentExportMemos.set(context, absent);
   }
   const state = traversal.haskellAbsence ??= {
-    seen: new Set(), attempted: new Set(), remaining: HASKELL_ABSENCE_PROOF_MAX_VISITS,
+    seen: new Set(), attempted: new Set(), absent: new Set(), remaining: HASKELL_ABSENCE_PROOF_MAX_VISITS,
   };
-  const key = haskellAbsenceKey(filePath, want.exportedName, want.haskellNamespace);
-  if (absent.get(key)) return true;
+  if (state.absent.has(key)) return true;
+  if (absent.get(key)) {
+    state.absent.add(key);
+    return true;
+  }
+  if (haskellPossibleExportMemos.get(context)?.get(key)) return false;
   if (!state.seen.has(key)) {
     state.seen.add(key);
     return false;
@@ -4459,7 +4501,14 @@ function proveHaskellExportAbsent(
     return true;
   };
   const enqueue = (file: string, name: string, atDepth: number): boolean => {
-    const nextKey = haskellAbsenceKey(file, name, want.haskellNamespace);
+    const nextKey = haskellAbsenceKey(file, name, want.haskellNamespace, traversal);
+    if (nextKey === undefined) return false;
+    if (haskellPossibleExportMemos.get(context)?.get(nextKey)) {
+      // This root reaches a witness in the superset. Abort the WHOLE proof:
+      // merely skipping this successor would publish an unsound absence.
+      rememberHaskellPossibleExport(context, key);
+      return false;
+    }
     if (absent.get(nextKey) || discovered.has(nextKey)) return true;
     if (atDepth > HASKELL_REEXPORT_MAX_DEPTH || !spend()) return false;
     // Charge on discovery, before allocating a queue entry, so a broad facade
@@ -4475,7 +4524,11 @@ function proveHaskellExportAbsent(
     const nodes = exportedNodesByName(index, current.file, context);
     for (const name of haskellNodeNameVariants(current.name)) {
       if (nodes.get(name)?.some((node) => want.haskellNamespace === 'value'
-        ? haskellValueNode(node) : want.haskellNamespace === 'type' ? haskellTypeNode(node) : true)) return false;
+        ? haskellValueNode(node) : want.haskellNamespace === 'type' ? haskellTypeNode(node) : true)) {
+        rememberHaskellPossibleExport(context, key);
+        rememberHaskellPossibleExport(context, haskellAbsenceKey(current.file, current.name, want.haskellNamespace, traversal)!);
+        return false;
+      }
     }
     const routes = getReExportRouteIndex(context.getReExports?.(current.file, 'haskell') ?? []);
     for (const entry of getHaskellNamedRoutes(routes, current.name)) {
@@ -4593,7 +4646,11 @@ function findExportedSymbolWalk(
     // This state already has a witness. A later converging path still needs
     // its own visibility/ambiguity checks, but cannot benefit from an absence
     // proof; do not spend auxiliary work rediscovering the witness.
-    traversal.haskellAbsence?.attempted.add(haskellAbsenceKey(filePath, want.exportedName, want.haskellNamespace));
+    const key = haskellAbsenceKey(filePath, want.exportedName, want.haskellNamespace, traversal);
+    if (key !== undefined) {
+      traversal.haskellAbsence?.attempted.add(key);
+      rememberHaskellPossibleExport(context, key);
+    }
     if (haskellCandidate && haskellCandidate.id !== node.id) haskellAmbiguous = true;
     else haskellCandidate = node;
   };
