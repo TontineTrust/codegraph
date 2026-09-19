@@ -233,18 +233,22 @@ describe('Haskell export absence proofs', () => {
     graph.add(declaration('Origin'));
     graph.clear();
     // The route arrays and module mapping did not change. A descendant node
-    // update must still invalidate cached negative or unique export proofs.
+    // update must still invalidate the ordinary file/exact-result indexes;
+    // a new lookup must establish its own negative or unique export proof.
     expect(graph.resolve()).toBeUndefined();
   });
 
   it('does not share a completed absence proof between contexts with identical paths and names', () => {
-    const routes = { Facade: [wildcard('Shared')], Shared: [wildcard('Origin')], Origin: [] };
+    const routes = { Facade: [wildcard('Shared'), wildcard('Shared'), wildcard('Shared')], Shared: [wildcard('Origin')], Origin: [] };
     const absent = fixture(routes, []);
     const target = declaration('Origin');
     const present = fixture(routes, [target]);
     // Even the immutable route arrays are shared. Only the context's nodes
     // differ, so a route-keyed or process-global absence memo would be wrong.
     expect(absent.resolve()).toBeUndefined();
+    // Within this lookup the third route reuses the second route's complete
+    // absence proof. It must never escape to the other context.
+    expect(absent.visits('Shared')).toBe(2);
     expect(present.resolve()).toBe(target.id);
     expect(absent.resolve()).toBeUndefined();
   });
@@ -252,10 +256,11 @@ describe('Haskell export absence proofs', () => {
   it.each([
     { absentNamespace: 'value', presentNamespace: 'type', kind: 'type_alias' },
     { absentNamespace: 'type', presentNamespace: 'value', kind: 'enum_member' },
-  ] as const)('keeps a cached $absentNamespace absence separate from $presentNamespace exports', ({ absentNamespace, presentNamespace, kind }) => {
+  ] as const)('keeps a local $absentNamespace absence separate from later $presentNamespace exports', ({ absentNamespace, presentNamespace, kind }) => {
     const target = declaration('Origin', 'T', '', kind);
-    const graph = fixture({ Facade: [wildcard('Shared')], Shared: [wildcard('Origin')], Origin: [] }, [target]);
+    const graph = fixture({ Facade: [wildcard('Shared'), wildcard('Shared'), wildcard('Shared')], Shared: [wildcard('Origin')], Origin: [] }, [target]);
     expect(graph.resolve('T', absentNamespace)).toBeUndefined();
+    expect(graph.visits('Shared')).toBe(2);
     expect(graph.resolve('T', presentNamespace)).toBe(target.id);
     expect(graph.resolve('T', absentNamespace)).toBeUndefined();
   });

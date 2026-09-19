@@ -72,8 +72,8 @@ function fixture(routes: Record<string, ReExport[]>, initial: Node[]) {
   };
 }
 
-describe('Haskell possible-export witnesses', () => {
-  it('rechecks owners and ambiguity after a different owner warmed the witness', () => {
+describe('Haskell export proof isolation', () => {
+  it('rechecks owners and ambiguity after queries for different owners', () => {
     const a = declaration('Shared', 'wanted', 'A', 'field');
     const b = declaration('Shared', 'wanted', 'B', 'field');
     const graph = fixture({
@@ -86,7 +86,7 @@ describe('Haskell possible-export witnesses', () => {
     expect(graph.resolve('Probe')).toBeUndefined();
   });
 
-  it('uses a breadth-first witness only to decline proof work, preserving path predicates', () => {
+  it('reproves a possible witness within each lookup while preserving path predicates', () => {
     const target = declaration('Origin', 'wanted', 'B', 'field');
     const local = declaration('Ambiguous');
     const hidden = () => wildcard('Shared', { excludedParentExports: ['B'] });
@@ -100,9 +100,10 @@ describe('Haskell possible-export witnesses', () => {
     expect(graph.visits('Shared')).toBe(3);
     const before = graph.visits('Shared');
     expect(graph.resolve('Probe')).toBe(target.id);
-    // The warmed witness avoids another proof, but both exact paths still
-    // run. Reusing the rejected path's result would lose the valid target.
-    expect(graph.visits('Shared') - before).toBe(2);
+    // The prior lookup's proof is gone: Probe performs its own convergence
+    // proof plus both exact paths. Reusing a rejected path would lose target;
+    // reusing a global witness would suppress the fresh third metadata read.
+    expect(graph.visits('Shared') - before).toBe(3);
     expect(graph.resolve('Ambiguous')).toBeUndefined();
   });
 
@@ -154,7 +155,7 @@ describe('Haskell possible-export witnesses', () => {
     expect(absent.visits('Shared')).toBe(2);
   });
 
-  it('clears stale witnesses after a descendant declaration is removed', () => {
+  it('clears stale file and exact-result indexes after a descendant declaration is removed', () => {
     const origin = declaration('Origin');
     const local = declaration('Probe');
     const routes: Record<string, ReExport[]> = {
@@ -170,9 +171,9 @@ describe('Haskell possible-export witnesses', () => {
     graph.replaceNodes([local]);
     graph.clear();
     const before = graph.reads();
-    // Every diamond state previously had a witness. If clear leaves those
-    // witnesses cached, both 6143-visit branches disable negative pruning
-    // and exhaust the exact 10000 limit, losing the valid local sibling.
+    // The earlier lookup found an authorized export. Clearing the ordinary
+    // node/result indexes must let this lookup prove absence locally in the
+    // diamond and retain its valid sibling within the exact visit cap.
     expect(graph.resolve('Probe')).toBe(local.id);
     expect(graph.reads() - before).toBeLessThan(1_000);
   });

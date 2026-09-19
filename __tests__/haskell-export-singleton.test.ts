@@ -83,7 +83,7 @@ function fixture(routes: Record<string, ReExport[]>, initial: Node[], options: {
 }
 
 describe('Haskell singleton export upper bounds', () => {
-  it('requires an authorized exact witness even after a singleton root is cached', () => {
+  it('requires an authorized exact witness at convergence and on later independent lookups', () => {
     const target = declaration('Origin');
     const graph = fixture({
       Warm: [hidden('Shared'), hidden('Shared')],
@@ -97,16 +97,16 @@ describe('Haskell singleton export upper bounds', () => {
     expect(graph.resolve('HiddenAgain')).toBeUndefined();
   });
 
-  it('includes a cached singleton child ID before skipping that child in a parent proof', () => {
+  it('includes a lookup-local singleton child ID before skipping it in a parent proof', () => {
     const child = declaration('Origin'), first = declaration('Rival');
     const graph = fixture({
-      PrimeChild: [hidden('Child'), hidden('Child')],
-      WarmParent: [hidden('Parent'), hidden('Parent')], Probe: [wildcard('Parent')],
+      Probe: [hidden('Child'), hidden('Child'), hidden('Parent'), hidden('Parent'), wildcard('Parent')],
       Parent: [wildcard('Rival'), wildcard('Child')], Child: [wildcard('Origin')],
       Origin: [], Rival: [],
     }, [child, first]);
-    expect(graph.resolve('PrimeChild')).toBeUndefined();
-    expect(graph.resolve('WarmParent')).toBeUndefined();
+    // First converge on Child, then Parent, within the SAME lookup. Their
+    // exact paths reject B, but Child's local upper bound contributes its ID
+    // to Parent's later proof; there is no cross-lookup proof cache.
     // Ignoring Child's cached ID would incorrectly certify Parent as {first}.
     // Its first exact hop accepts first, so premature singleton return would
     // then conceal the later, distinct child candidate.
@@ -171,7 +171,7 @@ describe('Haskell singleton export upper bounds', () => {
     expect(graph.resolve('Probe', 'Actual', warmNamespace)).toBeUndefined();
   });
 
-  it.each(['declaration', 'route'])('invalidates a singleton after only a descendant %s changes', change => {
+  it.each(['declaration', 'route'])('invalidates an exact result after only a descendant %s changes', change => {
     const original = declaration('Origin'), added = declaration(change === 'route' ? 'NewOrigin' : 'Rival');
     const routes: Record<string, ReExport[]> = {
       Warm: [hidden('Shared'), hidden('Shared')], Probe: [wildcard('Shared')],
@@ -179,11 +179,12 @@ describe('Haskell singleton export upper bounds', () => {
     };
     const graph = fixture(routes, change === 'route' ? [original, added] : [original]);
     expect(graph.resolve('Warm')).toBeUndefined();
+    expect(graph.resolve('Probe')).toBe(original.id);
     if (change === 'route') routes.Rival = [wildcard('NewOrigin')];
     else graph.replaceNodes([original, added]);
     graph.clear();
-    // Every ancestor route array is unchanged. A stale {original} bound would
-    // wrongly accept the first hop before visiting the new competitor.
+    // Every ancestor route array is unchanged. A stale exact result or file
+    // index would conceal the new competitor in this independent lookup.
     expect(graph.resolve('Probe')).toBeUndefined();
   });
 
@@ -231,30 +232,32 @@ describe('Haskell singleton export upper bounds', () => {
       expect(graph.resolve('Probe')).toBeUndefined();
     });
 
-    it('does not publish a path-local rejection as a global absence', () => {
+    it('reuses path-local rejection within a lookup without contaminating a later allowed root', () => {
       const target = declaration('Origin');
       const graph = fixture({
-        Warm: [hidden('Shared'), hidden('Shared')], Blocked: [hidden('Shared')],
+        Warm: [hidden('Shared'), hidden('Shared')], Blocked: [hidden('Shared'), hidden('Shared'), hidden('Shared')],
         Allowed: [selected('Shared')], Shared: [wildcard('Origin')], Origin: [],
       }, [target], { nodeLookup: 'exact' });
       expect(graph.resolve('Warm')).toBeUndefined();
       const before = graph.visits('Shared');
       expect(graph.resolve('Blocked')).toBeUndefined();
-      expect(graph.visits('Shared')).toBe(before);
-      // The same context and singleton key remain valid on a later path.
+      // A new lookup performs one exact visit plus its own complete proof.
+      // Its second and third hidden paths share the local rejection bound.
+      expect(graph.visits('Shared') - before).toBe(2);
+      // Rejecting those paths must not publish an absence to later roots.
       expect(graph.resolve('Allowed')).toBe(target.id);
     });
 
     it('preserves an authorized local sibling when the only imported candidate is hidden', () => {
       const hiddenTarget = declaration('Origin'), local = declaration('Probe', 'wanted', 'A');
       const graph = fixture({
-        Warm: [hidden('Shared'), hidden('Shared')], Probe: [hidden('Shared')],
+        Warm: [hidden('Shared'), hidden('Shared')], Probe: [hidden('Shared'), hidden('Shared'), hidden('Shared')],
         Allowed: [wildcard('Shared')], Shared: [wildcard('Origin')], Origin: [],
       }, [hiddenTarget, local], { nodeLookup: 'exact' });
       expect(graph.resolve('Warm')).toBeUndefined();
       const before = graph.visits('Shared');
       expect(graph.resolve('Probe')).toBe(local.id);
-      expect(graph.visits('Shared')).toBe(before);
+      expect(graph.visits('Shared') - before).toBe(2);
       expect(graph.resolve('Allowed')).toBe(hiddenTarget.id);
     });
 
@@ -265,7 +268,7 @@ describe('Haskell singleton export upper bounds', () => {
       const target = declaration('Origin');
       const graph = fixture({
         Warm: [hidden('Shared'), hidden('Shared')],
-        Blocked: [hidden('Reset')], Allowed: [wildcard('Reset')],
+        Blocked: [hidden('Shared'), hidden('Shared'), hidden('Reset')], Allowed: [wildcard('Reset')],
         // Equivalent named routes produce the owner OR {A,C}. It excludes
         // B here, but Shared's next hop resets it and permits the B member.
         Reset: [named('Shared', 'wanted', 'wanted', 'A'), named('Shared', 'wanted', 'wanted', 'C')],
@@ -274,7 +277,9 @@ describe('Haskell singleton export upper bounds', () => {
       expect(graph.resolve('Warm')).toBeUndefined();
       const before = graph.visits('Shared');
       expect(graph.resolve('Blocked')).toBeUndefined();
-      expect(graph.visits('Shared')).toBe(before);
+      // The first two paths establish a local bound for Shared. The Reset
+      // path must retain inherited hiding when it reuses that same bound.
+      expect(graph.visits('Shared') - before).toBe(2);
       // Parent alternatives cannot be used by the rejection shortcut:
       // unlike the inherited callback, a named/compact hop can clear them.
       expect(graph.resolve('Allowed')).toBe(target.id);
@@ -283,23 +288,25 @@ describe('Haskell singleton export upper bounds', () => {
     it.each(['absent', 'missing', 'mismatched'] as const)('falls back to the exact walk when the ID getter is %s', mode => {
       const target = declaration('Origin');
       const graph = fixture({
-        Warm: [hidden('Shared'), hidden('Shared')], Allowed: [selected('Shared')],
+        Warm: [hidden('Shared'), hidden('Shared')], Allowed: [hidden('Shared'), hidden('Shared'), selected('Shared')],
         Shared: [wildcard('Origin')], Origin: [],
       }, [target], mode === 'absent' ? {} : { nodeLookup: mode });
       expect(graph.resolve('Warm')).toBeUndefined();
       const before = graph.visits('Shared');
+      const idReadsBefore = graph.nodeReads(target.id);
       // The mismatched getter supplies an A-owned node with the wrong ID.
       // Testing the B-only callback on it would wrongly reject the real B.
       expect(graph.resolve('Allowed')).toBe(target.id);
-      expect(graph.visits('Shared')).toBeGreaterThan(before);
-      expect(graph.nodeReads(target.id)).toBe(mode === 'absent' ? 0 : 2);
+      expect(graph.visits('Shared') - before).toBeGreaterThanOrEqual(3);
+      expect(graph.nodeReads(target.id) - idReadsBefore).toBe(mode === 'absent' ? 0 : 1);
     });
 
     it('reuses an ID lookup within one traversal and releases it before the next lookup', () => {
       const target = declaration('Origin');
       const graph = fixture({
         Warm: [hidden('Shared'), hidden('Shared')],
-        Probe: [hidden('Shared'), hidden('Shared'), hidden('Shared')], Later: [hidden('Shared')],
+        Probe: [hidden('Shared'), hidden('Shared'), hidden('Shared')],
+        Later: [hidden('Shared'), hidden('Shared'), hidden('Shared')],
         Shared: [wildcard('Origin')], Origin: [],
       }, [target], { nodeLookup: 'exact' });
       expect(graph.resolve('Warm')).toBeUndefined();
