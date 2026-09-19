@@ -4395,6 +4395,7 @@ interface ReExportTraversal {
     seen: Set<string>;
     attempted: Set<string>;
     absent: Set<string>;
+    possible: Set<string>;
     remaining: number;
   };
 }
@@ -4479,14 +4480,18 @@ function proveHaskellExportAbsent(
     haskellAbsentExportMemos.set(context, absent);
   }
   const state = traversal.haskellAbsence ??= {
-    seen: new Set(), attempted: new Set(), absent: new Set(), remaining: HASKELL_ABSENCE_PROOF_MAX_VISITS,
+    seen: new Set(), attempted: new Set(), absent: new Set(), possible: new Set(), remaining: HASKELL_ABSENCE_PROOF_MAX_VISITS,
   };
   if (state.absent.has(key)) return true;
+  if (state.possible.has(key)) return false;
   if (absent.get(key)) {
     state.absent.add(key);
     return true;
   }
-  if (haskellPossibleExportMemos.get(context)?.get(key)) return false;
+  if (haskellPossibleExportMemos.get(context)?.get(key)) {
+    state.possible.add(key);
+    return false;
+  }
   if (!state.seen.has(key)) {
     state.seen.add(key);
     return false;
@@ -4507,6 +4512,7 @@ function proveHaskellExportAbsent(
       // This root reaches a witness in the superset. Abort the WHOLE proof:
       // merely skipping this successor would publish an unsound absence.
       rememberHaskellPossibleExport(context, key);
+      state.possible.add(key);
       return false;
     }
     if (absent.get(nextKey) || discovered.has(nextKey)) return true;
@@ -4526,6 +4532,7 @@ function proveHaskellExportAbsent(
       if (nodes.get(name)?.some((node) => want.haskellNamespace === 'value'
         ? haskellValueNode(node) : want.haskellNamespace === 'type' ? haskellTypeNode(node) : true)) {
         rememberHaskellPossibleExport(context, key);
+        state.possible.add(key);
         rememberHaskellPossibleExport(context, haskellAbsenceKey(current.file, current.name, want.haskellNamespace, traversal)!);
         return false;
       }
@@ -4628,199 +4635,116 @@ function findExportedSymbolWalk(
   }
   if (haskellMode && proveHaskellExportAbsent(filePath, want, context, depth, traversal)) return undefined;
   visited.add(filePath);
-  // Only Haskell carries path-local allow/deny predicates. Other languages
-  // retain a shared visited set to visit converging barrels once per lookup.
-  const branchVisited = (): Set<string> => haskellMode ? new Set(visited) : visited;
+  try {
+    // Haskell uses this set as a synchronous recursion stack; finally restores
+    // it before another route runs. Other languages retain their shared
+    // visited set to visit converging barrels once per lookup.
+    const branchVisited = (): Set<string> => visited;
 
-  const exportIndex = getFileExportIndex(filePath, context);
-  const exportedNames = language === 'haskell'
-    ? want.haskellNameVariants ?? haskellNodeNameVariants(want.exportedName)
-    : [want.exportedName];
-  // Haskell can expose the same value name from a local declaration and one
-  // or more `module X` re-exports. All authorized candidates participate in
-  // the ambiguity check; a direct declaration must not win merely because it
-  // is visited first.
-  let haskellCandidate: Node | undefined;
-  let haskellAmbiguous = false;
-  const addHaskellCandidate = (node: Node): void => {
-    // This state already has a witness. A later converging path still needs
-    // its own visibility/ambiguity checks, but cannot benefit from an absence
-    // proof; do not spend auxiliary work rediscovering the witness.
-    const key = haskellAbsenceKey(filePath, want.exportedName, want.haskellNamespace, traversal);
-    if (key !== undefined) {
-      traversal.haskellAbsence?.attempted.add(key);
-      rememberHaskellPossibleExport(context, key);
-    }
-    if (haskellCandidate && haskellCandidate.id !== node.id) haskellAmbiguous = true;
-    else haskellCandidate = node;
-  };
-  const uniqueHaskellCandidate = (): ExportedSymbolWalkResult => {
-    return haskellAmbiguous ? HASKELL_EXPORT_AMBIGUOUS : haskellCandidate;
-  };
+    const exportIndex = getFileExportIndex(filePath, context);
+    const exportedNames = language === 'haskell'
+      ? want.haskellNameVariants ?? haskellNodeNameVariants(want.exportedName)
+      : [want.exportedName];
+    // Haskell can expose the same value name from a local declaration and one
+    // or more `module X` re-exports. All authorized candidates participate in
+    // the ambiguity check; a direct declaration must not win merely because it
+    // is visited first.
+    let haskellCandidate: Node | undefined;
+    let haskellAmbiguous = false;
+    const addHaskellCandidate = (node: Node): void => {
+      // This state already has a witness. A later converging path still needs
+      // its own visibility/ambiguity checks, but cannot benefit from an absence
+      // proof; do not spend auxiliary work rediscovering the witness.
+      const key = haskellAbsenceKey(filePath, want.exportedName, want.haskellNamespace, traversal);
+      if (key !== undefined) {
+        traversal.haskellAbsence?.attempted.add(key);
+        traversal.haskellAbsence?.possible.add(key);
+        rememberHaskellPossibleExport(context, key);
+      }
+      if (haskellCandidate && haskellCandidate.id !== node.id) haskellAmbiguous = true;
+      else haskellCandidate = node;
+    };
+    const uniqueHaskellCandidate = (): ExportedSymbolWalkResult => {
+      return haskellAmbiguous ? HASKELL_EXPORT_AMBIGUOUS : haskellCandidate;
+    };
 
-  // 1. Direct hit: the symbol is declared in this file.
-  if (want.isDefault) {
-    // Svelte/Vue single-file components ARE the module's default export,
-    // but are extracted as kind 'component' (not function/class). Prefer
-    // the component node; fall back to an exported function/class for the
-    // `.ts`/`.tsx` `export default fn`/`class` case. Without the component
-    // branch, an `export { default as X } from './X.svelte'` barrel never
-    // resolves and the component shows a false 0 callers (#629).
-    // A component file IS its default export; otherwise the statement that
-    // names the binding beats the first-exported-function guess.
-    const direct = exportIndex.defaultComponent ?? exportIndex.defaultBinding ?? exportIndex.defaultFnClass;
-    if (direct) return direct;
-  } else if (want.isNamespace && want.memberName) {
-    const direct = exportIndex.byName.get(want.memberName);
-    if (direct) return direct;
-  } else {
-    for (const name of exportedNames) {
-      if (language === 'haskell') {
-        const candidates = (exportedNodesByName(exportIndex, filePath, context).get(name) ?? [])
-          .filter((node) => want.haskellParentAlternatives
-            ? want.haskellParentAlternatives.some((parent) => haskellNodeOwnedBy(node, parent))
-            : !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
-          .filter((node) => want.haskellNamespace === 'value'
-            ? haskellValueNode(node)
-            : want.haskellNamespace === 'type'
-              ? haskellTypeNode(node)
-              : true)
-          .filter((node) => !want.haskellAllows || want.haskellAllows(node));
-        for (const candidate of candidates) addHaskellCandidate(candidate);
-        if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
-      } else {
-        const direct = exportIndex.byName.get(name);
-        if (direct) return direct;
+    // 1. Direct hit: the symbol is declared in this file.
+    if (want.isDefault) {
+      // Svelte/Vue single-file components ARE the module's default export,
+      // but are extracted as kind 'component' (not function/class). Prefer
+      // the component node; fall back to an exported function/class for the
+      // `.ts`/`.tsx` `export default fn`/`class` case. Without the component
+      // branch, an `export { default as X } from './X.svelte'` barrel never
+      // resolves and the component shows a false 0 callers (#629).
+      // A component file IS its default export; otherwise the statement that
+      // names the binding beats the first-exported-function guess.
+      const direct = exportIndex.defaultComponent ?? exportIndex.defaultBinding ?? exportIndex.defaultFnClass;
+      if (direct) return direct;
+    } else if (want.isNamespace && want.memberName) {
+      const direct = exportIndex.byName.get(want.memberName);
+      if (direct) return direct;
+    } else {
+      for (const name of exportedNames) {
+        if (language === 'haskell') {
+          const candidates = (exportedNodesByName(exportIndex, filePath, context).get(name) ?? [])
+            .filter((node) => want.haskellParentAlternatives
+              ? want.haskellParentAlternatives.some((parent) => haskellNodeOwnedBy(node, parent))
+              : !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
+            .filter((node) => want.haskellNamespace === 'value'
+              ? haskellValueNode(node)
+              : want.haskellNamespace === 'type'
+                ? haskellTypeNode(node)
+                : true)
+            .filter((node) => !want.haskellAllows || want.haskellAllows(node));
+          for (const candidate of candidates) addHaskellCandidate(candidate);
+          if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
+        } else {
+          const direct = exportIndex.byName.get(name);
+          if (direct) return direct;
+        }
       }
     }
-  }
 
-  // 2. Re-export hit: the file forwards the symbol to another module.
-  const reExports = context.getReExports?.(filePath, language) ?? [];
-  if (reExports.length === 0) {
-    return language === 'haskell' ? uniqueHaskellCandidate() : undefined;
-  }
-  const reExportIndex = getReExportRouteIndex(reExports);
-
-  // Look for explicit `export { want } from './other'` (with optional rename).
-  const targetName = want.isDefault ? 'default' : want.exportedName;
-  const namedRoutes = language === 'haskell'
-    ? getHaskellNamedRoutes(reExportIndex, targetName)
-    : reExportIndex.namedByExportedName.get(targetName) ?? [];
-  for (const entry of namedRoutes) {
-    const rex = 'route' in entry ? entry.route : entry;
-    const parentAlternatives = 'route' in entry ? entry.parents : undefined;
-    // Haskell PackageImports cannot forward into a same-named home module.
-    // External package contents are not indexed, so fail closed here.
-    if (language === 'haskell' && rex.packageQualifier !== undefined) continue;
-    if (language === 'haskell'
-      && want.haskellNamespace === 'value'
-      && rex.haskellTypeOnly === true) continue;
-    if (language === 'haskell'
-      && want.haskellNamespace === 'type'
-      && rex.haskellValueOnly === true) continue;
-    const next = resolveImportPath(rex.source, filePath, language, context);
-    if (!next) continue;
-    // After rename: `export { foo as bar } from './x'` — to chase
-    // `bar`, we look for `foo` in `./x`.
-    const chained = findExportedSymbolWalk(
-      next,
-      {
-        isDefault: rex.originalName === 'default',
-        isNamespace: false,
-        exportedName: rex.originalName,
-        memberName: null,
-        ...(parentAlternatives && parentAlternatives.length > 1
-          ? { haskellParentAlternatives: parentAlternatives }
-          : rex.parentExport ? { haskellParent: rex.parentExport } : {}),
-        ...(want.haskellNamespace ? { haskellNamespace: want.haskellNamespace } : {}),
-        ...(want.haskellAllows ? { haskellAllows: want.haskellAllows } : {}),
-      },
-      language,
-      context,
-      branchVisited(),
-      depth + 1,
-      traversal,
-    );
-    if (traversal.exhausted) return undefined;
-    if (chained === HASKELL_EXPORT_AMBIGUOUS) {
-      return HASKELL_EXPORT_AMBIGUOUS;
-    } else if (chained) {
-      if (language === 'haskell') {
-        addHaskellCandidate(chained);
-        if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
-      }
-      else return chained;
+    // 2. Re-export hit: the file forwards the symbol to another module.
+    const reExports = context.getReExports?.(filePath, language) ?? [];
+    if (reExports.length === 0) {
+      return language === 'haskell' ? uniqueHaskellCandidate() : undefined;
     }
-  }
+    const reExportIndex = getReExportRouteIndex(reExports);
 
-  // 3. Wildcard re-export: `export * from './other'` — try every
-  //    forwarding source. This is the barrel-of-barrels case.
-  for (const rex of reExportIndex.wildcards) {
-    if (language === 'haskell' && rex.packageQualifier !== undefined) continue;
-    const visibility = language === 'haskell' ? getHaskellVisibilityIndex(rex) : undefined;
-    if (language === 'haskell'
-      && !haskellReExportCouldExposeName(
-        rex,
-        want.exportedName,
-        want.haskellNamespace,
-        visibility,
-      )) continue;
-    const next = resolveImportPath(rex.source, filePath, language, context);
-    if (!next) continue;
-    const restrictedParents = visibility
-      ? haskellRestrictedParents(visibility, want.exportedName, want.haskellNamespace)
-      : [];
-    const clearsParent = rex.haskellClearParent === true
-      && (visibility
-        ? visibility.includedNames?.has(want.exportedName) === true
-        : rex.includedNames?.includes(want.exportedName) === true);
-    const parentAlternativeSet = want.haskellParentAlternatives && restrictedParents.length > 0
-      ? new Set(want.haskellParentAlternatives)
-      : undefined;
-    let parentVariants = clearsParent
-      ? [undefined, ...restrictedParents]
-      : rex.haskellCollapsedParents
-        ? [want.haskellParent]
-      : restrictedParents.length > 0
-        ? restrictedParents.filter((parent) => parentAlternativeSet
-          ? parentAlternativeSet.has(parent)
-          : !want.haskellParent || parent === want.haskellParent)
-        : [want.haskellParent];
-    // Unrestricted and collapsed wildcards retain the same owner OR. Explicit
-    // selections intersect it above; a compact named route clears it exactly
-    // as an ordinary named hop does. Scalar-only paths keep their old behavior.
-    let inheritedParentAlternatives = !clearsParent
-      && (rex.haskellCollapsedParents || restrictedParents.length === 0)
-      ? want.haskellParentAlternatives
-      : undefined;
-    if (want.haskellParentAlternatives && !clearsParent && !rex.haskellCollapsedParents
-      && restrictedParents.length > 0 && parentVariants.length > 1) {
-      inheritedParentAlternatives = parentVariants as string[];
-      parentVariants = [undefined];
-    }
-    const restrictsHaskellNode = visibility?.restrictsNode === true;
-    // An unrestricted wildcard is the identity predicate. Retain the inherited
-    // restrictions without growing a closure chain at every facade hop.
-    const haskellAllows = restrictsHaskellNode
-      ? (node: Node): boolean => (
-          (!want.haskellAllows || want.haskellAllows(node))
-          && haskellReExportAllows(rex, want.exportedName, node)
-        )
-      : want.haskellAllows;
-    for (const parent of parentVariants) {
+    // Look for explicit `export { want } from './other'` (with optional rename).
+    const targetName = want.isDefault ? 'default' : want.exportedName;
+    const namedRoutes = language === 'haskell'
+      ? getHaskellNamedRoutes(reExportIndex, targetName)
+      : reExportIndex.namedByExportedName.get(targetName) ?? [];
+    for (const entry of namedRoutes) {
+      const rex = 'route' in entry ? entry.route : entry;
+      const parentAlternatives = 'route' in entry ? entry.parents : undefined;
+      // Haskell PackageImports cannot forward into a same-named home module.
+      // External package contents are not indexed, so fail closed here.
+      if (language === 'haskell' && rex.packageQualifier !== undefined) continue;
+      if (language === 'haskell'
+        && want.haskellNamespace === 'value'
+        && rex.haskellTypeOnly === true) continue;
+      if (language === 'haskell'
+        && want.haskellNamespace === 'type'
+        && rex.haskellValueOnly === true) continue;
+      const next = resolveImportPath(rex.source, filePath, language, context);
+      if (!next) continue;
+      // After rename: `export { foo as bar } from './x'` — to chase
+      // `bar`, we look for `foo` in `./x`.
       const chained = findExportedSymbolWalk(
         next,
         {
-          isDefault: want.isDefault,
-          isNamespace: want.isNamespace,
-          exportedName: want.exportedName,
-          memberName: want.memberName,
-          haskellParent: parent || (clearsParent || rex.haskellCollapsedParents ? undefined : want.haskellParent),
-          ...(inheritedParentAlternatives ? { haskellParentAlternatives: inheritedParentAlternatives } : {}),
-          haskellNamespace: want.haskellNamespace,
-          haskellAllows,
-          haskellNameVariants: exportedNames,
+          isDefault: rex.originalName === 'default',
+          isNamespace: false,
+          exportedName: rex.originalName,
+          memberName: null,
+          ...(parentAlternatives && parentAlternatives.length > 1
+            ? { haskellParentAlternatives: parentAlternatives }
+            : rex.parentExport ? { haskellParent: rex.parentExport } : {}),
+          ...(want.haskellNamespace ? { haskellNamespace: want.haskellNamespace } : {}),
+          ...(want.haskellAllows ? { haskellAllows: want.haskellAllows } : {}),
         },
         language,
         context,
@@ -4831,19 +4755,108 @@ function findExportedSymbolWalk(
       if (traversal.exhausted) return undefined;
       if (chained === HASKELL_EXPORT_AMBIGUOUS) {
         return HASKELL_EXPORT_AMBIGUOUS;
-      }
-      if (chained && (!restrictsHaskellNode || haskellReExportAllows(rex, want.exportedName, chained))) {
+      } else if (chained) {
         if (language === 'haskell') {
           addHaskellCandidate(chained);
-          // Every candidate has passed the complete path predicate and parent
-          // namespace checks; later routes cannot make two targets unique.
           if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
-        } else return chained;
+        }
+        else return chained;
       }
     }
-  }
 
-  return language === 'haskell' ? uniqueHaskellCandidate() : undefined;
+    // 3. Wildcard re-export: `export * from './other'` — try every
+    //    forwarding source. This is the barrel-of-barrels case.
+    for (const rex of reExportIndex.wildcards) {
+      if (language === 'haskell' && rex.packageQualifier !== undefined) continue;
+      const visibility = language === 'haskell' ? getHaskellVisibilityIndex(rex) : undefined;
+      if (language === 'haskell'
+        && !haskellReExportCouldExposeName(
+          rex,
+          want.exportedName,
+          want.haskellNamespace,
+          visibility,
+        )) continue;
+      const next = resolveImportPath(rex.source, filePath, language, context);
+      if (!next) continue;
+      const restrictedParents = visibility
+        ? haskellRestrictedParents(visibility, want.exportedName, want.haskellNamespace)
+        : [];
+      const clearsParent = rex.haskellClearParent === true
+        && (visibility
+          ? visibility.includedNames?.has(want.exportedName) === true
+          : rex.includedNames?.includes(want.exportedName) === true);
+      const parentAlternativeSet = want.haskellParentAlternatives && restrictedParents.length > 0
+        ? new Set(want.haskellParentAlternatives)
+        : undefined;
+      let parentVariants = clearsParent
+        ? [undefined, ...restrictedParents]
+        : rex.haskellCollapsedParents
+          ? [want.haskellParent]
+        : restrictedParents.length > 0
+          ? restrictedParents.filter((parent) => parentAlternativeSet
+            ? parentAlternativeSet.has(parent)
+            : !want.haskellParent || parent === want.haskellParent)
+          : [want.haskellParent];
+      // Unrestricted and collapsed wildcards retain the same owner OR. Explicit
+      // selections intersect it above; a compact named route clears it exactly
+      // as an ordinary named hop does. Scalar-only paths keep their old behavior.
+      let inheritedParentAlternatives = !clearsParent
+        && (rex.haskellCollapsedParents || restrictedParents.length === 0)
+        ? want.haskellParentAlternatives
+        : undefined;
+      if (want.haskellParentAlternatives && !clearsParent && !rex.haskellCollapsedParents
+        && restrictedParents.length > 0 && parentVariants.length > 1) {
+        inheritedParentAlternatives = parentVariants as string[];
+        parentVariants = [undefined];
+      }
+      const restrictsHaskellNode = visibility?.restrictsNode === true;
+      // An unrestricted wildcard is the identity predicate. Retain the inherited
+      // restrictions without growing a closure chain at every facade hop.
+      const haskellAllows = restrictsHaskellNode
+        ? (node: Node): boolean => (
+            (!want.haskellAllows || want.haskellAllows(node))
+            && haskellReExportAllows(rex, want.exportedName, node)
+          )
+        : want.haskellAllows;
+      for (const parent of parentVariants) {
+        const chained = findExportedSymbolWalk(
+          next,
+          {
+            isDefault: want.isDefault,
+            isNamespace: want.isNamespace,
+            exportedName: want.exportedName,
+            memberName: want.memberName,
+            haskellParent: parent || (clearsParent || rex.haskellCollapsedParents ? undefined : want.haskellParent),
+            ...(inheritedParentAlternatives ? { haskellParentAlternatives: inheritedParentAlternatives } : {}),
+            haskellNamespace: want.haskellNamespace,
+            haskellAllows,
+            haskellNameVariants: exportedNames,
+          },
+          language,
+          context,
+          branchVisited(),
+          depth + 1,
+          traversal,
+        );
+        if (traversal.exhausted) return undefined;
+        if (chained === HASKELL_EXPORT_AMBIGUOUS) {
+          return HASKELL_EXPORT_AMBIGUOUS;
+        }
+        if (chained && (!restrictsHaskellNode || haskellReExportAllows(rex, want.exportedName, chained))) {
+          if (language === 'haskell') {
+            addHaskellCandidate(chained);
+            // Every candidate has passed the complete path predicate and parent
+            // namespace checks; later routes cannot make two targets unique.
+            if (haskellAmbiguous) return HASKELL_EXPORT_AMBIGUOUS;
+          } else return chained;
+        }
+      }
+    }
+
+    return language === 'haskell' ? uniqueHaskellCandidate() : undefined;
+  } finally {
+    if (haskellMode) visited.delete(filePath);
+  }
 }
 
 /** Cheap name-only rejection before a recursive Haskell wildcard walk. */
