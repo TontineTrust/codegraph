@@ -117,7 +117,7 @@ describe('bounded re-export traversal', () => {
     expect(graph.visits()).toBeLessThan(100);
   });
 
-  it.each(['absent', 'early', 'leaf'] as const)('prunes only proven-negative Haskell diamonds with %s target', (placement) => {
+  it.each(['absent', 'early', 'leaf'] as const)('closes Haskell diamonds with %s target after proving their candidate bound', (placement) => {
     const target = declaration('wanted', 'Origin.hs', 'haskell');
     const graph = fixture('haskell', {
       ...diamond('haskell', 20, placement === 'leaf'),
@@ -128,14 +128,12 @@ describe('bounded re-export traversal', () => {
       'Consumer.hs': 'module Consumer where\nimport Entry (wanted)\nrun = wanted 1',
       'SafeConsumer.hs': 'module SafeConsumer where\nimport Origin (wanted)\nrun = wanted 1',
     }, [target]);
-    const expected = placement === 'early' ? target.id : undefined;
+    const expected = placement === 'absent' ? undefined : target.id;
     expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(expected);
     const visits = graph.visits();
-    // The exact walker retains 10k visits; at most 8192 separate state/route
-    // checks may try (and fail) to prove absence without reducing that budget.
-    expect(visits).toBeLessThanOrEqual(placement === 'leaf' ? 18_192 : 200);
-    // The leaf-bearing diamond remains incomplete: a possible candidate can
-    // never be discarded by the negative oracle or promoted by memoization.
+    // The completed superset has zero or one ID despite exponentially many
+    // paths. A positive answer still requires an authorized exact-path witness.
+    expect(visits).toBeLessThanOrEqual(1_000);
     expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(expected);
     expect(graph.visits()).toBe(visits);
     expect(graph.resolve('SafeConsumer.hs')?.targetNodeId).toBe(target.id);

@@ -128,11 +128,14 @@ describe('Haskell unions of parent-qualified named routes', () => {
     for (let level = 0; level < 20; level++) {
       for (const side of ['A', 'B']) {
         const name = `${side}${level}`;
-        sources[`${name}.hs`] = level === 19 ? `module ${name} (module Origin) where\nimport Origin`
+        sources[`${name}.hs`] = level === 19 ? `module ${name} (module Other) where\nimport Other`
           : `module ${name} (module A${level + 1}, module B${level + 1}) where\nimport A${level + 1}\nimport B${level + 1}`;
       }
     }
-    const graph = fixture({ Facade: [...union('Origin'), { kind: 'wildcard', source: 'A0' }], Origin: [] }, [declaration('Origin', 'A')], sources);
+    // The extra ID prevents a facade-wide singleton proof. Its path predicate
+    // rejects every witness in the diamond, so that exact walk still exhausts
+    // its unchanged budget and cannot validate the earlier authorized target.
+    const graph = fixture({ Facade: [...union('Origin'), { kind: 'wildcard', source: 'A0', excludedParentExports: ['B'] }], Origin: [], Other: [] }, [declaration('Origin', 'A'), declaration('Other', 'B')], sources);
     expect(graph.resolve()).toBeUndefined();
   });
 
@@ -153,7 +156,8 @@ describe('Haskell unions of parent-qualified named routes', () => {
     const graph = fixture({}, [target, declaration('Origin', '', 'function')], sources);
     expect(graph.resolve()).toBe(target.id);
     // Facade forwards Growth both by its named wanted export and module export.
-    // Each independent path now visits Origin once for all four owner options.
-    expect(graph.visits('Origin.hs')).toBe(2);
+    // Each path visits Origin once for all four owners; bounded superset
+    // proofs may read its metadata too, without multiplying by owner count.
+    expect(graph.visits('Origin.hs')).toBeLessThanOrEqual(4);
   });
 });
