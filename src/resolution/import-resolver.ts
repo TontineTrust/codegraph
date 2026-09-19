@@ -1915,6 +1915,13 @@ function haskellNodeNameVariants(name: string): string[] {
     : [member, `(${member})`];
 }
 
+// Only immutable, non-global regular expressions are retained. FIFO eviction
+// avoids promoting a hot pattern on every node check; graph changes need no
+// invalidation because neither nodes nor match results are cached here.
+const haskellOwnerPatterns = new Map<string, RegExp>();
+const HASKELL_OWNER_PATTERN_LIMIT = 1_024;
+const HASKELL_OWNER_PATTERN_MAX_LENGTH = 1_024;
+
 export function haskellNodeOwnedBy(node: Node, parent: string): boolean {
   const canonical = (value: string): string => value.startsWith('(') && value.endsWith(')')
     ? value.slice(1, -1)
@@ -1927,11 +1934,18 @@ export function haskellNodeOwnedBy(node: Node, parent: string): boolean {
   const ownerPath = node.qualifiedName.endsWith(leafSuffix)
     ? node.qualifiedName.slice(0, -leafSuffix.length)
     : '';
-  const escapedParent = canonicalParent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const ownerMatches = new RegExp(
-    `(?:^|::)(?:${escapedParent}|\\(${escapedParent}\\))(?:\\s.*)?$`,
-    'u',
-  ).test(ownerPath);
+  let pattern = haskellOwnerPatterns.get(canonicalParent);
+  if (!pattern) {
+    const escapedParent = canonicalParent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    pattern = new RegExp(`(?:^|::)(?:${escapedParent}|\\(${escapedParent}\\))(?:\\s.*)?$`, 'u');
+    if (canonicalParent.length <= HASKELL_OWNER_PATTERN_MAX_LENGTH) {
+      if (haskellOwnerPatterns.size >= HASKELL_OWNER_PATTERN_LIMIT) {
+        haskellOwnerPatterns.delete(haskellOwnerPatterns.keys().next().value!);
+      }
+      haskellOwnerPatterns.set(canonicalParent, pattern);
+    }
+  }
+  const ownerMatches = pattern.test(ownerPath);
   return ownerMatches
     || node.decorators?.some((decorator) =>
     decorator.startsWith('haskell-export-parent:')

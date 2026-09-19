@@ -17,7 +17,7 @@ const hidden = (source: string): ReExport => wildcard(source, { excludedParentEx
 const selected = (source: string, parent = 'B'): ReExport => wildcard(source, { includedParentExports: [parent] });
 
 /** Public resolver entry points over an in-memory graph; never indexes a corpus. */
-function fixture(routes: Record<string, ReExport[]>, initial: Node[]) {
+function fixture(routes: Record<string, ReExport[]>, initial: Node[], options: { nodeLookup?: 'exact' | 'missing' | 'mismatched' } = {}) {
   let values = [...initial];
   const modules = new Set([...Object.keys(routes), ...initial.map(node => node.filePath.slice(0, -3))]);
   for (const list of Object.values(routes)) for (const route of list) modules.add(route.source);
@@ -32,17 +32,19 @@ function fixture(routes: Record<string, ReExport[]>, initial: Node[]) {
     return { ...declaration(name, name, '', 'namespace'), id: `${name}:module`, qualifiedName: name };
   });
   let allNodes: Node[] = [];
-  let byFile = new Map<string, Node[]>(), byName = new Map<string, Node[]>();
+  let byFile = new Map<string, Node[]>(), byName = new Map<string, Node[]>(), byId = new Map<string, Node>();
   const refresh = () => {
     allNodes = [...values, ...moduleNodes];
-    byFile = new Map(); byName = new Map();
+    byFile = new Map(); byName = new Map(); byId = new Map();
     for (const node of allNodes) {
+      byId.set(node.id, node);
       const file = byFile.get(node.filePath) ?? []; file.push(node); byFile.set(node.filePath, file);
       const name = byName.get(node.name) ?? []; name.push(node); byName.set(node.name, name);
     }
   };
   refresh();
   let reads = 0;
+  const visits = new Map<string, number>(), nodeReads = new Map<string, number>();
   const context: ResolutionContext = {
     getNodesInFile: file => byFile.get(file) ?? [],
     getNodesByName: name => byName.get(name) ?? [],
@@ -54,8 +56,17 @@ function fixture(routes: Record<string, ReExport[]>, initial: Node[]) {
     getImportMappings: file => mappings.get(file) ?? [],
     getReExports: file => {
       if (++reads > 25_000) throw new Error('Fixture exceeded bounded resolver work');
+      visits.set(file, (visits.get(file) ?? 0) + 1);
       return routes[file.slice(0, -3)] ?? [];
     },
+  };
+  if (options.nodeLookup) context.getNodeById = id => {
+    nodeReads.set(id, (nodeReads.get(id) ?? 0) + 1);
+    const node = byId.get(id);
+    if (!node || options.nodeLookup === 'missing') return null;
+    return options.nodeLookup === 'mismatched'
+      ? { ...node, id: `wrong:${id}`, qualifiedName: 'Other::A::wanted' }
+      : node;
   };
   return {
     resolve(module: string, name = 'wanted', namespace: 'type' | 'value' = 'value') {
@@ -66,6 +77,8 @@ function fixture(routes: Record<string, ReExport[]>, initial: Node[]) {
     },
     replaceNodes(nodes: Node[]) { values = [...nodes]; refresh(); },
     clear: () => clearImportResolverMemos(context),
+    visits: (module: string) => visits.get(`${module}.hs`) ?? 0,
+    nodeReads: (id: string) => nodeReads.get(id) ?? 0,
   };
 }
 
@@ -200,5 +213,101 @@ describe('Haskell singleton export upper bounds', () => {
     // allowance expires before closure, while the independent exact walk
     // still has enough visits to reach Rival and discover true ambiguity.
     expect(graph.resolve('Probe')).toBeUndefined();
+  });
+
+  describe('path-local rejection of a complete singleton', () => {
+    it('refuses a complete bound across a named default transition', () => {
+      const ordinary = declaration('Shared');
+      const defaultTarget = declaration('DefaultOrigin', 'implementation', 'B', 'function');
+      const graph = fixture({
+        Warm: [hidden('Shared'), hidden('Shared')], Probe: [wildcard('Shared')],
+        Shared: [named('DefaultOrigin', 'wanted', 'default')], DefaultOrigin: [],
+      }, [ordinary, defaultTarget], { nodeLookup: 'exact' });
+      // The generic default branch does not apply the ordinary inherited
+      // callback. The proof must refuse that transition, even after seeing
+      // Shared's direct candidate. Otherwise a cached {ordinary} could both
+      // prune hidden paths and conceal the later default-export competitor.
+      expect(graph.resolve('Warm')).toBeUndefined();
+      expect(graph.resolve('Probe')).toBeUndefined();
+    });
+
+    it('does not publish a path-local rejection as a global absence', () => {
+      const target = declaration('Origin');
+      const graph = fixture({
+        Warm: [hidden('Shared'), hidden('Shared')], Blocked: [hidden('Shared')],
+        Allowed: [selected('Shared')], Shared: [wildcard('Origin')], Origin: [],
+      }, [target], { nodeLookup: 'exact' });
+      expect(graph.resolve('Warm')).toBeUndefined();
+      const before = graph.visits('Shared');
+      expect(graph.resolve('Blocked')).toBeUndefined();
+      expect(graph.visits('Shared')).toBe(before);
+      // The same context and singleton key remain valid on a later path.
+      expect(graph.resolve('Allowed')).toBe(target.id);
+    });
+
+    it('preserves an authorized local sibling when the only imported candidate is hidden', () => {
+      const hiddenTarget = declaration('Origin'), local = declaration('Probe', 'wanted', 'A');
+      const graph = fixture({
+        Warm: [hidden('Shared'), hidden('Shared')], Probe: [hidden('Shared')],
+        Allowed: [wildcard('Shared')], Shared: [wildcard('Origin')], Origin: [],
+      }, [hiddenTarget, local], { nodeLookup: 'exact' });
+      expect(graph.resolve('Warm')).toBeUndefined();
+      const before = graph.visits('Shared');
+      expect(graph.resolve('Probe')).toBe(local.id);
+      expect(graph.visits('Shared')).toBe(before);
+      expect(graph.resolve('Allowed')).toBe(hiddenTarget.id);
+    });
+
+    it.each([
+      { label: 'named', bridge: named('Origin') },
+      { label: 'compact', bridge: wildcard('Origin', { includedNames: ['wanted'], haskellClearParent: true }) },
+    ])('preserves inherited hiding and permits alternative-owner resets through $label hops', ({ bridge }) => {
+      const target = declaration('Origin');
+      const graph = fixture({
+        Warm: [hidden('Shared'), hidden('Shared')],
+        Blocked: [hidden('Reset')], Allowed: [wildcard('Reset')],
+        // Equivalent named routes produce the owner OR {A,C}. It excludes
+        // B here, but Shared's next hop resets it and permits the B member.
+        Reset: [named('Shared', 'wanted', 'wanted', 'A'), named('Shared', 'wanted', 'wanted', 'C')],
+        Shared: [bridge], Origin: [],
+      }, [target], { nodeLookup: 'exact' });
+      expect(graph.resolve('Warm')).toBeUndefined();
+      const before = graph.visits('Shared');
+      expect(graph.resolve('Blocked')).toBeUndefined();
+      expect(graph.visits('Shared')).toBe(before);
+      // Parent alternatives cannot be used by the rejection shortcut:
+      // unlike the inherited callback, a named/compact hop can clear them.
+      expect(graph.resolve('Allowed')).toBe(target.id);
+    });
+
+    it.each(['absent', 'missing', 'mismatched'] as const)('falls back to the exact walk when the ID getter is %s', mode => {
+      const target = declaration('Origin');
+      const graph = fixture({
+        Warm: [hidden('Shared'), hidden('Shared')], Allowed: [selected('Shared')],
+        Shared: [wildcard('Origin')], Origin: [],
+      }, [target], mode === 'absent' ? {} : { nodeLookup: mode });
+      expect(graph.resolve('Warm')).toBeUndefined();
+      const before = graph.visits('Shared');
+      // The mismatched getter supplies an A-owned node with the wrong ID.
+      // Testing the B-only callback on it would wrongly reject the real B.
+      expect(graph.resolve('Allowed')).toBe(target.id);
+      expect(graph.visits('Shared')).toBeGreaterThan(before);
+      expect(graph.nodeReads(target.id)).toBe(mode === 'absent' ? 0 : 2);
+    });
+
+    it('reuses an ID lookup within one traversal and releases it before the next lookup', () => {
+      const target = declaration('Origin');
+      const graph = fixture({
+        Warm: [hidden('Shared'), hidden('Shared')],
+        Probe: [hidden('Shared'), hidden('Shared'), hidden('Shared')], Later: [hidden('Shared')],
+        Shared: [wildcard('Origin')], Origin: [],
+      }, [target], { nodeLookup: 'exact' });
+      expect(graph.resolve('Warm')).toBeUndefined();
+      const before = graph.nodeReads(target.id);
+      expect(graph.resolve('Probe')).toBeUndefined();
+      expect(graph.nodeReads(target.id) - before).toBe(1);
+      expect(graph.resolve('Later')).toBeUndefined();
+      expect(graph.nodeReads(target.id) - before).toBe(2);
+    });
   });
 });
