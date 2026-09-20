@@ -1,0 +1,3677 @@
+{
+  "schemaVersion": 1,
+  "preparedAt": "2026-09-20T10:26:45.731473+00:00",
+  "purpose": "Postmeasurement snapshot diagnostics for the frozen constructor-recall engine.",
+  "engine": {
+    "arm": "candidate-constructor-recall-20260920",
+    "sourceRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+    "distSha256": "a70124c4ca4f4d4324a114f24bc8ab7b848406da721795c7341a18f8b5b5af75",
+    "distFiles": 1042
+  },
+  "ghcSourceRevision": "82c73b223a985bc0bcc00cb6252b2b535082d831",
+  "expectedProbes": 9,
+  "expectedSupplementalQueries": 27,
+  "expectedFullGhcQueries": 3,
+  "missingInputPairs": [],
+  "allExpectedProbesCompletedAndPreserved": true,
+  "rows": [
+    {
+      "probe": "xmonad-1",
+      "corpus": "xmonad",
+      "sourceRun": "candidate-constructor-recall-20260920-xmonad-1",
+      "kind": "flow",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "xmonad-1.internal.json",
+      "supervisorArtifact": "constructor-recall-post-xmonad-1-20260920.timing.json",
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 0.546,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:24:15Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:24:15.363Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": null,
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": true,
+      "diagnosticElapsedMs": 394.14050000000003,
+      "diagnosticMaxRSSKiB": 197008,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxDatabaseBytes": 104857600,
+        "maxStoredResponseChars": 65536,
+        "queries": 4
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 4481024,
+            "sizeBytesAfter": 4481024,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": true,
+            "absentAfter": true
+          }
+        ]
+      },
+      "flows": {
+        "recordsPresent": true,
+        "expectedQueries": 4,
+        "queryCount": 4,
+        "exactExpectedQuerySequence": true,
+        "queries": [
+          {
+            "queryOrdinal": 1,
+            "expectedQuery": "manage userCodeDef userCode",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 129.45262499999998,
+            "responseChars": 15891,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "manage",
+                "file": "src/XMonad/Operations.hs",
+                "line": 108
+              },
+              {
+                "symbol": "userCodeDef",
+                "file": "src/XMonad/Core.hs",
+                "line": 213
+              },
+              {
+                "symbol": "userCode",
+                "file": "src/XMonad/Core.hs",
+                "line": 208
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 2,
+            "expectedQuery": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 50.62858299999999,
+            "responseChars": 12361,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "float",
+                "file": "src/XMonad/Operations.hs",
+                "line": 774
+              },
+              {
+                "symbol": "floatLocation",
+                "file": "src/XMonad/Operations.hs",
+                "line": 720
+              },
+              {
+                "symbol": "applySizeHintsContents",
+                "file": "src/XMonad/Operations.hs",
+                "line": 871
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 3,
+            "expectedQuery": "windows catchX runX",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 32.751832999999976,
+            "responseChars": 16805,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "windows",
+                "file": "src/XMonad/Operations.hs",
+                "line": 159
+              },
+              {
+                "symbol": "catchX",
+                "file": "src/XMonad/Core.hs",
+                "line": 196
+              },
+              {
+                "symbol": "runX",
+                "file": "src/XMonad/Core.hs",
+                "line": 191
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 4,
+            "expectedQuery": "windows sendMessageWithNoRefresh updateLayout",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 34.69941600000004,
+            "responseChars": 14160,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          }
+        ]
+      },
+      "persistedIndexState": null
+    },
+    {
+      "probe": "xmonad-2",
+      "corpus": "xmonad",
+      "sourceRun": "candidate-constructor-recall-20260920-xmonad-2",
+      "kind": "flow",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "xmonad-2.internal.json",
+      "supervisorArtifact": "constructor-recall-post-xmonad-2-20260920.timing.json",
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 0.439,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:24:34Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:24:34.723Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": null,
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": true,
+      "diagnosticElapsedMs": 335.02079200000003,
+      "diagnosticMaxRSSKiB": 199456,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxDatabaseBytes": 104857600,
+        "maxStoredResponseChars": 65536,
+        "queries": 4
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 4481024,
+            "sizeBytesAfter": 4481024,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": true,
+            "absentAfter": true
+          }
+        ]
+      },
+      "flows": {
+        "recordsPresent": true,
+        "expectedQueries": 4,
+        "queryCount": 4,
+        "exactExpectedQuerySequence": true,
+        "queries": [
+          {
+            "queryOrdinal": 1,
+            "expectedQuery": "manage userCodeDef userCode",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 120.80070800000001,
+            "responseChars": 15891,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "manage",
+                "file": "src/XMonad/Operations.hs",
+                "line": 108
+              },
+              {
+                "symbol": "userCodeDef",
+                "file": "src/XMonad/Core.hs",
+                "line": 213
+              },
+              {
+                "symbol": "userCode",
+                "file": "src/XMonad/Core.hs",
+                "line": 208
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 2,
+            "expectedQuery": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 49.813042000000024,
+            "responseChars": 12361,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "float",
+                "file": "src/XMonad/Operations.hs",
+                "line": 774
+              },
+              {
+                "symbol": "floatLocation",
+                "file": "src/XMonad/Operations.hs",
+                "line": 720
+              },
+              {
+                "symbol": "applySizeHintsContents",
+                "file": "src/XMonad/Operations.hs",
+                "line": 871
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 3,
+            "expectedQuery": "windows catchX runX",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 30.801582999999994,
+            "responseChars": 16805,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "windows",
+                "file": "src/XMonad/Operations.hs",
+                "line": 159
+              },
+              {
+                "symbol": "catchX",
+                "file": "src/XMonad/Core.hs",
+                "line": 196
+              },
+              {
+                "symbol": "runX",
+                "file": "src/XMonad/Core.hs",
+                "line": 191
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 4,
+            "expectedQuery": "windows sendMessageWithNoRefresh updateLayout",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 35.845582999999976,
+            "responseChars": 14160,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          }
+        ]
+      },
+      "persistedIndexState": null
+    },
+    {
+      "probe": "xmonad-3",
+      "corpus": "xmonad",
+      "sourceRun": "candidate-constructor-recall-20260920-xmonad-3",
+      "kind": "flow",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "xmonad-3.internal.json",
+      "supervisorArtifact": "constructor-recall-post-xmonad-3-20260920.timing.json",
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 0.532,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:25:09Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:25:09.134Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": null,
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": true,
+      "diagnosticElapsedMs": 370.21754200000004,
+      "diagnosticMaxRSSKiB": 198080,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxDatabaseBytes": 104857600,
+        "maxStoredResponseChars": 65536,
+        "queries": 4
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 4481024,
+            "sizeBytesAfter": 4481024,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": true,
+            "absentAfter": true
+          }
+        ]
+      },
+      "flows": {
+        "recordsPresent": true,
+        "expectedQueries": 4,
+        "queryCount": 4,
+        "exactExpectedQuerySequence": true,
+        "queries": [
+          {
+            "queryOrdinal": 1,
+            "expectedQuery": "manage userCodeDef userCode",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 125.232584,
+            "responseChars": 15891,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "manage",
+                "file": "src/XMonad/Operations.hs",
+                "line": 108
+              },
+              {
+                "symbol": "userCodeDef",
+                "file": "src/XMonad/Core.hs",
+                "line": 213
+              },
+              {
+                "symbol": "userCode",
+                "file": "src/XMonad/Core.hs",
+                "line": 208
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 2,
+            "expectedQuery": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 49.315042000000005,
+            "responseChars": 12361,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "float",
+                "file": "src/XMonad/Operations.hs",
+                "line": 774
+              },
+              {
+                "symbol": "floatLocation",
+                "file": "src/XMonad/Operations.hs",
+                "line": 720
+              },
+              {
+                "symbol": "applySizeHintsContents",
+                "file": "src/XMonad/Operations.hs",
+                "line": 871
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 3,
+            "expectedQuery": "windows catchX runX",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 32.60258399999998,
+            "responseChars": 16805,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "windows",
+                "file": "src/XMonad/Operations.hs",
+                "line": 159
+              },
+              {
+                "symbol": "catchX",
+                "file": "src/XMonad/Core.hs",
+                "line": 196
+              },
+              {
+                "symbol": "runX",
+                "file": "src/XMonad/Core.hs",
+                "line": 191
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 4,
+            "expectedQuery": "windows sendMessageWithNoRefresh updateLayout",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 35.10858400000001,
+            "responseChars": 14160,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          }
+        ]
+      },
+      "persistedIndexState": null
+    },
+    {
+      "probe": "express-1",
+      "corpus": "express",
+      "sourceRun": "candidate-constructor-recall-20260920-express-1",
+      "kind": "flow",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "express-1.internal.json",
+      "supervisorArtifact": "constructor-recall-post-express-1-20260920.timing.json",
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 0.428,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:25:09Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:25:09.835Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": null,
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": true,
+      "diagnosticElapsedMs": 311.31783299999995,
+      "diagnosticMaxRSSKiB": 222688,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxCombinedDbWalBytes": 104857600,
+        "maxStoredResponseChars": 65536,
+        "maxReportBytes": 262144,
+        "queries": 5
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 4341760,
+            "sizeBytesAfter": 4341760,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": true,
+            "absentAfter": true
+          }
+        ]
+      },
+      "flows": {
+        "recordsPresent": true,
+        "expectedQueries": 5,
+        "queryCount": 5,
+        "exactExpectedQuerySequence": true,
+        "queries": [
+          {
+            "queryOrdinal": 1,
+            "expectedQuery": "sendStatus type set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 126.3045,
+            "responseChars": 13465,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "sendStatus",
+                "file": "lib/response.js",
+                "line": 323
+              },
+              {
+                "symbol": "send",
+                "file": "lib/response.js",
+                "line": 126
+              },
+              {
+                "symbol": "set",
+                "file": "lib/application.js",
+                "line": 351
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 2,
+            "expectedQuery": "redirect location set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 25.992957999999987,
+            "responseChars": 14275,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 3,
+            "expectedQuery": "attachment type set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 18.90779200000003,
+            "responseChars": 14010,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 4,
+            "expectedQuery": "send json stringify",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 18.574375000000032,
+            "responseChars": 11180,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "send",
+                "file": "lib/response.js",
+                "line": 126
+              },
+              {
+                "symbol": "json",
+                "file": "lib/response.js",
+                "line": 234
+              },
+              {
+                "symbol": "stringify",
+                "file": "lib/response.js",
+                "line": 1023
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 5,
+            "expectedQuery": "stringify compileQueryParser tryRender",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 24.515125000000012,
+            "responseChars": 16419,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          }
+        ]
+      },
+      "persistedIndexState": "complete"
+    },
+    {
+      "probe": "express-2",
+      "corpus": "express",
+      "sourceRun": "candidate-constructor-recall-20260920-express-2",
+      "kind": "flow",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "express-2.internal.json",
+      "supervisorArtifact": "constructor-recall-post-express-2-20260920.timing.json",
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 0.433,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:25:10Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:25:10.426Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": null,
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": true,
+      "diagnosticElapsedMs": 313.74437500000005,
+      "diagnosticMaxRSSKiB": 224480,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxCombinedDbWalBytes": 104857600,
+        "maxStoredResponseChars": 65536,
+        "maxReportBytes": 262144,
+        "queries": 5
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 4341760,
+            "sizeBytesAfter": 4341760,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": true,
+            "absentAfter": true
+          }
+        ]
+      },
+      "flows": {
+        "recordsPresent": true,
+        "expectedQueries": 5,
+        "queryCount": 5,
+        "exactExpectedQuerySequence": true,
+        "queries": [
+          {
+            "queryOrdinal": 1,
+            "expectedQuery": "sendStatus type set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 125.858333,
+            "responseChars": 13465,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "sendStatus",
+                "file": "lib/response.js",
+                "line": 323
+              },
+              {
+                "symbol": "send",
+                "file": "lib/response.js",
+                "line": 126
+              },
+              {
+                "symbol": "set",
+                "file": "lib/application.js",
+                "line": 351
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 2,
+            "expectedQuery": "redirect location set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 26.349333,
+            "responseChars": 14275,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 3,
+            "expectedQuery": "attachment type set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 19.428707999999972,
+            "responseChars": 14010,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 4,
+            "expectedQuery": "send json stringify",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 18.533875000000023,
+            "responseChars": 11180,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "send",
+                "file": "lib/response.js",
+                "line": 126
+              },
+              {
+                "symbol": "json",
+                "file": "lib/response.js",
+                "line": 234
+              },
+              {
+                "symbol": "stringify",
+                "file": "lib/response.js",
+                "line": 1023
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 5,
+            "expectedQuery": "stringify compileQueryParser tryRender",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 25.17791699999998,
+            "responseChars": 16419,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          }
+        ]
+      },
+      "persistedIndexState": "complete"
+    },
+    {
+      "probe": "express-3",
+      "corpus": "express",
+      "sourceRun": "candidate-constructor-recall-20260920-express-3",
+      "kind": "flow",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "express-3.internal.json",
+      "supervisorArtifact": "constructor-recall-post-express-3-20260920.timing.json",
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 0.441,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:25:10Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:25:11.044Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": null,
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": true,
+      "diagnosticElapsedMs": 322.784625,
+      "diagnosticMaxRSSKiB": 223040,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxCombinedDbWalBytes": 104857600,
+        "maxStoredResponseChars": 65536,
+        "maxReportBytes": 262144,
+        "queries": 5
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 4341760,
+            "sizeBytesAfter": 4341760,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": true,
+            "absentAfter": true
+          }
+        ]
+      },
+      "flows": {
+        "recordsPresent": true,
+        "expectedQueries": 5,
+        "queryCount": 5,
+        "exactExpectedQuerySequence": true,
+        "queries": [
+          {
+            "queryOrdinal": 1,
+            "expectedQuery": "sendStatus type set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 128.508333,
+            "responseChars": 13465,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "sendStatus",
+                "file": "lib/response.js",
+                "line": 323
+              },
+              {
+                "symbol": "send",
+                "file": "lib/response.js",
+                "line": 126
+              },
+              {
+                "symbol": "set",
+                "file": "lib/application.js",
+                "line": 351
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 2,
+            "expectedQuery": "redirect location set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 26.122458000000023,
+            "responseChars": 14275,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 3,
+            "expectedQuery": "attachment type set",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 20.269416999999976,
+            "responseChars": 14010,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 4,
+            "expectedQuery": "send json stringify",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 19.527832999999987,
+            "responseChars": 11180,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "send",
+                "file": "lib/response.js",
+                "line": 126
+              },
+              {
+                "symbol": "json",
+                "file": "lib/response.js",
+                "line": 234
+              },
+              {
+                "symbol": "stringify",
+                "file": "lib/response.js",
+                "line": 1023
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 5,
+            "expectedQuery": "stringify compileQueryParser tryRender",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 24.966250000000002,
+            "responseChars": 16419,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "chain": [],
+            "unpublishedChainEntries": 0
+          }
+        ]
+      },
+      "persistedIndexState": "complete"
+    },
+    {
+      "probe": "ghc-core-health",
+      "corpus": "ghc-core",
+      "sourceRun": "candidate-constructor-recall-20260920-ghc-core-1",
+      "kind": "health",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "ghc-core-health.internal.json",
+      "supervisorArtifact": "constructor-recall-post-ghc-core-health-20260920.timing.json",
+      "benchmarkProcess": {
+        "recordPresent": true,
+        "scope": "The source snapshot attempt only; this does not establish an n=3 benchmark group.",
+        "exitCode": 0,
+        "elapsedSeconds": 1228.461049583,
+        "timeoutSeconds": 1800,
+        "profile": false,
+        "status": "complete",
+        "sourcePinMatches": true
+      },
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 3.813,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:25:18Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:25:18.833Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": "done",
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": null,
+      "diagnosticElapsedMs": 3723.7314170000004,
+      "diagnosticMaxRSSKiB": 99840,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxCombinedDbWalBytes": 1073741824,
+        "sqliteCacheKiB": 32768,
+        "mmapBytes": 0,
+        "maxIntegrityErrors": 100,
+        "maxForeignKeyErrors": 100,
+        "maxFileRecords": 50000,
+        "maxFileExamples": 100,
+        "maxStoredErrorChars": 4000
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 388419584,
+            "sizeBytesAfter": 388419584,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": true,
+            "absentAfter": true
+          }
+        ]
+      },
+      "storageChecksPassed": true,
+      "health": {
+        "completedCheckNames": [
+          "metadata",
+          "page-storage",
+          "record-counts",
+          "integrity_check",
+          "foreign_key_check",
+          "orphan-counts",
+          "file-diagnostics"
+        ],
+        "index": {
+          "state": "complete",
+          "stateFieldPresent": true,
+          "fileAccounting": {
+            "index_files_accounted": 2795,
+            "index_files_discovered": 2795
+          }
+        },
+        "page-storage": {
+          "pageSize": 4096,
+          "pageCount": 94829,
+          "freelistCount": 0,
+          "logicalBytes": 388419584,
+          "journalMode": "wal"
+        },
+        "record-counts": {
+          "nodes": 117910,
+          "edges": 424373,
+          "files": 2795,
+          "referencesByStatus": [
+            {
+              "status": "failed",
+              "count": 262621
+            }
+          ]
+        },
+        "integrity_check": {
+          "ok": true,
+          "errorLimitReached": false,
+          "messageCount": 1,
+          "onlyOkMessage": true
+        },
+        "foreign_key_check": {
+          "ok": true,
+          "observed": 0,
+          "truncated": false
+        },
+        "orphan-counts": {
+          "edgesMissingSource": 0,
+          "edgesMissingTarget": 0,
+          "referencesMissingSource": 0,
+          "nodesWithoutFileRecord": 0,
+          "filesWithoutNodes": 18
+        },
+        "file-diagnostics": {
+          "scanned": 2795,
+          "truncated": false,
+          "generated": 10,
+          "zeroNodeRecords": 18,
+          "negativeSizeRecords": 0,
+          "filesWithErrors": 20,
+          "malformedErrorJson": 0,
+          "oversizedErrorJson": 0,
+          "examplesTruncated": false,
+          "exampleCount": 20,
+          "fileDiagnosticLedger": [
+            {
+              "file": "libraries/ghc-internal/include/CTypes.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/libraries/ghc-internal/include/CTypes.h",
+              "sizeBytes": 1292,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/rts/Globals.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/rts/Globals.h",
+              "sizeBytes": 1621,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/rts/Main.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/rts/Main.h",
+              "sizeBytes": 698,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/stg/MachRegs/s390x.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/stg/MachRegs/s390x.h",
+              "sizeBytes": 2563,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/AreaBelow.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/AreaBelow.h",
+              "sizeBytes": 48,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/AuxFile.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/AuxFile.h",
+              "sizeBytes": 80,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Axes.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Axes.h",
+              "sizeBytes": 39,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Curves.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Curves.h",
+              "sizeBytes": 141,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Defines.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Defines.h",
+              "sizeBytes": 2060,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Deviation.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Deviation.h",
+              "sizeBytes": 75,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Dimensions.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Dimensions.h",
+              "sizeBytes": 405,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Error.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Error.h",
+              "sizeBytes": 156,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Key.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Key.h",
+              "sizeBytes": 38,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Marks.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Marks.h",
+              "sizeBytes": 40,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/PsFile.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/PsFile.h",
+              "sizeBytes": 86,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Reorder.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Reorder.h",
+              "sizeBytes": 79,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Scale.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Scale.h",
+              "sizeBytes": 86,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Shade.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Shade.h",
+              "sizeBytes": 134,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/TopTwenty.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/TopTwenty.h",
+              "sizeBytes": 44,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/TraceElement.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/TraceElement.h",
+              "sizeBytes": 47,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            }
+          ],
+          "severityCountsFromStoredExamples": {
+            "warning": 20
+          },
+          "severityCountsCoverAllDiagnosticFiles": true,
+          "byLanguage": {
+            "yaml": 18,
+            "nix": 7,
+            "haskell": 2203,
+            "python": 17,
+            "c": 498,
+            "javascript": 44,
+            "cpp": 3,
+            "typescript": 2,
+            "tsx": 3
+          },
+          "otherLanguageRecordCount": 0,
+          "parseErrorDiagnosticCount": 20
+        }
+      }
+    },
+    {
+      "probe": "ghc-full-health",
+      "corpus": "ghc",
+      "sourceRun": "candidate-constructor-recall-20260920-ghc-1",
+      "kind": "health",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "ghc-full-health.internal.json",
+      "supervisorArtifact": "constructor-recall-post-ghc-full-health-20260920.timing.json",
+      "benchmarkProcess": {
+        "recordPresent": true,
+        "scope": "The source snapshot attempt only; this does not establish an n=3 benchmark group.",
+        "exitCode": 143,
+        "elapsedSeconds": 1800.3862378750005,
+        "timeoutSeconds": 1800,
+        "profile": false,
+        "status": "timeout",
+        "sourcePinMatches": true
+      },
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 4.59,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:25:44Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:25:44.498Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": "done",
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": null,
+      "diagnosticElapsedMs": 4414.7415,
+      "diagnosticMaxRSSKiB": 102656,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxCombinedDbWalBytes": 1073741824,
+        "sqliteCacheKiB": 32768,
+        "mmapBytes": 0,
+        "maxIntegrityErrors": 100,
+        "maxForeignKeyErrors": 100,
+        "maxFileRecords": 50000,
+        "maxFileExamples": 100,
+        "maxStoredErrorChars": 4000
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 507527168,
+            "sizeBytesAfter": 507527168,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 274387912,
+            "sizeBytesAfter": 274387912,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          }
+        ]
+      },
+      "storageChecksPassed": true,
+      "health": {
+        "completedCheckNames": [
+          "metadata",
+          "page-storage",
+          "record-counts",
+          "integrity_check",
+          "foreign_key_check",
+          "orphan-counts",
+          "file-diagnostics"
+        ],
+        "index": {
+          "state": "indexing",
+          "stateFieldPresent": true,
+          "fileAccounting": {}
+        },
+        "page-storage": {
+          "pageSize": 4096,
+          "pageCount": 123908,
+          "freelistCount": 29260,
+          "logicalBytes": 507527168,
+          "journalMode": "wal"
+        },
+        "record-counts": {
+          "nodes": 232604,
+          "edges": 433693,
+          "files": 14891,
+          "referencesByStatus": [
+            {
+              "status": "failed",
+              "count": 201894
+            },
+            {
+              "status": "pending",
+              "count": 374955
+            }
+          ]
+        },
+        "integrity_check": {
+          "ok": true,
+          "errorLimitReached": false,
+          "messageCount": 1,
+          "onlyOkMessage": true
+        },
+        "foreign_key_check": {
+          "ok": true,
+          "observed": 0,
+          "truncated": false
+        },
+        "orphan-counts": {
+          "edgesMissingSource": 0,
+          "edgesMissingTarget": 0,
+          "referencesMissingSource": 0,
+          "nodesWithoutFileRecord": 0,
+          "filesWithoutNodes": 21
+        },
+        "file-diagnostics": {
+          "scanned": 14891,
+          "truncated": false,
+          "generated": 13,
+          "zeroNodeRecords": 21,
+          "negativeSizeRecords": 0,
+          "filesWithErrors": 46,
+          "malformedErrorJson": 0,
+          "oversizedErrorJson": 0,
+          "examplesTruncated": false,
+          "exampleCount": 46,
+          "fileDiagnosticLedger": [
+            {
+              "file": "libraries/ghc-internal/include/CTypes.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/libraries/ghc-internal/include/CTypes.h",
+              "sizeBytes": 1292,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/rts/Globals.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/rts/Globals.h",
+              "sizeBytes": 1621,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/rts/Main.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/rts/Main.h",
+              "sizeBytes": 698,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/stg/MachRegs/s390x.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/stg/MachRegs/s390x.h",
+              "sizeBytes": 2563,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/default/default-fail01.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/default/default-fail01.hs",
+              "sizeBytes": 54,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/default/default-fail02.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/default/default-fail02.hs",
+              "sizeBytes": 30,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/default/default-fail03.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/default/default-fail03.hs",
+              "sizeBytes": 92,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T12135a.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T12135a.h",
+              "sizeBytes": 12,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T12135b.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T12135b.h",
+              "sizeBytes": 12,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T16167.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T16167.hs",
+              "sizeBytes": 9,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T16521/a.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T16521/a.h",
+              "sizeBytes": 7,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T16521/b2.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T16521/b2.h",
+              "sizeBytes": 9,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/bug1677/Foo.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/bug1677/Foo.hs",
+              "sizeBytes": 17,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/RecordDotSyntaxFail1.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/RecordDotSyntaxFail1.hs",
+              "sizeBytes": 151,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/T5425.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/T5425.hs",
+              "sizeBytes": 125,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/T8431.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/T8431.hs",
+              "sizeBytes": 2,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/readFail012.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/readFail012.hs",
+              "sizeBytes": 171,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/strictnessDataCon_A.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/strictnessDataCon_A.hs",
+              "sizeBytes": 30,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/strictnessDataCon_B.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/strictnessDataCon_B.hs",
+              "sizeBytes": 43,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/typeops_B.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/typeops_B.hs",
+              "sizeBytes": 13,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/typeops_D.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/typeops_D.hs",
+              "sizeBytes": 11,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_run/T25609.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_run/T25609.hs",
+              "sizeBytes": 608,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_run/T26415.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_run/T26415.hs",
+              "sizeBytes": 156,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_002.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_002.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_003.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_003.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_004.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_004.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_005.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_005.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/perf/compiler/parsing001.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/perf/compiler/parsing001.hs",
+              "sizeBytes": 580313,
+              "nodeCount": 0,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "error",
+                  "code": "parse_error",
+                  "category": "parser-timeout",
+                  "timeoutMs": 60000
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/rts/T27434.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/rts/T27434.hs",
+              "sizeBytes": 24573,
+              "nodeCount": 0,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "error",
+                  "code": "parse_error",
+                  "category": "parser-timeout",
+                  "timeoutMs": 30000
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/safeHaskell/flags/Flags01_A.cpp",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/safeHaskell/flags/Flags01_A.cpp",
+              "sizeBytes": 35,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/AreaBelow.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/AreaBelow.h",
+              "sizeBytes": 48,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/AuxFile.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/AuxFile.h",
+              "sizeBytes": 80,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Axes.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Axes.h",
+              "sizeBytes": 39,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Curves.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Curves.h",
+              "sizeBytes": 141,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Defines.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Defines.h",
+              "sizeBytes": 2060,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Deviation.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Deviation.h",
+              "sizeBytes": 75,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Dimensions.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Dimensions.h",
+              "sizeBytes": 405,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Error.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Error.h",
+              "sizeBytes": 156,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Key.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Key.h",
+              "sizeBytes": 38,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Marks.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Marks.h",
+              "sizeBytes": 40,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/PsFile.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/PsFile.h",
+              "sizeBytes": 86,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Reorder.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Reorder.h",
+              "sizeBytes": 79,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Scale.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Scale.h",
+              "sizeBytes": 86,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Shade.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Shade.h",
+              "sizeBytes": 134,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/TopTwenty.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/TopTwenty.h",
+              "sizeBytes": 44,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/TraceElement.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/TraceElement.h",
+              "sizeBytes": 47,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            }
+          ],
+          "severityCountsFromStoredExamples": {
+            "warning": 44,
+            "error": 2
+          },
+          "severityCountsCoverAllDiagnosticFiles": true,
+          "byLanguage": {
+            "yaml": 19,
+            "nix": 7,
+            "haskell": 14011,
+            "python": 39,
+            "c": 737,
+            "javascript": 60,
+            "cpp": 10,
+            "objc": 3,
+            "typescript": 2,
+            "tsx": 3
+          },
+          "otherLanguageRecordCount": 0,
+          "parseErrorDiagnosticCount": 46
+        }
+      }
+    },
+    {
+      "probe": "ghc-full-flows",
+      "corpus": "ghc",
+      "sourceRun": "candidate-constructor-recall-20260920-ghc-1",
+      "kind": "flow",
+      "rawReportPresent": true,
+      "supervisorRecordPresent": true,
+      "rawArtifact": "ghc-full-flows.internal.json",
+      "supervisorArtifact": "constructor-recall-post-ghc-full-flows-20260920.timing.json",
+      "benchmarkProcess": {
+        "recordPresent": true,
+        "scope": "The source snapshot attempt only; this does not establish an n=3 benchmark group.",
+        "exitCode": 143,
+        "elapsedSeconds": 1800.3862378750005,
+        "timeoutSeconds": 1800,
+        "profile": false,
+        "status": "timeout",
+        "sourcePinMatches": true
+      },
+      "supervision": {
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "completed": true,
+        "elapsedSeconds": 16.028,
+        "cleanupTimedOut": null,
+        "startedAt": "2026-09-20T10:26:12Z",
+        "errorType": null
+      },
+      "startedAt": "2026-09-20T10:26:12.227Z",
+      "node": "v24.18.0",
+      "completed": true,
+      "phase": "done",
+      "sourceRunLabelMatches": true,
+      "engineLabelMatches": true,
+      "diagnosticElapsedMs": 15910.570709000001,
+      "diagnosticMaxRSSKiB": 333776,
+      "limits": {
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxCombinedDbWalBytes": 1073741824,
+        "maxStoredResponseChars": 65536
+      },
+      "errorRecorded": false,
+      "preservation": {
+        "beforePresent": true,
+        "afterPresent": true,
+        "reportedDatabaseAndWalUnchanged": true,
+        "beforeAfterComparable": true,
+        "recordedMetadataEqual": true,
+        "hashVerificationComparable": true,
+        "files": [
+          {
+            "fileRole": "database",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 507527168,
+            "sizeBytesAfter": 507527168,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          },
+          {
+            "fileRole": "wal",
+            "beforeRecorded": true,
+            "afterRecorded": true,
+            "recordedMetadataEqual": true,
+            "absentBefore": false,
+            "absentAfter": false,
+            "sizeBytesBefore": 274387912,
+            "sizeBytesAfter": 274387912,
+            "sizeEqual": true,
+            "mtimeEqual": true,
+            "recordedDigestEqual": true
+          }
+        ]
+      },
+      "flows": {
+        "recordsPresent": true,
+        "expectedQueries": 3,
+        "queryCount": 3,
+        "exactExpectedQuerySequence": true,
+        "queries": [
+          {
+            "queryOrdinal": 1,
+            "expectedQuery": "hsc_typecheck tcRnModule' tcRnModule",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 5233.292542,
+            "responseChars": 24095,
+            "outputTruncated": true,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "hsc_typecheck",
+                "file": "compiler/GHC/Driver/Main/Passes.hs",
+                "line": 405
+              },
+              {
+                "symbol": "tcRnModule'",
+                "file": "compiler/GHC/Driver/Main/Passes.hs",
+                "line": 444
+              },
+              {
+                "symbol": "tcRnModule",
+                "file": "compiler/GHC/Tc/Module.hs",
+                "line": 223
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 2,
+            "expectedQuery": "hscDesugar hscDesugar' deSugar",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 4046.4048749999993,
+            "responseChars": 24807,
+            "outputTruncated": true,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "hscDesugar",
+                "file": "compiler/GHC/Driver/Main/Passes.hs",
+                "line": 494
+              },
+              {
+                "symbol": "hscDesugar'",
+                "file": "compiler/GHC/Driver/Main/Passes.hs",
+                "line": 498
+              },
+              {
+                "symbol": "deSugar",
+                "file": "compiler/GHC/HsToCore.hs",
+                "line": 125
+              }
+            ],
+            "unpublishedChainEntries": 0
+          },
+          {
+            "queryOrdinal": 3,
+            "expectedQuery": "hscSimplify hscSimplify' core2core",
+            "queryMatchesExpected": true,
+            "isError": false,
+            "diagnosticExploreMs": 4626.327208999999,
+            "responseChars": 24942,
+            "outputTruncated": false,
+            "storedResponseTruncated": false,
+            "surfacedFlow": {
+              "present": true,
+              "steps": 3,
+              "truncated": false
+            },
+            "chain": [
+              {
+                "symbol": "hscSimplify",
+                "file": "compiler/GHC/Driver/Main/Passes.hs",
+                "line": 1443
+              },
+              {
+                "symbol": "hscSimplify'",
+                "file": "compiler/GHC/Driver/Main/Passes.hs",
+                "line": 1449
+              },
+              {
+                "symbol": "core2core",
+                "file": "compiler/GHC/Core/Opt/Pipeline.hs",
+                "line": 78
+              }
+            ],
+            "unpublishedChainEntries": 0
+          }
+        ]
+      },
+      "index": {
+        "state": "indexing",
+        "stateFieldPresent": true,
+        "fileAccounting": {}
+      },
+      "unresolvedStatusTotals": [
+        {
+          "status": "failed",
+          "count": 201894
+        },
+        {
+          "status": "pending",
+          "count": 374955
+        }
+      ],
+      "recordedAuxiliaryArrays": {
+        "nodes": {
+          "recorded": true,
+          "count": 9,
+          "truncated": false
+        },
+        "outgoingEdges": {
+          "recorded": true,
+          "count": 193,
+          "truncated": false
+        },
+        "unresolvedReferences": {
+          "recorded": true,
+          "count": 176,
+          "truncated": false
+        }
+      }
+    }
+  ],
+  "method": {
+    "metadataOnly": true,
+    "databaseOpened": false,
+    "corpusReadOrCopied": false,
+    "hashesComputed": false,
+    "rawResponsesIncluded": false,
+    "rawProjectMetadataIncluded": false,
+    "sourceVerdictsAutomated": false,
+    "inputLimitBytes": 4194304,
+    "outputLimitBytes": 2097152
+  },
+  "qualifications": [
+    "Recorded process groups and preservation fields are reported, not independently re-probed by this aggregator.",
+    "Index state and numeric file accounting are individually allowlisted; all other project metadata is excluded.",
+    "A missing record is distinct from an explicitly null WAL; missing checks never become zero violations or successful preservation.",
+    "Health checks describe the preserved snapshot, including an incomplete full index if applicable, not a qualified benchmark completion.",
+    "Flow presence, source correctness, full-response truncation, stored-response truncation and Flow truncation are distinct.",
+    "The historically wrong Express sendStatus/type/set target must not be credited solely because a Flow is displayed; source review remains separate.",
+    "These serial postmeasurement probes are not performance repetitions or agent A/B. No macros or corpus builds run in this aggregator.",
+    "Severity totals cover all file diagnostics only when the explicit completeness flag is true; otherwise they describe stored examples only.",
+    "All 27 new xmonad/Express responses have no recorded tool error, whole-output truncation, stored-response truncation or Flow-excerpt truncation. Express sendStatus/type/set remains a known wrong target and is not credited.",
+    "The selected GHC-full snapshot remains indexing after the 1800-second benchmark timeout: its three observed postmeasurement Flows do not make it a qualified completed benchmark. The first two whole outputs are truncated; all three stored responses and Flow excerpts are untruncated.",
+    "The complete stored file diagnostic enumeration records 20 warnings/zero errors for GHC core, and 44 warnings/two parser-timeout errors for GHC full. Storage integrity is distinct from extraction completeness and semantic correctness.",
+    "Baseline-full diagnostics are explicitly reused from earlier on 20 September. No baseline re-execution is represented by the nine new probes."
+  ],
+  "auditDate": "2026-09-20",
+  "assembly": {
+    "assembledAt": "2026-09-20T10:29:16.183160+00:00",
+    "method": "Bounded existing public JSON only; no new hashes, SQL, corpus reads, copies, tests or measurements.",
+    "sourceArtifactLabels": [
+      "constructor-postmeasurement-20260920/summary.public.json",
+      "ghc-full-postmeasurement-20260920.public.json"
+    ],
+    "sourceArtifactBytes": {
+      "constructor-postmeasurement-20260920/summary.public.json": 92224,
+      "ghc-full-postmeasurement-20260920.public.json": 78600
+    },
+    "inputAndOutputLimitBytesPerFile": 2097152,
+    "referencePolicy": "Only publicReference/publicReferences objects designate published companion links. Other evidence/report/ledger/log/input filenames are source-artifact labels, not links or a claim that private raw inputs accompany this publication.",
+    "qualification": "The nine new probes use constructor-recall172 snapshots. The earlier baseline-full diagnostics below are reused without rerunning their scripts; original execution dates, engine identities and observation limits are retained."
+  },
+  "reusedBaselineFull": {
+    "engine": {
+      "arm": "baseline-20260920",
+      "sourceRevision": "80b89692056381a4e95b2d855f8d3516a5b8535c",
+      "distSha256": "b4684753bb251e9b35651f9d09ea122bb8fc72b0fb075ea96f4b3bc2213e9c5e",
+      "distFiles": 1038
+    },
+    "reused": true,
+    "newlyExecutedInTheseNineProbes": false,
+    "qualification": "Earlier 20 September baseline full attempt and postmeasurement snapshots; one failed attempt, two parser errors, zero qualified full repetitions. These earlier health/flow scripts were not rerun with the constructor candidate. Their documented process-evidence limits remain unchanged.",
+    "evidence": {
+      "inputArtifacts": [
+        "ghc-full-baseline-health-20260920.internal.json",
+        "ghc-full-baseline-flows-20260920.internal.json"
+      ],
+      "benchmarkContext": {
+        "attemptsObserved": 1,
+        "processCapSeconds": 1800,
+        "status": "failed",
+        "qualifiedRepetitions": 0,
+        "medianAvailable": false,
+        "repetitions2And3": "not attempted after incomplete first attempt",
+        "qualification": "Benchmark status is separate from completion of these later diagnostic scripts; the baseline persisted complete marker does not negate its two fatal file errors."
+      },
+      "health": {
+        "startedAt": "2026-09-20T08:07:43.348Z",
+        "node": "v24.18.0",
+        "completed": true,
+        "phase": "done",
+        "diagnosticElapsedMs": 4243.443917,
+        "diagnosticMaxRSSKiB": 102336,
+        "limits": {
+          "timeoutMs": 30000,
+          "maxHeapMiB": 512,
+          "maxCombinedDbWalBytes": 1073741824,
+          "sqliteCacheKiB": 32768,
+          "mmapBytes": 0,
+          "maxIntegrityErrors": 100,
+          "maxForeignKeyErrors": 100,
+          "maxFileRecords": 50000,
+          "maxFileExamples": 100,
+          "maxStoredErrorChars": 4000
+        },
+        "storageChecksPassed": true,
+        "pageStorage": {
+          "pageSize": 4096,
+          "pageCount": 139563,
+          "freelistCount": 0,
+          "logicalBytes": 571650048,
+          "journalMode": "wal"
+        },
+        "pageStorageMeaning": "Logical committed pages including copied WAL; not a compacted database size. No checkpoint or VACUUM performed by the recorded diagnostics.",
+        "recordCounts": {
+          "nodes": 232604,
+          "edges": 445389,
+          "files": 14891,
+          "referencesByStatus": [
+            {
+              "status": "failed",
+              "count": 566562
+            }
+          ]
+        },
+        "integrityCheck": {
+          "ok": true,
+          "errorLimitReached": false,
+          "messages": [
+            "ok"
+          ],
+          "diagnosticMs": 2686.668709
+        },
+        "foreignKeyCheck": {
+          "ok": true,
+          "observed": 0,
+          "truncated": false,
+          "examplesCount": 0,
+          "countMeaning": "Complete violation count",
+          "diagnosticMs": 348.80570799999987
+        },
+        "orphanCounts": {
+          "edgesMissingSource": 0,
+          "edgesMissingTarget": 0,
+          "referencesMissingSource": 0,
+          "nodesWithoutFileRecord": 0,
+          "filesWithoutNodes": 21
+        },
+        "orphanInterpretation": "No missing edge/reference node endpoints observed. Files without nodes are reported separately and do not alone prove graph corruption.",
+        "fileDiagnostics": {
+          "scanned": 14891,
+          "truncated": false,
+          "generated": 13,
+          "zeroNodeRecords": 21,
+          "negativeSizeRecords": 0,
+          "filesWithErrors": 46,
+          "malformedErrorJson": 0,
+          "oversizedErrorJson": 0,
+          "examplesTruncated": false,
+          "filesWithErrorsMeaning": "File records carrying diagnostics, including warnings; not a count of fatal file extraction errors.",
+          "byLanguage": {
+            "yaml": 19,
+            "nix": 7,
+            "haskell": 14011,
+            "python": 39,
+            "c": 737,
+            "javascript": 60,
+            "cpp": 10,
+            "objc": 3,
+            "typescript": 2,
+            "tsx": 3
+          },
+          "byErrorCode": {
+            "parse_error": 46
+          },
+          "diagnosticSeverityCountsFromCompleteStoredExamples": {
+            "warning": 44,
+            "error": 2
+          },
+          "fileDiagnosticLedger": [
+            {
+              "file": "libraries/ghc-internal/include/CTypes.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/libraries/ghc-internal/include/CTypes.h",
+              "sizeBytes": 1292,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/rts/Globals.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/rts/Globals.h",
+              "sizeBytes": 1621,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/rts/Main.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/rts/Main.h",
+              "sizeBytes": 698,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "rts/include/stg/MachRegs/s390x.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/rts/include/stg/MachRegs/s390x.h",
+              "sizeBytes": 2563,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/default/default-fail01.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/default/default-fail01.hs",
+              "sizeBytes": 54,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/default/default-fail02.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/default/default-fail02.hs",
+              "sizeBytes": 30,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/default/default-fail03.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/default/default-fail03.hs",
+              "sizeBytes": 92,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T12135a.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T12135a.h",
+              "sizeBytes": 12,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T12135b.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T12135b.h",
+              "sizeBytes": 12,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T16167.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T16167.hs",
+              "sizeBytes": 9,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T16521/a.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T16521/a.h",
+              "sizeBytes": 7,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/T16521/b2.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/T16521/b2.h",
+              "sizeBytes": 9,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/driver/bug1677/Foo.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/driver/bug1677/Foo.hs",
+              "sizeBytes": 17,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/RecordDotSyntaxFail1.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/RecordDotSyntaxFail1.hs",
+              "sizeBytes": 151,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/T5425.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/T5425.hs",
+              "sizeBytes": 125,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/T8431.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/T8431.hs",
+              "sizeBytes": 2,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/readFail012.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/readFail012.hs",
+              "sizeBytes": 171,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/strictnessDataCon_A.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/strictnessDataCon_A.hs",
+              "sizeBytes": 30,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/strictnessDataCon_B.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/strictnessDataCon_B.hs",
+              "sizeBytes": 43,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/typeops_B.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/typeops_B.hs",
+              "sizeBytes": 13,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_fail/typeops_D.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_fail/typeops_D.hs",
+              "sizeBytes": 11,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_run/T25609.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_run/T25609.hs",
+              "sizeBytes": 608,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/should_run/T26415.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/should_run/T26415.hs",
+              "sizeBytes": 156,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_002.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_002.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_003.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_003.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_004.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_004.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/parser/unicode/utf8_005.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/parser/unicode/utf8_005.hs",
+              "sizeBytes": 24,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/perf/compiler/parsing001.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/perf/compiler/parsing001.hs",
+              "sizeBytes": 580313,
+              "nodeCount": 0,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "error",
+                  "code": "parse_error",
+                  "category": "parser-timeout",
+                  "timeoutMs": 60000
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/rts/T27434.hs",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/rts/T27434.hs",
+              "sizeBytes": 24573,
+              "nodeCount": 0,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "error",
+                  "code": "parse_error",
+                  "category": "parser-timeout",
+                  "timeoutMs": 30000
+                }
+              ]
+            },
+            {
+              "file": "testsuite/tests/safeHaskell/flags/Flags01_A.cpp",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/testsuite/tests/safeHaskell/flags/Flags01_A.cpp",
+              "sizeBytes": 35,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/AreaBelow.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/AreaBelow.h",
+              "sizeBytes": 48,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/AuxFile.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/AuxFile.h",
+              "sizeBytes": 80,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Axes.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Axes.h",
+              "sizeBytes": 39,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Curves.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Curves.h",
+              "sizeBytes": 141,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Defines.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Defines.h",
+              "sizeBytes": 2060,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Deviation.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Deviation.h",
+              "sizeBytes": 75,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Dimensions.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Dimensions.h",
+              "sizeBytes": 405,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Error.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Error.h",
+              "sizeBytes": 156,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Key.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Key.h",
+              "sizeBytes": 38,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Marks.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Marks.h",
+              "sizeBytes": 40,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/PsFile.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/PsFile.h",
+              "sizeBytes": 86,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Reorder.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Reorder.h",
+              "sizeBytes": 79,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Scale.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Scale.h",
+              "sizeBytes": 86,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/Shade.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/Shade.h",
+              "sizeBytes": 134,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/TopTwenty.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/TopTwenty.h",
+              "sizeBytes": 44,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            },
+            {
+              "file": "utils/hp2ps/TraceElement.h",
+              "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/utils/hp2ps/TraceElement.h",
+              "sizeBytes": 47,
+              "nodeCount": 1,
+              "storedErrorsTruncated": false,
+              "diagnostics": [
+                {
+                  "severity": "warning",
+                  "code": "parse_error",
+                  "category": "parse-tree-errors-produced-no-symbols"
+                }
+              ]
+            }
+          ]
+        },
+        "preservation": {
+          "reportedDatabaseAndWalUnchanged": true,
+          "beforeAfterRecordsEqual": true,
+          "files": [
+            {
+              "fileRole": "mainDatabase",
+              "presentBefore": true,
+              "presentAfter": true,
+              "sizeBytesBefore": 571650048,
+              "sizeBytesAfter": 571650048,
+              "sizeUnchanged": true,
+              "mtimeUnchanged": true,
+              "recordedDigestUnchanged": true,
+              "recordedMetadataUnchanged": true
+            },
+            {
+              "fileRole": "wal",
+              "presentBefore": false,
+              "presentAfter": false,
+              "before": null,
+              "after": null,
+              "recordedMetadataUnchanged": true
+            }
+          ],
+          "scope": "Recorded main database and WAL; this summary recomputes no hashes and does not infer SHM preservation or a process census."
+        }
+      },
+      "flows": {
+        "startedAt": "2026-09-20T08:09:10.270Z",
+        "node": "v24.18.0",
+        "completed": true,
+        "phase": "done",
+        "diagnosticElapsedMs": 3561.0117499999997,
+        "diagnosticMaxRSSKiB": 334592,
+        "limits": {
+          "timeoutMs": 30000,
+          "maxHeapMiB": 512,
+          "maxCombinedDbWalBytes": 1073741824,
+          "maxStoredResponseChars": 65536
+        },
+        "openingMode": "Isolated main database plus WAL copy; native read-only adapter; no migration, healing, indexing or synchronization.",
+        "persistedIndexState": "complete",
+        "indexFileAccounting": {
+          "index_files_accounted": 14891,
+          "index_files_discovered": 14891
+        },
+        "indexFileAccountingPresent": true,
+        "unresolvedReferenceStatusTotals": [
+          {
+            "status": "failed",
+            "count": 566562
+          }
+        ],
+        "queries": [
+          {
+            "query": "hsc_typecheck tcRnModule' tcRnModule",
+            "diagnosticExploreMs": 912.260333,
+            "isError": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "surfacedChain": [],
+            "responseChars": 24773,
+            "outputTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "hscDesugar hscDesugar' deSugar",
+            "diagnosticExploreMs": 781.5710829999998,
+            "isError": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "surfacedChain": [],
+            "responseChars": 24978,
+            "outputTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "hscSimplify hscSimplify' core2core",
+            "diagnosticExploreMs": 801.3307500000001,
+            "isError": false,
+            "surfacedFlow": {
+              "present": false,
+              "steps": 0,
+              "truncated": false
+            },
+            "surfacedChain": [],
+            "responseChars": 24971,
+            "outputTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ],
+        "flowPresentCount": 0,
+        "queryCount": 3,
+        "recordedAuxiliaryArrays": {
+          "scope": "Rows captured for the nine queried canonical symbols; these counts are not the whole graph. Raw rows and metadata are excluded.",
+          "nodes": {
+            "count": 9,
+            "truncated": false
+          },
+          "outgoingEdges": {
+            "count": 17,
+            "truncated": false
+          },
+          "unresolvedReferences": {
+            "count": 355,
+            "truncated": false
+          }
+        },
+        "queriedFiles": [
+          {
+            "file": "compiler/GHC/Core/Opt/Pipeline.hs",
+            "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/compiler/GHC/Core/Opt/Pipeline.hs",
+            "sizeBytes": 26228,
+            "nodeCount": 73,
+            "storedErrorsAbsent": true
+          },
+          {
+            "file": "compiler/GHC/Driver/Main/Passes.hs",
+            "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/compiler/GHC/Driver/Main/Passes.hs",
+            "sizeBytes": 75851,
+            "nodeCount": 181,
+            "storedErrorsAbsent": true
+          },
+          {
+            "file": "compiler/GHC/HsToCore.hs",
+            "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/compiler/GHC/HsToCore.hs",
+            "sizeBytes": 33229,
+            "nodeCount": 98,
+            "storedErrorsAbsent": true
+          },
+          {
+            "file": "compiler/GHC/Tc/Module.hs",
+            "sourceUrl": "https://github.com/ghc/ghc/blob/82c73b223a985bc0bcc00cb6252b2b535082d831/compiler/GHC/Tc/Module.hs",
+            "sizeBytes": 142691,
+            "nodeCount": 259,
+            "storedErrorsAbsent": true
+          }
+        ],
+        "preservation": {
+          "reportedDatabaseAndWalUnchanged": true,
+          "beforeAfterRecordsEqual": true,
+          "files": [
+            {
+              "fileRole": "mainDatabase",
+              "presentBefore": true,
+              "presentAfter": true,
+              "sizeBytesBefore": 571650048,
+              "sizeBytesAfter": 571650048,
+              "sizeUnchanged": true,
+              "mtimeUnchanged": true,
+              "recordedDigestUnchanged": true,
+              "recordedMetadataUnchanged": true
+            },
+            {
+              "fileRole": "wal",
+              "presentBefore": false,
+              "presentAfter": false,
+              "before": null,
+              "after": null,
+              "recordedMetadataUnchanged": true
+            }
+          ],
+          "scope": "Recorded main database and WAL; this summary recomputes no hashes and does not infer SHM preservation or a process census."
+        }
+      },
+      "processEvidenceScope": {
+        "bothDiagnosticReportsReachedDone": true,
+        "exitCodeRecordedInTheseInputs": false,
+        "independentProcessCensusRecordedInTheseInputs": false,
+        "qualification": "The four supplied JSON reports record diagnostic completion and elapsed/resource bounds. They do not contain supervisor exit codes or a post-run process census; no such proof is inferred."
+      }
+    }
+  },
+  "publicReferences": [
+    {
+      "file": "haskell-audit-2026-09-20-final-postmeasurement.json",
+      "pointer": "/rows",
+      "role": "Nine new constructor-recall172 postmeasurement probe records and supervisor/preservation fields"
+    },
+    {
+      "file": "haskell-audit-2026-09-20-final-postmeasurement.json",
+      "pointer": "/reusedBaselineFull",
+      "role": "Earlier baseline-full diagnostic evidence, reused without re-execution"
+    },
+    {
+      "file": "haskell-audit-2026-09-20-final-validation.json",
+      "pointer": "/engine",
+      "role": "Frozen constructor-recall172 engine identity and separate complete validation"
+    },
+    {
+      "file": "haskell-audit-2026-09-20-express-source-review.json",
+      "pointer": "",
+      "role": "Existing Express source verdicts; displayed wrong-target Flow is not credited"
+    }
+  ]
+}

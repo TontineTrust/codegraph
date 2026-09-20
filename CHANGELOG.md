@@ -160,6 +160,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Interrupted indexing and synchronization recover current references and remove partial symbols when source files change.
 - Haskell re-export searches reuse compiled visibility constraints and combine equivalent parent alternatives while preserving namespace, ambiguity, and work-limit checks.
 - Haskell call paths now reach definitions through large networks of re-exports while preserving visibility and ambiguity checks.
+- Haskell constructors imported with `T(..)` retain their calls when they share the type's name, including in modules with unrelated deep re-exports.
 
 - Rust calls on `self` now stay with the enclosing type instead of linking to an unrelated type’s same-named method. Thanks @L4XB. (#1861)
 

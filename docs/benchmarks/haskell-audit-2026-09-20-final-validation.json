@@ -1,0 +1,1338 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "purpose": "Complete validation of corrected engine 172fd3b; corpus measurements and graph comparison are separate.",
+  "engine": {
+    "arm": "candidate-constructor-recall-20260920",
+    "codeRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+    "distSha256": "a70124c4ca4f4d4324a114f24bc8ab7b848406da721795c7341a18f8b5b5af75",
+    "distFiles": 1042,
+    "builtFrom": "Successful full npm run build; full-build-constructor-recall-20260920.log",
+    "sourceDistByteIdentical": true,
+    "createdAt": "2026-09-20T08:21:05.344843+00:00"
+  },
+  "validation": {
+    "schemaVersion": 1,
+    "date": "2026-09-20",
+    "createdAt": "2026-09-20T08:34:40Z",
+    "completed": true,
+    "sourceRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+    "frozenArm": "candidate-constructor-recall-20260920",
+    "build": {
+      "macOS": {
+        "exitCode": 0,
+        "performedBy": "root task",
+        "log": "full-build-constructor-recall-20260920.log",
+        "replayedForValidation": false
+      },
+      "verification": "full-build-verification-constructor-recall-20260920.public.json",
+      "finalSeal": "final-seal-constructor-recall-20260920.public.json",
+      "matchesFrozenEngine": true,
+      "finalDist": {
+        "distFiles": 1042,
+        "distSha256": "a70124c4ca4f4d4324a114f24bc8ab7b848406da721795c7341a18f8b5b5af75"
+      },
+      "linux": {
+        "exitCode": 0,
+        "elapsedSeconds": 17.026,
+        "log": "linux-build-constructor-recall-20260920.log",
+        "imageTag": "codegraph-haskell-audit:constructor-recall-20260920"
+      }
+    },
+    "typescript": {
+      "label": "tsc-constructor-recall-20260920",
+      "command": [
+        "npx",
+        "tsc",
+        "--noEmit"
+      ],
+      "timeoutSeconds": 120,
+      "startedAt": "2026-09-20T08:25:51Z",
+      "exitCode": 0,
+      "processGroupClosed": true,
+      "completed": true,
+      "elapsedSeconds": 2.296,
+      "cancelledSignals": []
+    },
+    "focusedSuite": {
+      "passed": true,
+      "testsPassed": 185,
+      "testsSkipped": 0,
+      "filesPassed": 10,
+      "filesSkipped": 0,
+      "vitestDurationSeconds": 5.0,
+      "wallSeconds": 5.607,
+      "log": "focused-tests-constructor-recall-20260920.log",
+      "constructorTestsPassed": 20,
+      "completeWorkspaceIncludingUi": false
+    },
+    "suites": {
+      "macOS": {
+        "passed": true,
+        "testsPassed": 5089,
+        "testsSkipped": 192,
+        "filesPassed": 285,
+        "filesSkipped": 16,
+        "vitestDurationSeconds": 93.53,
+        "wallSeconds": 94.221,
+        "log": "full-tests-macos-constructor-recall-20260920.log",
+        "constructorTestsPassed": 20,
+        "completeWorkspaceIncludingUi": true,
+        "options": {
+          "workspace": "engine and UI",
+          "maxWorkers": 4,
+          "minWorkers": 1,
+          "pool": "forks",
+          "forkExecArgv": [
+            "--liftoff-only"
+          ],
+          "extraGlobalTelemetryFlags": false
+        },
+        "runtime": {
+          "node": "v24.18.0",
+          "npm": "11.16.0",
+          "vitest": "2.1.9",
+          "platform": "darwin",
+          "arch": "arm64",
+          "release": "27.0.0",
+          "v8": "13.6.233.17-node.50",
+          "sqlite": "3.53.1"
+        }
+      },
+      "linux": {
+        "passed": true,
+        "testsPassed": 5089,
+        "testsSkipped": 192,
+        "filesPassed": 285,
+        "filesSkipped": 16,
+        "vitestDurationSeconds": 77.42,
+        "wallSeconds": 78.235,
+        "log": "full-tests-linux-constructor-recall-20260920.log",
+        "constructorTestsPassed": 20,
+        "completeWorkspaceIncludingUi": true,
+        "options": {
+          "workspace": "engine and UI",
+          "maxWorkers": 4,
+          "minWorkers": 1,
+          "v8Flags": "default",
+          "CODEGRAPH_KERNEL": "0",
+          "extraGlobalTelemetryFlags": false
+        },
+        "runtime": {
+          "node": "v22.23.2",
+          "npm": "10.9.8",
+          "vitest": "2.1.9",
+          "platform": "linux",
+          "arch": "arm64",
+          "release": "6.12.76-linuxkit",
+          "v8": "12.4.254.21-node.56",
+          "sqlite": "3.51.3"
+        }
+      }
+    },
+    "linux": {
+      "imageTag": "codegraph-haskell-audit:constructor-recall-20260920",
+      "imageId": "sha256:4c21e3d58b12e38c9086c5b9fbf50e8f932b159163892d7a0513eb641e897d36",
+      "architecture": "arm64",
+      "os": "linux",
+      "baseTag": "node:22-bookworm",
+      "freshContext": true,
+      "copiedSourceFiles": 1158,
+      "contextSourceRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+      "requiredFilesVerified": [
+        "__tests__/haskell-export-absence.test.ts",
+        "__tests__/haskell-export-history.test.ts",
+        "__tests__/haskell-export-possible.test.ts",
+        "__tests__/haskell-export-singleton.test.ts",
+        "__tests__/haskell-owner-pattern-cache.test.ts",
+        "__tests__/haskell-parent-route-union.test.ts",
+        "__tests__/haskell-same-name-constructor.test.ts",
+        "__tests__/reexport-traversal-budget.test.ts",
+        "package-lock.json",
+        "package.json",
+        "src/resolution/import-resolver.ts",
+        "vitest.workspace.mts"
+      ],
+      "testContainerRemoved": true
+    },
+    "package": {
+      "evidence": "package-consumer-constructor-recall-20260920/package-validation.public.json",
+      "executionStartedAt": "2026-09-20T08:31:10Z",
+      "completed": true,
+      "published": false,
+      "versionBumped": false,
+      "archive": {
+        "name": "@colbymchenry/codegraph",
+        "version": "1.6.0",
+        "size": 8864264,
+        "unpackedSize": 83759827,
+        "shasum": "f54f7be9fe57394a0115e6909fbdb0e0b359902e",
+        "integrity": "sha512-mFNya7+/hiel6zT5zBdQY7mYUe0NqK84Kna0ALbLWdg3GACLOkWuTMsD+/b4jTWC0wlbzgIFMy4QEkTM86LmLQ==",
+        "entryCount": 1129
+      },
+      "archiveSha256": "978e11669c5bca19b1b1b53669cf26ea954a9ac0a938384ddef573596ecacaba",
+      "assets": {
+        "name": "@colbymchenry/codegraph",
+        "version": "1.6.0",
+        "entryCount": 1129,
+        "unpackedBytes": 83759827,
+        "grammarCount": 30,
+        "haskellLicensePresent": true,
+        "packageLicensePresent": true,
+        "schemaPresent": true,
+        "viewerPresent": true,
+        "safePathsAndTypes": true,
+        "allBuiltDistAndScriptFilesByteEqual": true
+      },
+      "installedArchiveFilesByteEqual": true,
+      "archiveUnchanged": true,
+      "originalPackInputsUnchanged": true,
+      "runtime": {
+        "node": "v24.18.0",
+        "npm": "11.16.0",
+        "python": "3.9.6"
+      },
+      "cliVersion": "1.6.0",
+      "cliStatus": {
+        "initialized": true,
+        "version": "1.6.0",
+        "fileCount": 3,
+        "nodeCount": 11,
+        "edgeCount": 12,
+        "backend": "node-sqlite",
+        "languages": [
+          "haskell"
+        ],
+        "index": {
+          "builtWithVersion": "1.6.0",
+          "builtWithExtractionVersion": 29,
+          "currentExtractionVersion": 29,
+          "reindexRecommended": false,
+          "state": "complete",
+          "pendingRefs": 0
+        }
+      },
+      "graph": {
+        "state": "complete",
+        "expectedCallEdges": [
+          [
+            "alpha",
+            "beta"
+          ],
+          [
+            "beta",
+            "gamma"
+          ]
+        ],
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "sqliteRuntime": "same Node as installed CLI"
+      },
+      "mcp": {
+        "run": true,
+        "sdkVersion": "1.30.0",
+        "connected": true,
+        "toolCount": 1,
+        "exploreListed": true,
+        "isError": false,
+        "outputTruncated": false,
+        "responseBytes": 1401,
+        "responseSha256": "76b947269fe38106b4c77c7ec5bd77634a28e3385af925b4255df89bdbea31b1",
+        "evidenceTruncated": false,
+        "actualFlow": {
+          "present": true,
+          "steps": 3,
+          "expectedOrder": true
+        },
+        "directStdio": true,
+        "watcherDisabled": true,
+        "runtimeFlagsOverridden": false,
+        "clientClosed": true,
+        "stderrBytes": 189
+      },
+      "disposableConsumerRemoved": true,
+      "allProcessGroupsClosed": true,
+      "commandWallSecondsSum": 10.317,
+      "consumerDependencySource": "fresh npm install from checked tarball"
+    },
+    "campaignDriverSmoke": {
+      "evidence": "constructor-driver-smoke-20260920.public.json",
+      "completed": true,
+      "cases": {
+        "complete": {
+          "steps": 12,
+          "stubChildren": 12,
+          "childSleepSeconds": 0.02,
+          "exitCode": 0,
+          "allOwnedGroupsClosed": true,
+          "workerGroupClosed": true,
+          "leaseReleased": true,
+          "controlSocketRemoved": true,
+          "statusCommandPassed": true
+        },
+        "stop": {
+          "childSleepSeconds": 20,
+          "stubChildrenStarted": 1,
+          "secondCampaignLaunchRefused": true,
+          "socketStopAccepted": true,
+          "exitCode": 130,
+          "allOwnedGroupsClosed": true,
+          "workerGroupClosed": true,
+          "leaseReleased": true,
+          "controlSocketRemoved": true
+        }
+      },
+      "productionDriverUnchanged": true,
+      "benchmarkExecuted": false,
+      "realRunsOpened": false
+    },
+    "dependencyAudit": {
+      "schemaVersion": 1,
+      "createdAt": "2026-09-20T08:34:33Z",
+      "completed": true,
+      "sourceRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+      "imageTag": "codegraph-haskell-audit:constructor-recall-20260920",
+      "sourceOrDependenciesModified": false,
+      "method": "Two read-only npm audit commands in new disposable containers from the freshly built Linux validation image; no audit fix or install was run.",
+      "commands": [
+        {
+          "scope": "all",
+          "exitCode": 1,
+          "nonzeroExpectedForAdvisories": true,
+          "processGroupClosed": true,
+          "counts": {
+            "info": 0,
+            "low": 0,
+            "moderate": 5,
+            "high": 4,
+            "critical": 1,
+            "total": 10
+          },
+          "privateLog": "npm-audit-all-constructor-recall-20260920.internal.log"
+        },
+        {
+          "scope": "production",
+          "exitCode": 0,
+          "nonzeroExpectedForAdvisories": false,
+          "processGroupClosed": true,
+          "counts": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0,
+            "total": 0
+          },
+          "privateLog": "npm-audit-production-constructor-recall-20260920.internal.log"
+        }
+      ],
+      "packages": [
+        {
+          "package": "@sveltejs/vite-plugin-svelte",
+          "severity": "moderate",
+          "isDirect": true,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=5.0.0",
+          "viaPackages": [
+            "@sveltejs/vite-plugin-svelte-inspector",
+            "vite"
+          ],
+          "directAdvisoryUrls": []
+        },
+        {
+          "package": "@sveltejs/vite-plugin-svelte-inspector",
+          "severity": "moderate",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=3.0.1",
+          "viaPackages": [
+            "@sveltejs/vite-plugin-svelte",
+            "vite"
+          ],
+          "directAdvisoryUrls": []
+        },
+        {
+          "package": "@vitest/mocker",
+          "severity": "moderate",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=4.1.10",
+          "viaPackages": [
+            "vite"
+          ],
+          "directAdvisoryUrls": [
+            "https://github.com/advisories/GHSA-82fw-gwwq-j7x9"
+          ]
+        },
+        {
+          "package": "esbuild",
+          "severity": "moderate",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=0.24.2",
+          "viaPackages": [],
+          "directAdvisoryUrls": [
+            "https://github.com/advisories/GHSA-67mh-4wv8-2f99"
+          ]
+        },
+        {
+          "package": "nanoid",
+          "severity": "high",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=3.3.17",
+          "viaPackages": [],
+          "directAdvisoryUrls": [
+            "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+            "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+            "https://github.com/advisories/GHSA-xwg4-73v4-xw9w"
+          ]
+        },
+        {
+          "package": "postcss",
+          "severity": "high",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=8.5.22",
+          "viaPackages": [],
+          "directAdvisoryUrls": [
+            "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+            "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+            "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+            "https://github.com/advisories/GHSA-r28c-9q8g-f849"
+          ]
+        },
+        {
+          "package": "rollup",
+          "severity": "high",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "4.0.0 - 4.58.0",
+          "viaPackages": [],
+          "directAdvisoryUrls": [
+            "https://github.com/advisories/GHSA-mw96-cpmx-2vgc"
+          ]
+        },
+        {
+          "package": "vite",
+          "severity": "high",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=6.4.2",
+          "viaPackages": [
+            "esbuild"
+          ],
+          "directAdvisoryUrls": [
+            "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+            "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+            "https://github.com/advisories/GHSA-fx2h-pf6j-xcff"
+          ]
+        },
+        {
+          "package": "vite-node",
+          "severity": "moderate",
+          "isDirect": false,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=2.2.0-beta.2",
+          "viaPackages": [
+            "vite"
+          ],
+          "directAdvisoryUrls": []
+        },
+        {
+          "package": "vitest",
+          "severity": "critical",
+          "isDirect": true,
+          "absentWhenDevOmitted": true,
+          "affectedRange": "<=4.1.10",
+          "viaPackages": [
+            "@vitest/mocker",
+            "vite",
+            "vite-node"
+          ],
+          "directAdvisoryUrls": [
+            "https://github.com/advisories/GHSA-5xrq-8626-4rwp",
+            "https://github.com/advisories/GHSA-82fw-gwwq-j7x9"
+          ]
+        }
+      ],
+      "advisories": [
+        {
+          "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+          "name": "vitest",
+          "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+          "severity": "moderate",
+          "range": ">=2.1.0 <4.1.11"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+          "name": "esbuild",
+          "title": "esbuild enables any website to send any requests to the development server and read the response",
+          "severity": "moderate",
+          "range": "<=0.24.2"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+          "name": "nanoid",
+          "title": "nanoid: non-secure generators can loop indefinitely with negative size",
+          "severity": "high",
+          "range": "<3.3.16"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+          "name": "nanoid",
+          "title": "nanoid: custom generators can loop indefinitely when size is zero",
+          "severity": "high",
+          "range": "<3.3.18"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w",
+          "name": "nanoid",
+          "title": "nanoid: Integer Overflow or Wraparound",
+          "severity": "high",
+          "range": "<3.3.12"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+          "name": "postcss",
+          "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+          "severity": "moderate",
+          "range": "<8.5.10"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+          "name": "postcss",
+          "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+          "severity": "high",
+          "range": "<=8.5.11"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+          "name": "postcss",
+          "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+          "severity": "moderate",
+          "range": "<=8.5.22"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+          "name": "postcss",
+          "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+          "severity": "high",
+          "range": "<=8.5.17"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-mw96-cpmx-2vgc",
+          "name": "rollup",
+          "title": "Rollup 4 has Arbitrary File Write via Path Traversal",
+          "severity": "high",
+          "range": ">=4.0.0 <4.59.0"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+          "name": "vite",
+          "title": "Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling",
+          "severity": "moderate",
+          "range": "<=6.4.1"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+          "name": "vite",
+          "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+          "severity": "moderate",
+          "range": "<=6.4.2"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+          "name": "vite",
+          "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+          "severity": "high",
+          "range": "<=6.4.2"
+        },
+        {
+          "url": "https://github.com/advisories/GHSA-5xrq-8626-4rwp",
+          "name": "vitest",
+          "title": "When Vitest UI server is listening, arbitrary file can be read and executed",
+          "severity": "critical",
+          "range": "<3.2.6"
+        }
+      ],
+      "limitations": [
+        "Registry advisory snapshot, not an exploitability assessment.",
+        "absentWhenDevOmitted means omitted by this npm audit production filter; it is not a claim about every deployment or bundled asset.",
+        "The source package consumer has separate fresh-install validation and dependency evidence."
+      ]
+    },
+    "processClosure": {
+      "remainingNamedContainers": [],
+      "remainingMatchingValidationProcesses": [],
+      "allObservedValidationProcessesClosed": true,
+      "scope": "All stage process groups, helper-reported owned groups, named validation containers and a bounded final process inventory; no unrelated processes were terminated."
+    },
+    "stages": [
+      {
+        "label": "tsc-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 2.296,
+        "processGroupClosed": true
+      },
+      {
+        "label": "focused-tests-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 5.607,
+        "processGroupClosed": true
+      },
+      {
+        "label": "full-tests-macos-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 94.221,
+        "processGroupClosed": true
+      },
+      {
+        "label": "linux-context-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 0.766,
+        "processGroupClosed": true
+      },
+      {
+        "label": "linux-build-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 17.026,
+        "processGroupClosed": true
+      },
+      {
+        "label": "full-tests-linux-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 78.235,
+        "processGroupClosed": true
+      },
+      {
+        "label": "linux-runtime-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 0.31,
+        "processGroupClosed": true
+      },
+      {
+        "label": "package-consumer-constructor-recall-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 11.371,
+        "processGroupClosed": true
+      },
+      {
+        "label": "constructor-recall-driver-smoke-20260920",
+        "exitCode": 0,
+        "elapsedSeconds": 7.503,
+        "processGroupClosed": true
+      }
+    ],
+    "limitations": [
+      "macOS uses the documented Liftoff mitigation for a pre-existing V8 failure; default-V8 macOS full-suite success is not claimed.",
+      "Linux uses the existing optional-kernel-disabled configuration; the mutable base tag and exact resulting image/runtime are recorded.",
+      "Package validation covers a fresh source npm package consumer and real SDK MCP stdio Flow, not Windows or the separate platform-bundled release/shim workflow.",
+      "The reused package helper has a legacy static auditDate; the new execution timestamp, output lineage and source/dist seals establish this run.",
+      "Dependency advisories are read-only registry results for the recorded lock/image; no source or dependency upgrade was performed.",
+      "No earlier revision validation was substituted, and this validation makes no corpus performance or repaired-index claim."
+    ]
+  },
+  "packageExecutionDate": "2026-09-20",
+  "packageHelperDateNotice": "The reused helper retains a legacy auditDate of 2026-09-19; the actual command timestamps and validation.package.executionStartedAt identify this new 20 September execution.",
+  "package": {
+    "schemaVersion": 1,
+    "auditDate": "2026-09-19",
+    "completed": true,
+    "published": false,
+    "versionBumped": false,
+    "consumerDependencySource": "fresh npm install from checked tarball",
+    "platform": "Darwin",
+    "architecture": "arm64",
+    "commands": [
+      {
+        "label": "node-version",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 57
+      },
+      {
+        "label": "npm-version",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 123
+      },
+      {
+        "label": "npm-pack",
+        "timeoutSeconds": 90,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 4878
+      },
+      {
+        "label": "fresh-install",
+        "timeoutSeconds": 240,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 1820
+      },
+      {
+        "label": "cli-version",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 303
+      },
+      {
+        "label": "installed-assets",
+        "timeoutSeconds": 20,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 62
+      },
+      {
+        "label": "cli-init",
+        "timeoutSeconds": 60,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 514
+      },
+      {
+        "label": "cli-reindex",
+        "timeoutSeconds": 60,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 303
+      },
+      {
+        "label": "cli-status",
+        "timeoutSeconds": 20,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 180
+      },
+      {
+        "label": "cli-query",
+        "timeoutSeconds": 20,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 176
+      },
+      {
+        "label": "graph-readonly",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 58
+      },
+      {
+        "label": "mcp-sdk-install",
+        "timeoutSeconds": 180,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 1492
+      },
+      {
+        "label": "mcp-stdio",
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 351
+      }
+    ],
+    "limitations": [
+      "Source npm package only; does not validate the platform-bundled release/shim workflow.",
+      "Network dependency versions reflect this install, not the development lockfile.",
+      "Default compiled parser/CLI runtime; no NODE_PATH, NODE_OPTIONS or kernel override.",
+      "MCP uses direct stdio with daemon and watcher disabled for isolated cleanup.",
+      "Command timeouts and output guards are not total RSS or disk-quota guarantees."
+    ],
+    "packInputsBefore": {
+      "files": 1130,
+      "bytes": 83883666,
+      "manifestSha256": "ca56a3800628df1920a3ecf523f27d85c5e7a25be69feda753c8b4362dc65731"
+    },
+    "runtime": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "python": "3.9.6"
+    },
+    "npmPack": {
+      "name": "@colbymchenry/codegraph",
+      "version": "1.6.0",
+      "size": 8864264,
+      "unpackedSize": 83759827,
+      "shasum": "f54f7be9fe57394a0115e6909fbdb0e0b359902e",
+      "integrity": "sha512-mFNya7+/hiel6zT5zBdQY7mYUe0NqK84Kna0ALbLWdg3GACLOkWuTMsD+/b4jTWC0wlbzgIFMy4QEkTM86LmLQ==",
+      "entryCount": 1129
+    },
+    "archiveCreatedByThisRun": true,
+    "archiveBefore": {
+      "bytes": 8864264,
+      "mtimeNs": 1789893075913025183,
+      "sha256": "978e11669c5bca19b1b1b53669cf26ea954a9ac0a938384ddef573596ecacaba"
+    },
+    "archive": {
+      "name": "@colbymchenry/codegraph",
+      "version": "1.6.0",
+      "entryCount": 1129,
+      "unpackedBytes": 83759827,
+      "grammarCount": 30,
+      "haskellLicensePresent": true,
+      "packageLicensePresent": true,
+      "schemaPresent": true,
+      "viewerPresent": true,
+      "safePathsAndTypes": true,
+      "allBuiltDistAndScriptFilesByteEqual": true
+    },
+    "installedArchiveFilesByteEqual": true,
+    "cliVersion": "1.6.0",
+    "cliStatus": {
+      "initialized": true,
+      "version": "1.6.0",
+      "fileCount": 3,
+      "nodeCount": 11,
+      "edgeCount": 12,
+      "backend": "node-sqlite",
+      "languages": [
+        "haskell"
+      ],
+      "index": {
+        "builtWithVersion": "1.6.0",
+        "builtWithExtractionVersion": 29,
+        "currentExtractionVersion": 29,
+        "reindexRecommended": false,
+        "state": "complete",
+        "pendingRefs": 0
+      }
+    },
+    "cliQueryFoundAlpha": true,
+    "graph": {
+      "state": "complete",
+      "expectedCallEdges": [
+        [
+          "alpha",
+          "beta"
+        ],
+        [
+          "beta",
+          "gamma"
+        ]
+      ],
+      "integrity": "ok",
+      "foreignKeyViolations": 0,
+      "sqliteRuntime": "same Node as installed CLI"
+    },
+    "consumerLockBeforeMcp": {
+      "bytes": 5821,
+      "mtimeNs": 1789893077908265996,
+      "sha256": "448c6f70003b70713fc2a1ac5c43346bddf6371319e01abaaa4723d64eeffe9d",
+      "installedVersions": {
+        "node_modules/@clack/core": "1.5.1",
+        "node_modules/@clack/prompts": "1.8.1",
+        "node_modules/@colbymchenry/codegraph": "1.6.0",
+        "node_modules/commander": "14.0.3",
+        "node_modules/fast-string-truncated-width": "3.0.3",
+        "node_modules/fast-string-width": "3.0.2",
+        "node_modules/fast-wrap-ansi": "0.2.2",
+        "node_modules/ignore": "7.0.9",
+        "node_modules/jsonc-parser": "3.3.1",
+        "node_modules/picomatch": "4.0.7",
+        "node_modules/sisteransi": "1.0.5",
+        "node_modules/tree-sitter-wasms": "0.1.13",
+        "node_modules/web-tree-sitter": "0.25.10"
+      }
+    },
+    "mcp": {
+      "run": true,
+      "sdkVersion": "1.30.0",
+      "connected": true,
+      "toolCount": 1,
+      "exploreListed": true,
+      "isError": false,
+      "outputTruncated": false,
+      "responseBytes": 1401,
+      "responseSha256": "76b947269fe38106b4c77c7ec5bd77634a28e3385af925b4255df89bdbea31b1",
+      "evidenceTruncated": false,
+      "actualFlow": {
+        "present": true,
+        "steps": 3,
+        "expectedOrder": true
+      },
+      "directStdio": true,
+      "watcherDisabled": true,
+      "runtimeFlagsOverridden": false,
+      "clientClosed": true,
+      "stderrBytes": 189
+    },
+    "consumerLockAfterMcp": {
+      "bytes": 47921,
+      "mtimeNs": 1789893081033057734,
+      "sha256": "565bc8c05e4e68959fc66029f1cddffad620de89392b30f6b449180b1047bab6",
+      "installedVersions": {
+        "node_modules/@clack/core": "1.5.1",
+        "node_modules/@clack/prompts": "1.8.1",
+        "node_modules/@colbymchenry/codegraph": "1.6.0",
+        "node_modules/@hono/node-server": "2.1.1",
+        "node_modules/@modelcontextprotocol/sdk": "1.30.0",
+        "node_modules/accepts": "2.0.0",
+        "node_modules/ajv": "8.20.0",
+        "node_modules/ajv-formats": "3.0.1",
+        "node_modules/body-parser": "2.3.0",
+        "node_modules/body-parser/node_modules/content-type": "2.1.0",
+        "node_modules/bytes": "3.1.2",
+        "node_modules/call-bind-apply-helpers": "1.0.2",
+        "node_modules/call-bound": "1.0.4",
+        "node_modules/commander": "14.0.3",
+        "node_modules/content-disposition": "1.1.0",
+        "node_modules/content-type": "1.0.5",
+        "node_modules/cookie": "0.7.2",
+        "node_modules/cookie-signature": "1.2.2",
+        "node_modules/cors": "2.8.6",
+        "node_modules/cross-spawn": "7.0.6",
+        "node_modules/debug": "4.4.3",
+        "node_modules/depd": "2.0.0",
+        "node_modules/dunder-proto": "1.0.1",
+        "node_modules/ee-first": "1.1.1",
+        "node_modules/encodeurl": "2.0.0",
+        "node_modules/es-define-property": "1.0.1",
+        "node_modules/es-errors": "1.3.0",
+        "node_modules/es-object-atoms": "1.1.2",
+        "node_modules/escape-html": "1.0.3",
+        "node_modules/etag": "1.8.1",
+        "node_modules/eventsource": "3.0.7",
+        "node_modules/eventsource-parser": "3.1.1",
+        "node_modules/express": "5.2.1",
+        "node_modules/express-rate-limit": "8.7.0",
+        "node_modules/fast-deep-equal": "3.1.3",
+        "node_modules/fast-string-truncated-width": "3.0.3",
+        "node_modules/fast-string-width": "3.0.2",
+        "node_modules/fast-uri": "3.1.8",
+        "node_modules/fast-wrap-ansi": "0.2.2",
+        "node_modules/finalhandler": "2.1.1",
+        "node_modules/forwarded": "0.2.0",
+        "node_modules/fresh": "2.0.0",
+        "node_modules/function-bind": "1.1.2",
+        "node_modules/get-intrinsic": "1.3.0",
+        "node_modules/get-proto": "1.0.1",
+        "node_modules/gopd": "1.2.0",
+        "node_modules/has-symbols": "1.1.0",
+        "node_modules/hasown": "2.0.4",
+        "node_modules/hono": "4.13.8",
+        "node_modules/http-errors": "2.0.1",
+        "node_modules/iconv-lite": "0.7.3",
+        "node_modules/ignore": "7.0.9",
+        "node_modules/inherits": "2.0.4",
+        "node_modules/ip-address": "10.7.2",
+        "node_modules/ipaddr.js": "1.9.1",
+        "node_modules/is-promise": "4.0.0",
+        "node_modules/isexe": "2.0.0",
+        "node_modules/jose": "6.2.12",
+        "node_modules/json-schema-traverse": "1.0.0",
+        "node_modules/json-schema-typed": "8.0.2",
+        "node_modules/jsonc-parser": "3.3.1",
+        "node_modules/math-intrinsics": "1.1.0",
+        "node_modules/media-typer": "1.1.1",
+        "node_modules/merge-descriptors": "2.0.0",
+        "node_modules/mime-db": "1.54.0",
+        "node_modules/mime-types": "3.0.2",
+        "node_modules/ms": "2.1.3",
+        "node_modules/negotiator": "1.1.0",
+        "node_modules/negotiator/node_modules/content-type": "2.1.0",
+        "node_modules/object-assign": "4.1.1",
+        "node_modules/object-inspect": "1.13.4",
+        "node_modules/on-finished": "2.4.1",
+        "node_modules/once": "1.4.0",
+        "node_modules/parseurl": "1.3.3",
+        "node_modules/path-key": "3.1.1",
+        "node_modules/path-to-regexp": "8.4.2",
+        "node_modules/picomatch": "4.0.7",
+        "node_modules/pkce-challenge": "5.0.1",
+        "node_modules/proxy-addr": "2.0.8",
+        "node_modules/qs": "6.16.0",
+        "node_modules/range-parser": "1.3.0",
+        "node_modules/raw-body": "3.0.2",
+        "node_modules/require-from-string": "2.0.2",
+        "node_modules/router": "2.2.0",
+        "node_modules/safer-buffer": "2.1.2",
+        "node_modules/send": "1.2.1",
+        "node_modules/serve-static": "2.2.1",
+        "node_modules/setprototypeof": "1.2.0",
+        "node_modules/shebang-command": "2.0.0",
+        "node_modules/shebang-regex": "3.0.0",
+        "node_modules/side-channel": "1.1.1",
+        "node_modules/side-channel-list": "1.0.1",
+        "node_modules/side-channel-map": "1.0.1",
+        "node_modules/side-channel-weakmap": "1.0.2",
+        "node_modules/sisteransi": "1.0.5",
+        "node_modules/statuses": "2.0.2",
+        "node_modules/toidentifier": "1.0.1",
+        "node_modules/tree-sitter-wasms": "0.1.13",
+        "node_modules/type-is": "2.1.0",
+        "node_modules/type-is/node_modules/content-type": "2.1.0",
+        "node_modules/unpipe": "1.0.0",
+        "node_modules/vary": "1.1.2",
+        "node_modules/web-tree-sitter": "0.25.10",
+        "node_modules/which": "2.0.2",
+        "node_modules/wrappy": "1.0.2",
+        "node_modules/zod": "4.6.5",
+        "node_modules/zod-to-json-schema": "3.25.2"
+      }
+    },
+    "disposableConsumerRemoved": true,
+    "packInputsAfter": {
+      "files": 1130,
+      "bytes": 83883666,
+      "manifestSha256": "ca56a3800628df1920a3ecf523f27d85c5e7a25be69feda753c8b4362dc65731"
+    },
+    "originalPackInputsUnchanged": true,
+    "archiveAfter": {
+      "bytes": 8864264,
+      "mtimeNs": 1789893075913025183,
+      "sha256": "978e11669c5bca19b1b1b53669cf26ea954a9ac0a938384ddef573596ecacaba"
+    },
+    "archiveUnchanged": true,
+    "allProcessGroupsClosed": true
+  },
+  "npmAudit": {
+    "schemaVersion": 1,
+    "createdAt": "2026-09-20T08:34:33Z",
+    "completed": true,
+    "sourceRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+    "imageTag": "codegraph-haskell-audit:constructor-recall-20260920",
+    "sourceOrDependenciesModified": false,
+    "method": "Two read-only npm audit commands in new disposable containers from the freshly built Linux validation image; no audit fix or install was run.",
+    "commands": [
+      {
+        "scope": "all",
+        "exitCode": 1,
+        "nonzeroExpectedForAdvisories": true,
+        "processGroupClosed": true,
+        "counts": {
+          "info": 0,
+          "low": 0,
+          "moderate": 5,
+          "high": 4,
+          "critical": 1,
+          "total": 10
+        },
+        "privateLog": "npm-audit-all-constructor-recall-20260920.internal.log"
+      },
+      {
+        "scope": "production",
+        "exitCode": 0,
+        "nonzeroExpectedForAdvisories": false,
+        "processGroupClosed": true,
+        "counts": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0,
+          "total": 0
+        },
+        "privateLog": "npm-audit-production-constructor-recall-20260920.internal.log"
+      }
+    ],
+    "packages": [
+      {
+        "package": "@sveltejs/vite-plugin-svelte",
+        "severity": "moderate",
+        "isDirect": true,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=5.0.0",
+        "viaPackages": [
+          "@sveltejs/vite-plugin-svelte-inspector",
+          "vite"
+        ],
+        "directAdvisoryUrls": []
+      },
+      {
+        "package": "@sveltejs/vite-plugin-svelte-inspector",
+        "severity": "moderate",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=3.0.1",
+        "viaPackages": [
+          "@sveltejs/vite-plugin-svelte",
+          "vite"
+        ],
+        "directAdvisoryUrls": []
+      },
+      {
+        "package": "@vitest/mocker",
+        "severity": "moderate",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=4.1.10",
+        "viaPackages": [
+          "vite"
+        ],
+        "directAdvisoryUrls": [
+          "https://github.com/advisories/GHSA-82fw-gwwq-j7x9"
+        ]
+      },
+      {
+        "package": "esbuild",
+        "severity": "moderate",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=0.24.2",
+        "viaPackages": [],
+        "directAdvisoryUrls": [
+          "https://github.com/advisories/GHSA-67mh-4wv8-2f99"
+        ]
+      },
+      {
+        "package": "nanoid",
+        "severity": "high",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=3.3.17",
+        "viaPackages": [],
+        "directAdvisoryUrls": [
+          "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+          "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+          "https://github.com/advisories/GHSA-xwg4-73v4-xw9w"
+        ]
+      },
+      {
+        "package": "postcss",
+        "severity": "high",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=8.5.22",
+        "viaPackages": [],
+        "directAdvisoryUrls": [
+          "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+          "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+          "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+          "https://github.com/advisories/GHSA-r28c-9q8g-f849"
+        ]
+      },
+      {
+        "package": "rollup",
+        "severity": "high",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "4.0.0 - 4.58.0",
+        "viaPackages": [],
+        "directAdvisoryUrls": [
+          "https://github.com/advisories/GHSA-mw96-cpmx-2vgc"
+        ]
+      },
+      {
+        "package": "vite",
+        "severity": "high",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=6.4.2",
+        "viaPackages": [
+          "esbuild"
+        ],
+        "directAdvisoryUrls": [
+          "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+          "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+          "https://github.com/advisories/GHSA-fx2h-pf6j-xcff"
+        ]
+      },
+      {
+        "package": "vite-node",
+        "severity": "moderate",
+        "isDirect": false,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=2.2.0-beta.2",
+        "viaPackages": [
+          "vite"
+        ],
+        "directAdvisoryUrls": []
+      },
+      {
+        "package": "vitest",
+        "severity": "critical",
+        "isDirect": true,
+        "absentWhenDevOmitted": true,
+        "affectedRange": "<=4.1.10",
+        "viaPackages": [
+          "@vitest/mocker",
+          "vite",
+          "vite-node"
+        ],
+        "directAdvisoryUrls": [
+          "https://github.com/advisories/GHSA-5xrq-8626-4rwp",
+          "https://github.com/advisories/GHSA-82fw-gwwq-j7x9"
+        ]
+      }
+    ],
+    "advisories": [
+      {
+        "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+        "name": "vitest",
+        "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+        "severity": "moderate",
+        "range": ">=2.1.0 <4.1.11"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+        "name": "esbuild",
+        "title": "esbuild enables any website to send any requests to the development server and read the response",
+        "severity": "moderate",
+        "range": "<=0.24.2"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+        "name": "nanoid",
+        "title": "nanoid: non-secure generators can loop indefinitely with negative size",
+        "severity": "high",
+        "range": "<3.3.16"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+        "name": "nanoid",
+        "title": "nanoid: custom generators can loop indefinitely when size is zero",
+        "severity": "high",
+        "range": "<3.3.18"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w",
+        "name": "nanoid",
+        "title": "nanoid: Integer Overflow or Wraparound",
+        "severity": "high",
+        "range": "<3.3.12"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+        "name": "postcss",
+        "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+        "severity": "moderate",
+        "range": "<8.5.10"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+        "name": "postcss",
+        "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+        "severity": "high",
+        "range": "<=8.5.11"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+        "name": "postcss",
+        "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+        "severity": "moderate",
+        "range": "<=8.5.22"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+        "name": "postcss",
+        "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+        "severity": "high",
+        "range": "<=8.5.17"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-mw96-cpmx-2vgc",
+        "name": "rollup",
+        "title": "Rollup 4 has Arbitrary File Write via Path Traversal",
+        "severity": "high",
+        "range": ">=4.0.0 <4.59.0"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+        "name": "vite",
+        "title": "Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling",
+        "severity": "moderate",
+        "range": "<=6.4.1"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+        "name": "vite",
+        "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+        "severity": "moderate",
+        "range": "<=6.4.2"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+        "name": "vite",
+        "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+        "severity": "high",
+        "range": "<=6.4.2"
+      },
+      {
+        "url": "https://github.com/advisories/GHSA-5xrq-8626-4rwp",
+        "name": "vitest",
+        "title": "When Vitest UI server is listening, arbitrary file can be read and executed",
+        "severity": "critical",
+        "range": "<3.2.6"
+      }
+    ],
+    "limitations": [
+      "Registry advisory snapshot, not an exploitability assessment.",
+      "absentWhenDevOmitted means omitted by this npm audit production filter; it is not a claim about every deployment or bundled asset.",
+      "The source package consumer has separate fresh-install validation and dependency evidence."
+    ]
+  },
+  "driverLifecycleSmoke": {
+    "schemaVersion": 1,
+    "purpose": "Driver lifecycle only; no corpus or package validation",
+    "completed": true,
+    "productionDriverSha256Before": "ebe241a6f64eeb51a67060e383e3ba07c1a48bf4ee814c0578c312d6036b663b",
+    "cases": {
+      "complete": {
+        "steps": 12,
+        "stubChildren": 12,
+        "childSleepSeconds": 0.02,
+        "exitCode": 0,
+        "allOwnedGroupsClosed": true,
+        "workerGroupClosed": true,
+        "leaseReleased": true,
+        "controlSocketRemoved": true,
+        "statusCommandPassed": true
+      },
+      "stop": {
+        "childSleepSeconds": 20,
+        "stubChildrenStarted": 1,
+        "secondCampaignLaunchRefused": true,
+        "socketStopAccepted": true,
+        "exitCode": 130,
+        "allOwnedGroupsClosed": true,
+        "workerGroupClosed": true,
+        "leaseReleased": true,
+        "controlSocketRemoved": true
+      }
+    },
+    "realRunsOpened": false,
+    "benchmarkExecuted": false,
+    "originalRunnerModified": false,
+    "productionAstAndHelpPassed": true,
+    "cleanup": [
+      {
+        "case": "complete",
+        "leaseReleased": true,
+        "workerGroupClosed": true
+      },
+      {
+        "case": "stop",
+        "leaseReleased": true,
+        "workerGroupClosed": true
+      }
+    ],
+    "productionDriverSha256After": "ebe241a6f64eeb51a67060e383e3ba07c1a48bf4ee814c0578c312d6036b663b",
+    "productionDriverUnchanged": true,
+    "elapsedSeconds": 7.412
+  },
+  "postCampaignSeal": {
+    "createdAt": "2026-09-20T10:35:13.476764+00:00",
+    "sourceRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+    "workingDist": {
+      "distFiles": 1042,
+      "distSha256": "a70124c4ca4f4d4324a114f24bc8ab7b848406da721795c7341a18f8b5b5af75"
+    },
+    "frozenDist": {
+      "distFiles": 1042,
+      "distSha256": "a70124c4ca4f4d4324a114f24bc8ab7b848406da721795c7341a18f8b5b5af75"
+    },
+    "matchesFrozen": true,
+    "productionSourceClean": true,
+    "trackedNonProductionChanges": [
+      "CHANGELOG.md"
+    ],
+    "method": "Same sorted pathlib.Path order as controller preflight (lexicographic path components), then each dist-relative POSIX path encoded UTF-8, NUL and file bytes. Repeated after all macro, comparison, health and source-capture processes closed. No rebuild or tests rerun.",
+    "verificationQualification": "An initial verifier used a different whole-POSIX-string sorting order and failed the expected-seal assertion. The controller-compatible order above matches both the working and frozen recorded seals; no dist files were modified."
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "purpose": "Two actual stored-reference resolver probes before/after the constructor fix; no corpus reindex claimed.",
+  "engine": {
+    "arm": "candidate-constructor-recall-20260920",
+    "codeRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+    "distSha256": "a70124c4ca4f4d4324a114f24bc8ab7b848406da721795c7341a18f8b5b5af75",
+    "distFiles": 1042,
+    "builtFrom": "Successful full npm run build; full-build-constructor-recall-20260920.log",
+    "sourceDistByteIdentical": true,
+    "createdAt": "2026-09-20T08:21:05.344843+00:00"
+  },
+  "regressionTestCoverage": {
+    "newTests": 20,
+    "focusedSuiteTotal": 185,
+    "beforeReproduction": "Two direct constructor fixtures pass and the two variants with 65 unrelated facade hops fail on the pre-fix source.",
+    "newFullSuitesPassedEach": 5089,
+    "fullSuitesSkippedEach": 192,
+    "publicReference": "haskell-audit-2026-09-20-final-validation.json"
+  },
+  "before": {
+    "schemaVersion": 1,
+    "engineLabel": "candidate-local-proof-16k-20260920",
+    "node": "v24.18.0",
+    "startedAt": "2026-09-20T08:24:02.015Z",
+    "completed": true,
+    "phase": "done",
+    "sourceRun": "candidate-local-proof-16k-20260920-ghc-core-1",
+    "sourceRevision": "82c73b223a985bc0bcc00cb6252b2b535082d831",
+    "actualStoredReferencesOnly": true,
+    "sourceOrFlowQueriesRepeated": false,
+    "corpusReindexed": false,
+    "method": "Fresh native readonly graph context per engine; public resolveViaImport API on each preserved stored reference with resolver caches cleared before each call.",
+    "results": [
+      {
+        "storedReferenceId": 322543,
+        "reference": {
+          "fromNodeId": "function:477f3759992f8a3aa5fd3d5e75f3130d",
+          "referenceName": "FieldLabelString",
+          "referenceKind": "calls",
+          "line": 2691,
+          "column": 17,
+          "filePath": "compiler/GHC/Tc/Errors.hs",
+          "language": "haskell"
+        },
+        "storedStatus": "failed",
+        "expectedTargetId": "enum_member:038d8ddab8c97ee08f7907402a41bf6a",
+        "target": {
+          "id": "enum_member:038d8ddab8c97ee08f7907402a41bf6a",
+          "name": "FieldLabelString",
+          "kind": "enum_member",
+          "file_path": "compiler/Language/Haskell/Syntax/Basic.hs",
+          "start_line": 79,
+          "is_exported": 1
+        },
+        "resolvedTargetId": null,
+        "matchesExpectedTarget": false,
+        "result": null,
+        "elapsedMs": 509.3204999999999,
+        "storedReferenceUnchanged": true
+      },
+      {
+        "storedReferenceId": 250703,
+        "reference": {
+          "fromNodeId": "function:928642e1b19309c796d68dc755f86a4b",
+          "referenceName": "ConInfo",
+          "referenceKind": "calls",
+          "line": 916,
+          "column": 26,
+          "filePath": "compiler/GHC/Rename/Names.hs",
+          "language": "haskell"
+        },
+        "storedStatus": "failed",
+        "expectedTargetId": "enum_member:b9ad1f5c941782d532c7d724963a8d49",
+        "target": {
+          "id": "enum_member:b9ad1f5c941782d532c7d724963a8d49",
+          "name": "ConInfo",
+          "kind": "enum_member",
+          "file_path": "compiler/GHC/Types/GREInfo.hs",
+          "start_line": 212,
+          "is_exported": 1
+        },
+        "resolvedTargetId": null,
+        "matchesExpectedTarget": false,
+        "result": null,
+        "elapsedMs": 373.2070830000001,
+        "storedReferenceUnchanged": true
+      }
+    ],
+    "backend": "node-sqlite",
+    "indexState": "complete",
+    "databaseClosed": true,
+    "elapsedMs": 1032.951,
+    "finishedAt": "2026-09-20T08:24:03.048Z",
+    "maxRssKiB": 366592
+  },
+  "after": {
+    "schemaVersion": 1,
+    "engineLabel": "candidate-constructor-recall-20260920",
+    "node": "v24.18.0",
+    "startedAt": "2026-09-20T08:24:03.093Z",
+    "completed": true,
+    "phase": "done",
+    "sourceRun": "candidate-local-proof-16k-20260920-ghc-core-1",
+    "sourceRevision": "82c73b223a985bc0bcc00cb6252b2b535082d831",
+    "actualStoredReferencesOnly": true,
+    "sourceOrFlowQueriesRepeated": false,
+    "corpusReindexed": false,
+    "method": "Fresh native readonly graph context per engine; public resolveViaImport API on each preserved stored reference with resolver caches cleared before each call.",
+    "results": [
+      {
+        "storedReferenceId": 322543,
+        "reference": {
+          "fromNodeId": "function:477f3759992f8a3aa5fd3d5e75f3130d",
+          "referenceName": "FieldLabelString",
+          "referenceKind": "calls",
+          "line": 2691,
+          "column": 17,
+          "filePath": "compiler/GHC/Tc/Errors.hs",
+          "language": "haskell"
+        },
+        "storedStatus": "failed",
+        "expectedTargetId": "enum_member:038d8ddab8c97ee08f7907402a41bf6a",
+        "target": {
+          "id": "enum_member:038d8ddab8c97ee08f7907402a41bf6a",
+          "name": "FieldLabelString",
+          "kind": "enum_member",
+          "file_path": "compiler/Language/Haskell/Syntax/Basic.hs",
+          "start_line": 79,
+          "is_exported": 1
+        },
+        "resolvedTargetId": "enum_member:038d8ddab8c97ee08f7907402a41bf6a",
+        "matchesExpectedTarget": true,
+        "result": {
+          "targetNodeId": "enum_member:038d8ddab8c97ee08f7907402a41bf6a",
+          "confidence": 0.95,
+          "resolvedBy": "import"
+        },
+        "elapsedMs": 23.650125000000017,
+        "storedReferenceUnchanged": true
+      },
+      {
+        "storedReferenceId": 250703,
+        "reference": {
+          "fromNodeId": "function:928642e1b19309c796d68dc755f86a4b",
+          "referenceName": "ConInfo",
+          "referenceKind": "calls",
+          "line": 916,
+          "column": 26,
+          "filePath": "compiler/GHC/Rename/Names.hs",
+          "language": "haskell"
+        },
+        "storedStatus": "failed",
+        "expectedTargetId": "enum_member:b9ad1f5c941782d532c7d724963a8d49",
+        "target": {
+          "id": "enum_member:b9ad1f5c941782d532c7d724963a8d49",
+          "name": "ConInfo",
+          "kind": "enum_member",
+          "file_path": "compiler/GHC/Types/GREInfo.hs",
+          "start_line": 212,
+          "is_exported": 1
+        },
+        "resolvedTargetId": "enum_member:b9ad1f5c941782d532c7d724963a8d49",
+        "matchesExpectedTarget": true,
+        "result": {
+          "targetNodeId": "enum_member:b9ad1f5c941782d532c7d724963a8d49",
+          "confidence": 0.95,
+          "resolvedBy": "import"
+        },
+        "elapsedMs": 10.375,
+        "storedReferenceUnchanged": true
+      }
+    ],
+    "backend": "node-sqlite",
+    "indexState": "complete",
+    "databaseClosed": true,
+    "elapsedMs": 146.530625,
+    "finishedAt": "2026-09-20T08:24:03.239Z",
+    "maxRssKiB": 114624
+  },
+  "preservation": {
+    "schemaVersion": 1,
+    "sourceRun": "candidate-local-proof-16k-20260920-ghc-core-1",
+    "sourceRevision": "82c73b223a985bc0bcc00cb6252b2b535082d831",
+    "startedAt": "2026-09-20T08:24:01.421602+00:00",
+    "status": "complete",
+    "corpusReindexed": false,
+    "originalsOpenedBySqlite": false,
+    "reusedEvidenceLabels": [
+      "ghc-retarget-check-node-v2-20260920/preservation.public.json",
+      "ghc-core-source-capture-20260920/preservation-and-capture.public.json"
+    ],
+    "limits": {
+      "combinedDbWalBytes": 1073741824,
+      "perEngineChildSeconds": 30,
+      "nodeHeapMiB": 512,
+      "perOutputOrLogBytes": 1048576
+    },
+    "limitations": [
+      "Diagnostic on the stored 204 graph, not a repaired corpus index or measured benchmark.",
+      "Two engines run serially in separate processes; resolver caches clear before each actual stored reference.",
+      "Byte-bounded snapshot copy/hash time is outside the per-child deadline; JS heap is not total RSS."
+    ],
+    "probes": [
+      {
+        "label": "before-204",
+        "engineLabel": "candidate-local-proof-16k-20260920",
+        "outputLabel": "before-204.public.json",
+        "exitCode": 0,
+        "closed": true,
+        "stopReason": null,
+        "elapsedSeconds": 1.083,
+        "completed": true,
+        "targets": [
+          {
+            "name": "FieldLabelString",
+            "targetId": null,
+            "matchesExpected": false
+          },
+          {
+            "name": "ConInfo",
+            "targetId": null,
+            "matchesExpected": false
+          }
+        ]
+      },
+      {
+        "label": "candidate",
+        "engineLabel": "candidate-constructor-recall-20260920",
+        "outputLabel": "candidate.public.json",
+        "exitCode": 0,
+        "closed": true,
+        "stopReason": null,
+        "elapsedSeconds": 0.235,
+        "completed": true,
+        "targets": [
+          {
+            "name": "FieldLabelString",
+            "targetId": "enum_member:038d8ddab8c97ee08f7907402a41bf6a",
+            "matchesExpected": true
+          },
+          {
+            "name": "ConInfo",
+            "targetId": "enum_member:b9ad1f5c941782d532c7d724963a8d49",
+            "matchesExpected": true
+          }
+        ]
+      }
+    ],
+    "allOwnedProcessGroupsClosed": true,
+    "copyRemoved": true,
+    "before": {
+      "database": {
+        "bytes": 388231168,
+        "mtimeNs": 1789883635489560024,
+        "sha256": "0ae4008928e46386d14312f3664f6507cc72da6a855bed5f6954eac7557be9a9"
+      },
+      "wal": null
+    },
+    "after": {
+      "database": {
+        "bytes": 388231168,
+        "mtimeNs": 1789883635489560024,
+        "sha256": "0ae4008928e46386d14312f3664f6507cc72da6a855bed5f6954eac7557be9a9"
+      },
+      "wal": null
+    },
+    "originalDatabaseAndWalUnchanged": true,
+    "finishedAt": "2026-09-20T08:24:03.449954+00:00"
+  }
+}

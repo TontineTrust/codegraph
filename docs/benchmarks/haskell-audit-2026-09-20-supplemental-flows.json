@@ -1,0 +1,823 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "evidenceKind": "54-normal-snapshot-actual-toolhandler-queries",
+  "status": "completed",
+  "assembly": {
+    "assembledAt": "2026-09-20T05:46:49.115616+00:00",
+    "method": "Bounded existing public JSON only; no new hashes, SQL, engine/corpus reads, tests or measurements.",
+    "sourceArtifactLabels": [
+      "normal-supplemental-flows-20260920/summary.public.json"
+    ],
+    "sourceArtifactBytes": {
+      "normal-supplemental-flows-20260920/summary.public.json": 28160
+    },
+    "inputAndOutputLimitBytesPerFile": 2097152,
+    "referencePolicy": "Only publicReference/publicReferences objects designate published companion links. Other evidence/report/ledger/log/input filenames are retained source-artifact labels, not links and not a claim that private inputs accompany this publication. Labels preserve original execution provenance. Private raw inputs are not included.",
+    "qualification": "Publication wrapper and explicit links are new; original execution dates, engine/index lineage and observations are preserved. Source documents are untouched."
+  },
+  "evidence": {
+    "schemaVersion": 1,
+    "date": "2026-09-20",
+    "purpose": "Supplemental actual ToolHandler Flow replay on three inactive final snapshots per arm; not agent A/B or timing benchmark.",
+    "completed": true,
+    "rows": [
+      {
+        "tag": "baseline-20260920-xmonad-1",
+        "corpus": "xmonad",
+        "arm": "baseline-20260920",
+        "repetition": 1,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "manage userCodeDef userCode",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. manage (src/XMonad/Operations.hs:108)\n   \u2193 calls\n2. userCodeDef (src/XMonad/Core.hs:213)\n   \u2193 calls\n3. userCode (src/XMonad/Core.hs:208)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. float (src/XMonad/Operations.hs:774)\n   \u2193 calls\n2. floatLocation (src/XMonad/Operations.hs:720)\n   \u2193 calls\n3. applySizeHintsContents (src/XMonad/Operations.hs:871)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows catchX runX",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. windows (src/XMonad/Operations.hs:159)\n   \u2193 calls\n2. catchX (src/XMonad/Core.hs:196)\n   \u2193 calls\n3. runX (src/XMonad/Core.hs:191)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows sendMessageWithNoRefresh updateLayout",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "baseline-20260920-xmonad-2",
+        "corpus": "xmonad",
+        "arm": "baseline-20260920",
+        "repetition": 2,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "manage userCodeDef userCode",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. manage (src/XMonad/Operations.hs:108)\n   \u2193 calls\n2. userCodeDef (src/XMonad/Core.hs:213)\n   \u2193 calls\n3. userCode (src/XMonad/Core.hs:208)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. float (src/XMonad/Operations.hs:774)\n   \u2193 calls\n2. floatLocation (src/XMonad/Operations.hs:720)\n   \u2193 calls\n3. applySizeHintsContents (src/XMonad/Operations.hs:871)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows catchX runX",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. windows (src/XMonad/Operations.hs:159)\n   \u2193 calls\n2. catchX (src/XMonad/Core.hs:196)\n   \u2193 calls\n3. runX (src/XMonad/Core.hs:191)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows sendMessageWithNoRefresh updateLayout",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "baseline-20260920-xmonad-3",
+        "corpus": "xmonad",
+        "arm": "baseline-20260920",
+        "repetition": 3,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "manage userCodeDef userCode",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. manage (src/XMonad/Operations.hs:108)\n   \u2193 calls\n2. userCodeDef (src/XMonad/Core.hs:213)\n   \u2193 calls\n3. userCode (src/XMonad/Core.hs:208)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. float (src/XMonad/Operations.hs:774)\n   \u2193 calls\n2. floatLocation (src/XMonad/Operations.hs:720)\n   \u2193 calls\n3. applySizeHintsContents (src/XMonad/Operations.hs:871)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows catchX runX",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. windows (src/XMonad/Operations.hs:159)\n   \u2193 calls\n2. catchX (src/XMonad/Core.hs:196)\n   \u2193 calls\n3. runX (src/XMonad/Core.hs:191)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows sendMessageWithNoRefresh updateLayout",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "candidate-local-proof-16k-20260920-xmonad-1",
+        "corpus": "xmonad",
+        "arm": "candidate-local-proof-16k-20260920",
+        "repetition": 1,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "manage userCodeDef userCode",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. manage (src/XMonad/Operations.hs:108)\n   \u2193 calls\n2. userCodeDef (src/XMonad/Core.hs:213)\n   \u2193 calls\n3. userCode (src/XMonad/Core.hs:208)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. float (src/XMonad/Operations.hs:774)\n   \u2193 calls\n2. floatLocation (src/XMonad/Operations.hs:720)\n   \u2193 calls\n3. applySizeHintsContents (src/XMonad/Operations.hs:871)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows catchX runX",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. windows (src/XMonad/Operations.hs:159)\n   \u2193 calls\n2. catchX (src/XMonad/Core.hs:196)\n   \u2193 calls\n3. runX (src/XMonad/Core.hs:191)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows sendMessageWithNoRefresh updateLayout",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "candidate-local-proof-16k-20260920-xmonad-2",
+        "corpus": "xmonad",
+        "arm": "candidate-local-proof-16k-20260920",
+        "repetition": 2,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "manage userCodeDef userCode",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. manage (src/XMonad/Operations.hs:108)\n   \u2193 calls\n2. userCodeDef (src/XMonad/Core.hs:213)\n   \u2193 calls\n3. userCode (src/XMonad/Core.hs:208)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. float (src/XMonad/Operations.hs:774)\n   \u2193 calls\n2. floatLocation (src/XMonad/Operations.hs:720)\n   \u2193 calls\n3. applySizeHintsContents (src/XMonad/Operations.hs:871)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows catchX runX",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. windows (src/XMonad/Operations.hs:159)\n   \u2193 calls\n2. catchX (src/XMonad/Core.hs:196)\n   \u2193 calls\n3. runX (src/XMonad/Core.hs:191)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows sendMessageWithNoRefresh updateLayout",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "candidate-local-proof-16k-20260920-xmonad-3",
+        "corpus": "xmonad",
+        "arm": "candidate-local-proof-16k-20260920",
+        "repetition": 3,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "manage userCodeDef userCode",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. manage (src/XMonad/Operations.hs:108)\n   \u2193 calls\n2. userCodeDef (src/XMonad/Core.hs:213)\n   \u2193 calls\n3. userCode (src/XMonad/Core.hs:208)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "XMonad.Operations.float floatLocation applySizeHintsContents",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. float (src/XMonad/Operations.hs:774)\n   \u2193 calls\n2. floatLocation (src/XMonad/Operations.hs:720)\n   \u2193 calls\n3. applySizeHintsContents (src/XMonad/Operations.hs:871)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows catchX runX",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. windows (src/XMonad/Operations.hs:159)\n   \u2193 calls\n2. catchX (src/XMonad/Core.hs:196)\n   \u2193 calls\n3. runX (src/XMonad/Core.hs:191)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "windows sendMessageWithNoRefresh updateLayout",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "baseline-20260920-express-1",
+        "corpus": "express",
+        "arm": "baseline-20260920",
+        "repetition": 1,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "sendStatus type set",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. sendStatus (lib/response.js:323)\n   \u2193 calls\n2. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'string' && typeof type === 'string')\n3. set (lib/application.js:351)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "redirect location set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "attachment type set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "send json stringify",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'object' && chunk !== null && !ArrayBuffer.isView(chunk))\n2. json (lib/response.js:234)\n   \u2193 calls\n3. stringify (lib/response.js:1023)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "stringify compileQueryParser tryRender",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "baseline-20260920-express-2",
+        "corpus": "express",
+        "arm": "baseline-20260920",
+        "repetition": 2,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "sendStatus type set",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. sendStatus (lib/response.js:323)\n   \u2193 calls\n2. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'string' && typeof type === 'string')\n3. set (lib/application.js:351)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "redirect location set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "attachment type set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "send json stringify",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'object' && chunk !== null && !ArrayBuffer.isView(chunk))\n2. json (lib/response.js:234)\n   \u2193 calls\n3. stringify (lib/response.js:1023)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "stringify compileQueryParser tryRender",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "baseline-20260920-express-3",
+        "corpus": "express",
+        "arm": "baseline-20260920",
+        "repetition": 3,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "sendStatus type set",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. sendStatus (lib/response.js:323)\n   \u2193 calls\n2. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'string' && typeof type === 'string')\n3. set (lib/application.js:351)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "redirect location set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "attachment type set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "send json stringify",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'object' && chunk !== null && !ArrayBuffer.isView(chunk))\n2. json (lib/response.js:234)\n   \u2193 calls\n3. stringify (lib/response.js:1023)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "stringify compileQueryParser tryRender",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "candidate-local-proof-16k-20260920-express-1",
+        "corpus": "express",
+        "arm": "candidate-local-proof-16k-20260920",
+        "repetition": 1,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "sendStatus type set",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. sendStatus (lib/response.js:323)\n   \u2193 calls\n2. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'string' && typeof type === 'string')\n3. set (lib/application.js:351)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "redirect location set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "attachment type set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "send json stringify",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'object' && chunk !== null && !ArrayBuffer.isView(chunk))\n2. json (lib/response.js:234)\n   \u2193 calls\n3. stringify (lib/response.js:1023)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "stringify compileQueryParser tryRender",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "candidate-local-proof-16k-20260920-express-2",
+        "corpus": "express",
+        "arm": "candidate-local-proof-16k-20260920",
+        "repetition": 2,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "sendStatus type set",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. sendStatus (lib/response.js:323)\n   \u2193 calls\n2. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'string' && typeof type === 'string')\n3. set (lib/application.js:351)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "redirect location set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "attachment type set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "send json stringify",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'object' && chunk !== null && !ArrayBuffer.isView(chunk))\n2. json (lib/response.js:234)\n   \u2193 calls\n3. stringify (lib/response.js:1023)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "stringify compileQueryParser tryRender",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      },
+      {
+        "tag": "candidate-local-proof-16k-20260920-express-3",
+        "corpus": "express",
+        "arm": "candidate-local-proof-16k-20260920",
+        "repetition": 3,
+        "completed": true,
+        "originalDatabaseAndWalUnchanged": true,
+        "queries": [
+          {
+            "query": "sendStatus type set",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. sendStatus (lib/response.js:323)\n   \u2193 calls\n2. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'string' && typeof type === 'string')\n3. set (lib/application.js:351)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "redirect location set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "attachment type set",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "send json stringify",
+            "error": false,
+            "flow": {
+              "present": true,
+              "text": "**Flow (call path among the symbols you queried)**\n1. send (lib/response.js:126)\n   \u2193 calls (when typeof chunk === 'object' && chunk !== null && !ArrayBuffer.isView(chunk))\n2. json (lib/response.js:234)\n   \u2193 calls\n3. stringify (lib/response.js:1023)",
+              "steps": 3,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          },
+          {
+            "query": "stringify compileQueryParser tryRender",
+            "error": false,
+            "flow": {
+              "present": false,
+              "text": "",
+              "steps": 0,
+              "truncated": false
+            },
+            "responseTruncated": false,
+            "storedResponseTruncated": false
+          }
+        ]
+      }
+    ],
+    "sourceQualification": {
+      "xmonad": "Three positive prompts and one negative retained from18 source review; reuse requires exact semantic graph equality and unchanged corpus pin.",
+      "express": "Four positive intended paths plus one negative. sendStatus type set surfaces a wrong app.set target; redirect and attachment missing; send/json/stringify is source supported; negative absent. See haskell-audit-2026-09-20-express-source-review.json."
+    },
+    "limits": {
+      "workerTimeoutMs": 30000,
+      "parentTimeoutSeconds": 45,
+      "workerHeapMiB": 512,
+      "inputDbBytes": 104857600
+    },
+    "allOriginalsUnchanged": true,
+    "publicReferences": [
+      {
+        "file": "haskell-audit-2026-09-20-express-source-review.json",
+        "pointer": "/evidence",
+        "role": "Express source verdicts"
+      },
+      {
+        "file": "haskell-audit-2026-09-20-normal-graphs.json",
+        "pointer": "/sourceReviewReuse",
+        "role": "Exact graph/pin transfer"
+      },
+      {
+        "file": "haskell-audit-2026-09-18-results.json",
+        "pointer": "/supplementalXmonadFlows",
+        "role": "Original xmonad prompt selection and results"
+      }
+    ]
+  }
+}

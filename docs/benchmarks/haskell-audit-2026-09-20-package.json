@@ -1,0 +1,375 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "evidenceKind": "fresh-source-package-cli-and-stdio-mcp",
+  "status": "passed",
+  "assembly": {
+    "assembledAt": "2026-09-20T05:46:49.110501+00:00",
+    "method": "Bounded existing public JSON only; no new hashes, SQL, engine/corpus reads, tests or measurements.",
+    "sourceArtifactLabels": [
+      "package-consumer-local-proof-16k-20260919/package-validation.public.json"
+    ],
+    "sourceArtifactBytes": {
+      "package-consumer-local-proof-16k-20260919/package-validation.public.json": 11348
+    },
+    "inputAndOutputLimitBytesPerFile": 2097152,
+    "referencePolicy": "Only publicReference/publicReferences objects designate published companion links. Other evidence/report/ledger/log/input filenames are retained source-artifact labels, not links and not a claim that private inputs accompany this publication. Labels preserve original execution provenance. Private raw inputs are not included.",
+    "qualification": "Publication wrapper and explicit links are new; original execution dates, engine/index lineage and observations are preserved. Source documents are untouched."
+  },
+  "evidence": {
+    "schemaVersion": 1,
+    "auditDate": "2026-09-19",
+    "completed": true,
+    "published": false,
+    "versionBumped": false,
+    "consumerDependencySource": "fresh npm install from checked tarball",
+    "platform": "Darwin",
+    "architecture": "arm64",
+    "commands": [
+      {
+        "label": "node-version",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 65
+      },
+      {
+        "label": "npm-version",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 184
+      },
+      {
+        "label": "npm-pack",
+        "timeoutSeconds": 90,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 14431
+      },
+      {
+        "label": "fresh-install",
+        "timeoutSeconds": 240,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 3481
+      },
+      {
+        "label": "cli-version",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 698
+      },
+      {
+        "label": "installed-assets",
+        "timeoutSeconds": 20,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 125
+      },
+      {
+        "label": "cli-init",
+        "timeoutSeconds": 60,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 1192
+      },
+      {
+        "label": "cli-reindex",
+        "timeoutSeconds": 60,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 830
+      },
+      {
+        "label": "cli-status",
+        "timeoutSeconds": 20,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 425
+      },
+      {
+        "label": "cli-query",
+        "timeoutSeconds": 20,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 405
+      },
+      {
+        "label": "graph-readonly",
+        "timeoutSeconds": 15,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 124
+      },
+      {
+        "label": "mcp-sdk-install",
+        "timeoutSeconds": 180,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 3048
+      },
+      {
+        "label": "mcp-stdio",
+        "timeoutSeconds": 45,
+        "exitCode": 0,
+        "processGroupClosed": true,
+        "elapsedMs": 946
+      }
+    ],
+    "limitations": [
+      "Source npm package only; does not validate the platform-bundled release/shim workflow.",
+      "Network dependency versions reflect this install, not the development lockfile.",
+      "Default compiled parser/CLI runtime; no NODE_PATH, NODE_OPTIONS or kernel override.",
+      "MCP uses direct stdio with daemon and watcher disabled for isolated cleanup.",
+      "Command timeouts and output guards are not total RSS or disk-quota guarantees."
+    ],
+    "packInputsBefore": {
+      "files": 1130,
+      "bytes": 83882352,
+      "manifestSha256": "c579d50a653c81a89fc17b08feecf35af20c412ffa6206ee1fdcaf893b405c70"
+    },
+    "runtime": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "python": "3.9.6"
+    },
+    "npmPack": {
+      "name": "@colbymchenry/codegraph",
+      "version": "1.6.0",
+      "size": 8863403,
+      "unpackedSize": 83758513,
+      "shasum": "dcc4330afa1bd819c6b3042c6599b5dfcf01f300",
+      "integrity": "sha512-M9xWBgr2uz6LqB6hIN8S4nKTkRpqTJ+rvG8S+6wzsUiR6aaeBdR+MWB9oL/iK1qS8/d1i+aFiF+/3HuqldiM8w==",
+      "entryCount": 1129
+    },
+    "archiveCreatedByThisRun": true,
+    "archiveBefore": {
+      "bytes": 8863403,
+      "mtimeNs": 1789804231042249013,
+      "sha256": "a5fff684f467e20890cbdef82e7be854f281ebaccff68a5c44093ab0bfe6a91b"
+    },
+    "archive": {
+      "name": "@colbymchenry/codegraph",
+      "version": "1.6.0",
+      "entryCount": 1129,
+      "unpackedBytes": 83758513,
+      "grammarCount": 30,
+      "haskellLicensePresent": true,
+      "packageLicensePresent": true,
+      "schemaPresent": true,
+      "viewerPresent": true,
+      "safePathsAndTypes": true,
+      "allBuiltDistAndScriptFilesByteEqual": true
+    },
+    "installedArchiveFilesByteEqual": true,
+    "cliVersion": "1.6.0",
+    "cliStatus": {
+      "initialized": true,
+      "version": "1.6.0",
+      "fileCount": 3,
+      "nodeCount": 11,
+      "edgeCount": 12,
+      "backend": "node-sqlite",
+      "languages": [
+        "haskell"
+      ],
+      "index": {
+        "builtWithVersion": "1.6.0",
+        "builtWithExtractionVersion": 29,
+        "currentExtractionVersion": 29,
+        "reindexRecommended": false,
+        "state": "complete",
+        "pendingRefs": 0
+      }
+    },
+    "cliQueryFoundAlpha": true,
+    "graph": {
+      "state": "complete",
+      "expectedCallEdges": [
+        [
+          "alpha",
+          "beta"
+        ],
+        [
+          "beta",
+          "gamma"
+        ]
+      ],
+      "integrity": "ok",
+      "foreignKeyViolations": 0,
+      "sqliteRuntime": "same Node as installed CLI"
+    },
+    "consumerLockBeforeMcp": {
+      "bytes": 5821,
+      "mtimeNs": 1789804234981765885,
+      "sha256": "7e5e81fa4ae9f15ca08a87d151b098888dbb3b455b2bb8ff79c490bcd05550e2",
+      "installedVersions": {
+        "node_modules/@clack/core": "1.5.1",
+        "node_modules/@clack/prompts": "1.8.1",
+        "node_modules/@colbymchenry/codegraph": "1.6.0",
+        "node_modules/commander": "14.0.3",
+        "node_modules/fast-string-truncated-width": "3.0.3",
+        "node_modules/fast-string-width": "3.0.2",
+        "node_modules/fast-wrap-ansi": "0.2.2",
+        "node_modules/ignore": "7.0.9",
+        "node_modules/jsonc-parser": "3.3.1",
+        "node_modules/picomatch": "4.0.7",
+        "node_modules/sisteransi": "1.0.5",
+        "node_modules/tree-sitter-wasms": "0.1.13",
+        "node_modules/web-tree-sitter": "0.25.10"
+      }
+    },
+    "mcp": {
+      "run": true,
+      "sdkVersion": "1.30.0",
+      "connected": true,
+      "toolCount": 1,
+      "exploreListed": true,
+      "isError": false,
+      "outputTruncated": false,
+      "responseBytes": 1401,
+      "responseSha256": "76b947269fe38106b4c77c7ec5bd77634a28e3385af925b4255df89bdbea31b1",
+      "evidenceTruncated": false,
+      "actualFlow": {
+        "present": true,
+        "steps": 3,
+        "expectedOrder": true
+      },
+      "directStdio": true,
+      "watcherDisabled": true,
+      "runtimeFlagsOverridden": false,
+      "clientClosed": true,
+      "stderrBytes": 189
+    },
+    "consumerLockAfterMcp": {
+      "bytes": 47921,
+      "mtimeNs": 1789804242013436483,
+      "sha256": "0afe2b71136f55754c321e2e209069d751a3ac2a589a6cc40a260a2b40d661ff",
+      "installedVersions": {
+        "node_modules/@clack/core": "1.5.1",
+        "node_modules/@clack/prompts": "1.8.1",
+        "node_modules/@colbymchenry/codegraph": "1.6.0",
+        "node_modules/@hono/node-server": "2.1.1",
+        "node_modules/@modelcontextprotocol/sdk": "1.30.0",
+        "node_modules/accepts": "2.0.0",
+        "node_modules/ajv": "8.20.0",
+        "node_modules/ajv-formats": "3.0.1",
+        "node_modules/body-parser": "2.3.0",
+        "node_modules/body-parser/node_modules/content-type": "2.1.0",
+        "node_modules/bytes": "3.1.2",
+        "node_modules/call-bind-apply-helpers": "1.0.2",
+        "node_modules/call-bound": "1.0.4",
+        "node_modules/commander": "14.0.3",
+        "node_modules/content-disposition": "1.1.0",
+        "node_modules/content-type": "1.0.5",
+        "node_modules/cookie": "0.7.2",
+        "node_modules/cookie-signature": "1.2.2",
+        "node_modules/cors": "2.8.6",
+        "node_modules/cross-spawn": "7.0.6",
+        "node_modules/debug": "4.4.3",
+        "node_modules/depd": "2.0.0",
+        "node_modules/dunder-proto": "1.0.1",
+        "node_modules/ee-first": "1.1.1",
+        "node_modules/encodeurl": "2.0.0",
+        "node_modules/es-define-property": "1.0.1",
+        "node_modules/es-errors": "1.3.0",
+        "node_modules/es-object-atoms": "1.1.2",
+        "node_modules/escape-html": "1.0.3",
+        "node_modules/etag": "1.8.1",
+        "node_modules/eventsource": "3.0.7",
+        "node_modules/eventsource-parser": "3.1.1",
+        "node_modules/express": "5.2.1",
+        "node_modules/express-rate-limit": "8.7.0",
+        "node_modules/fast-deep-equal": "3.1.3",
+        "node_modules/fast-string-truncated-width": "3.0.3",
+        "node_modules/fast-string-width": "3.0.2",
+        "node_modules/fast-uri": "3.1.8",
+        "node_modules/fast-wrap-ansi": "0.2.2",
+        "node_modules/finalhandler": "2.1.1",
+        "node_modules/forwarded": "0.2.0",
+        "node_modules/fresh": "2.0.0",
+        "node_modules/function-bind": "1.1.2",
+        "node_modules/get-intrinsic": "1.3.0",
+        "node_modules/get-proto": "1.0.1",
+        "node_modules/gopd": "1.2.0",
+        "node_modules/has-symbols": "1.1.0",
+        "node_modules/hasown": "2.0.4",
+        "node_modules/hono": "4.13.8",
+        "node_modules/http-errors": "2.0.1",
+        "node_modules/iconv-lite": "0.7.3",
+        "node_modules/ignore": "7.0.9",
+        "node_modules/inherits": "2.0.4",
+        "node_modules/ip-address": "10.7.2",
+        "node_modules/ipaddr.js": "1.9.1",
+        "node_modules/is-promise": "4.0.0",
+        "node_modules/isexe": "2.0.0",
+        "node_modules/jose": "6.2.12",
+        "node_modules/json-schema-traverse": "1.0.0",
+        "node_modules/json-schema-typed": "8.0.2",
+        "node_modules/jsonc-parser": "3.3.1",
+        "node_modules/math-intrinsics": "1.1.0",
+        "node_modules/media-typer": "1.1.1",
+        "node_modules/merge-descriptors": "2.0.0",
+        "node_modules/mime-db": "1.54.0",
+        "node_modules/mime-types": "3.0.2",
+        "node_modules/ms": "2.1.3",
+        "node_modules/negotiator": "1.1.0",
+        "node_modules/negotiator/node_modules/content-type": "2.1.0",
+        "node_modules/object-assign": "4.1.1",
+        "node_modules/object-inspect": "1.13.4",
+        "node_modules/on-finished": "2.4.1",
+        "node_modules/once": "1.4.0",
+        "node_modules/parseurl": "1.3.3",
+        "node_modules/path-key": "3.1.1",
+        "node_modules/path-to-regexp": "8.4.2",
+        "node_modules/picomatch": "4.0.7",
+        "node_modules/pkce-challenge": "5.0.1",
+        "node_modules/proxy-addr": "2.0.8",
+        "node_modules/qs": "6.16.0",
+        "node_modules/range-parser": "1.3.0",
+        "node_modules/raw-body": "3.0.2",
+        "node_modules/require-from-string": "2.0.2",
+        "node_modules/router": "2.2.0",
+        "node_modules/safer-buffer": "2.1.2",
+        "node_modules/send": "1.2.1",
+        "node_modules/serve-static": "2.2.1",
+        "node_modules/setprototypeof": "1.2.0",
+        "node_modules/shebang-command": "2.0.0",
+        "node_modules/shebang-regex": "3.0.0",
+        "node_modules/side-channel": "1.1.1",
+        "node_modules/side-channel-list": "1.0.1",
+        "node_modules/side-channel-map": "1.0.1",
+        "node_modules/side-channel-weakmap": "1.0.2",
+        "node_modules/sisteransi": "1.0.5",
+        "node_modules/statuses": "2.0.2",
+        "node_modules/toidentifier": "1.0.1",
+        "node_modules/tree-sitter-wasms": "0.1.13",
+        "node_modules/type-is": "2.1.0",
+        "node_modules/type-is/node_modules/content-type": "2.1.0",
+        "node_modules/unpipe": "1.0.0",
+        "node_modules/vary": "1.1.2",
+        "node_modules/web-tree-sitter": "0.25.10",
+        "node_modules/which": "2.0.2",
+        "node_modules/wrappy": "1.0.2",
+        "node_modules/zod": "4.6.5",
+        "node_modules/zod-to-json-schema": "3.25.2"
+      }
+    },
+    "disposableConsumerRemoved": true,
+    "packInputsAfter": {
+      "files": 1130,
+      "bytes": 83882352,
+      "manifestSha256": "c579d50a653c81a89fc17b08feecf35af20c412ffa6206ee1fdcaf893b405c70"
+    },
+    "originalPackInputsUnchanged": true,
+    "archiveAfter": {
+      "bytes": 8863403,
+      "mtimeNs": 1789804231042249013,
+      "sha256": "a5fff684f467e20890cbdef82e7be854f281ebaccff68a5c44093ab0bfe6a91b"
+    },
+    "archiveUnchanged": true,
+    "allProcessGroupsClosed": true
+  }
+}

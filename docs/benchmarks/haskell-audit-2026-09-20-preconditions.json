@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "evidenceKind": "agent-ab-and-windows-availability",
+  "status": "unavailable",
+  "assembly": {
+    "assembledAt": "2026-09-20T05:46:49.115856+00:00",
+    "method": "Bounded existing public JSON only; no new hashes, SQL, engine/corpus reads, tests or measurements.",
+    "sourceArtifactLabels": [
+      "agent-ab-prerequisites-20260920.public.json"
+    ],
+    "sourceArtifactBytes": {
+      "agent-ab-prerequisites-20260920.public.json": 536
+    },
+    "inputAndOutputLimitBytesPerFile": 2097152,
+    "referencePolicy": "Only publicReference/publicReferences objects designate published companion links. Other evidence/report/ledger/log/input filenames are retained source-artifact labels, not links and not a claim that private inputs accompany this publication. Labels preserve original execution provenance. Private raw inputs are not included.",
+    "qualification": "Publication wrapper and explicit links are new; original execution dates, engine/index lineage and observations are preserved. Source documents are untouched."
+  },
+  "availability": {
+    "agentAB": "unavailable",
+    "windowsValidation": "unavailable"
+  },
+  "evidence": {
+    "schemaVersion": 1,
+    "checkedAt": "2026-09-20T05:27:42.770725+00:00",
+    "commandsPresent": {
+      "claude": false,
+      "tmux": false,
+      "prlctl": false
+    },
+    "credentialEnvironmentPresent": {
+      "ANTHROPIC_API_KEY": false,
+      "CLAUDE_CODE_OAUTH_TOKEN": false
+    },
+    "isolatedCloneParallelsFilePresent": false,
+    "executedAgentAB": false,
+    "executedWindowsGuest": false,
+    "qualification": "Presence checks only; no credential values or guest configuration read, no alternate model substituted for required Sonnet/high A/B."
+  }
+}

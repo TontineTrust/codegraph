@@ -1,0 +1,4529 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "evidenceKind": "selected-bounded-resolver-diagnostics-on-historical-snapshots",
+  "status": "completed",
+  "assembly": {
+    "assembledAt": "2026-09-20T05:46:49.111510+00:00",
+    "method": "Bounded existing public JSON only; no new hashes, SQL, engine/corpus reads, tests or measurements.",
+    "sourceArtifactLabels": [
+      "local-proof-final-diagnostics-20260919.public.json"
+    ],
+    "sourceArtifactBytes": {
+      "local-proof-final-diagnostics-20260919.public.json": 140657
+    },
+    "inputAndOutputLimitBytesPerFile": 2097152,
+    "referencePolicy": "Only publicReference/publicReferences objects designate published companion links. Other evidence/report/ledger/log/input filenames are retained source-artifact labels, not links and not a claim that private inputs accompany this publication. Labels preserve original execution provenance. Private raw inputs are not included.",
+    "qualification": "Publication wrapper and explicit links are new; original execution dates, engine/index lineage and observations are preserved. Source documents are untouched."
+  },
+  "qualification": "Contains its synthetic/history/sample evidence once; these are not final 20 September GHC index results.",
+  "evidence": {
+    "schemaVersion": 1,
+    "purpose": "Final bounded diagnostics, not an indexing benchmark or an exhaustive real-corpus precision/recall audit.",
+    "finalEngine": {
+      "arm": "candidate-local-proof-16k-20260919",
+      "codeRevision": "204ce9b172cd9c9729b111c9be2512daf3bd7914",
+      "distFiles": 1042,
+      "distSha256": "17f30bf95e5da31857346c655d0e52a835c04801fb35a2fb1d5670de5bf57917",
+      "builtFrom": "Successful full npm run build; full-build-local-proof-16k-20260919.log",
+      "createdAt": "2026-09-19T07:42:23.590798+00:00",
+      "resolverSha256": "1e9a18e423aa7e760ce6cc7a41f9cbb30dacfe437edeca937f25bee8e248768c"
+    },
+    "bounds": {
+      "exactVisitsPerExportWalk": 10000,
+      "auxiliaryStateAndRouteUnitsPerExportWalk": 16384,
+      "maximumCountedExactPlusAuxiliaryUnitsPerExportWalk": 26384,
+      "haskellDepth": 64,
+      "auxiliaryCompositeKeyMaxCharacters": 4096,
+      "proofScope": "One top-level exported-symbol traversal; no cross-lookup ABSENT/SINGLETON/UNKNOWN evidence.",
+      "qualification": "These bound counted visits/state/route checks, not every CPU operation or total process RSS."
+    },
+    "syntheticDifferential": {
+      "completed": true,
+      "passed": true,
+      "engines": {
+        "frozenResolverSha256": "f4c47145bebfd9812a485a447ac4e139ce8ad45c4c14e4a857f3e720479f404c",
+        "candidateResolverSha256": "1e9a18e423aa7e760ce6cc7a41f9cbb30dacfe437edeca937f25bee8e248768c"
+      },
+      "method": {
+        "seed": "xorshift32: 0x19092026 xor imul(graph+1,0x9e3779b1)",
+        "baselineVisitBudget": 10000,
+        "oracleVisitBudget": 200000,
+        "depthBudgetUnchanged": 64,
+        "oracle": "Frozen resolver modified only in memory; used only to certify newly resolved targets after baseline exhaustion",
+        "exclusions": "Both unresolved when baseline exhausted are counted separately, not counted as completed equivalence checks",
+        "minimumCompletedComparisonsFraction": 0.9,
+        "independentContextsPerEngine": true,
+        "baselineCachesClearedBeforeEachQuery": true,
+        "realCorpusReads": false,
+        "engineFilesModified": false,
+        "fixturesAreResolverMetadata": true
+      },
+      "summary": {
+        "cases": 1000,
+        "graphs": 500,
+        "baselineComplete": 916,
+        "baselineExhausted": 84,
+        "oldTargets": 407,
+        "preservedOldTargets": 407,
+        "completedComparisons": 916,
+        "mismatches": 0,
+        "oracleComparisons": 27,
+        "oracleExhausted": 0,
+        "newTargetsVerified": 27,
+        "unverifiedNewTargets": 0,
+        "bothIncompleteOrUnresolved": 57,
+        "warmChecks": 1000,
+        "warmMismatches": 0,
+        "maxModules": 18
+      },
+      "failures": [],
+      "skipped": [],
+      "process": {
+        "exitCode": 0,
+        "signal": null,
+        "timeout": false,
+        "maxHeapMiB": 512,
+        "timeoutMs": 30000
+      }
+    },
+    "historyRegression": {
+      "completed": true,
+      "engines": [
+        {
+          "arm": "candidate-final",
+          "resolverSha256": "f4c47145bebfd9812a485a447ac4e139ce8ad45c4c14e4a857f3e720479f404c"
+        },
+        {
+          "arm": "candidate-local-proof-16k-20260919",
+          "resolverSha256": "1e9a18e423aa7e760ce6cc7a41f9cbb30dacfe437edeca937f25bee8e248768c"
+        }
+      ],
+      "fixture": {
+        "chainModules": 63,
+        "warmC62Depth": 64,
+        "probeC62Depth": 65,
+        "immutableContext": true,
+        "distinctWarmAndProbeQueries": true,
+        "freshColdAndWarmContexts": true,
+        "singletonLiteralQualification": "Keeping Warm local creates an early competing ID; a third case removes it to guarantee convergence."
+      },
+      "rows": 12,
+      "historyChangesResult": 0,
+      "observations": [
+        {
+          "arm": "candidate-final",
+          "fixture": "negative-chain",
+          "apiKind": "exportWalker",
+          "coldProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "Warm:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 129,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-final",
+          "fixture": "negative-chain",
+          "apiKind": "resolveViaImport",
+          "coldProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "Warm:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 129,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-final",
+          "fixture": "singleton-chain-literal-warm-local",
+          "apiKind": "exportWalker",
+          "coldProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 65,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 1
+          },
+          "warmProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-final",
+          "fixture": "singleton-chain-literal-warm-local",
+          "apiKind": "resolveViaImport",
+          "coldProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 65,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 1
+          },
+          "warmProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-final",
+          "fixture": "singleton-chain-converging-warm",
+          "apiKind": "exportWalker",
+          "coldProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "C0:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 129,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-final",
+          "fixture": "singleton-chain-converging-warm",
+          "apiKind": "resolveViaImport",
+          "coldProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "C0:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 129,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": null
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-local-proof-16k-20260919",
+          "fixture": "negative-chain",
+          "apiKind": "exportWalker",
+          "coldProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "Warm:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 67,
+                "auxiliaryRemaining": 16259
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-local-proof-16k-20260919",
+          "fixture": "negative-chain",
+          "apiKind": "resolveViaImport",
+          "coldProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "Warm:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 67,
+                "auxiliaryRemaining": 16259
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-local-proof-16k-20260919",
+          "fixture": "singleton-chain-literal-warm-local",
+          "apiKind": "exportWalker",
+          "coldProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 65,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 1
+          },
+          "warmProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-local-proof-16k-20260919",
+          "fixture": "singleton-chain-literal-warm-local",
+          "apiKind": "resolveViaImport",
+          "coldProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 65,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 1
+          },
+          "warmProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-local-proof-16k-20260919",
+          "fixture": "singleton-chain-converging-warm",
+          "apiKind": "exportWalker",
+          "coldProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "C0:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 67,
+                "auxiliaryRemaining": 16259
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "ambiguous",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        },
+        {
+          "arm": "candidate-local-proof-16k-20260919",
+          "fixture": "singleton-chain-converging-warm",
+          "apiKind": "resolveViaImport",
+          "coldProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "warmQuery": {
+            "result": "target",
+            "targetId": "C0:wanted",
+            "walks": [
+              {
+                "exhausted": false,
+                "exactVisits": 67,
+                "auxiliaryRemaining": 16259
+              }
+            ],
+            "routeReads": 129,
+            "C0": 2,
+            "C61": 2,
+            "C62": 2
+          },
+          "warmProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "clearedProbe": {
+            "result": "undefined",
+            "targetId": null,
+            "walks": [
+              {
+                "exhausted": true,
+                "exactVisits": 66,
+                "auxiliaryRemaining": 16384
+              }
+            ],
+            "routeReads": 65,
+            "C0": 1,
+            "C61": 1,
+            "C62": 0
+          },
+          "historyChangesResult": false
+        }
+      ],
+      "process": {
+        "exitCode": 0,
+        "signal": null,
+        "timeout": false,
+        "maxHeapMiB": 256,
+        "timeoutMs": 5000,
+        "stderrPresent": false,
+        "closed": true
+      },
+      "corpusOpened": false,
+      "indexRun": false,
+      "qualification": "Twelve fixture rows cover two engines, three variants and two APIs. They do not establish whole-corpus determinism."
+    },
+    "ghcThreeImportedCalls": {
+      "corpus": "candidate-final-ghc-core-1",
+      "storedIndexState": "complete",
+      "snapshotQualification": "Historical completed candidate-final core index built before this final engine; fresh resolver probes neither add stored edges nor reindex it.",
+      "freshTargetsResolved": 3,
+      "freshProbes": [
+        {
+          "name": "deSugar",
+          "file": "compiler/GHC/Driver/Main/Passes.hs",
+          "line": 503,
+          "column": 7,
+          "storedReferenceStatus": "failed",
+          "targetNodeId": "function:6078204fe70e0c0c044ba4dc5b1511f9",
+          "targetQualifiedName": "GHC.HsToCore::deSugar",
+          "targetFile": "compiler/GHC/HsToCore.hs",
+          "resolvedBy": "import",
+          "instrumentedResultMatches": true,
+          "exportWalks": 76,
+          "exhaustedWalks": 0,
+          "ambiguousWalks": 0,
+          "exactVisitEntriesAcrossWalks": 102153
+        },
+        {
+          "name": "tcRnModule",
+          "file": "compiler/GHC/Driver/Main/Passes.hs",
+          "line": 458,
+          "column": 19,
+          "storedReferenceStatus": "failed",
+          "targetNodeId": "function:d16f00c018da94e0dee5de194620c5c1",
+          "targetQualifiedName": "GHC.Tc.Module::tcRnModule",
+          "targetFile": "compiler/GHC/Tc/Module.hs",
+          "resolvedBy": "import",
+          "instrumentedResultMatches": true,
+          "exportWalks": 76,
+          "exhaustedWalks": 0,
+          "ambiguousWalks": 0,
+          "exactVisitEntriesAcrossWalks": 98957
+        },
+        {
+          "name": "core2core",
+          "file": "compiler/GHC/Driver/Main/Passes.hs",
+          "line": 1457,
+          "column": 15,
+          "storedReferenceStatus": "failed",
+          "targetNodeId": "function:970cefae09bd0caaee284f671356798e",
+          "targetQualifiedName": "GHC.Core.Opt.Pipeline::core2core",
+          "targetFile": "compiler/GHC/Core/Opt/Pipeline.hs",
+          "resolvedBy": "import",
+          "instrumentedResultMatches": true,
+          "exportWalks": 76,
+          "exhaustedWalks": 0,
+          "ambiguousWalks": 0,
+          "exactVisitEntriesAcrossWalks": 101827
+        }
+      ],
+      "actualFlowQueries": 3,
+      "actualFlowPresent": 0,
+      "actualFlows": [
+        {
+          "query": "hsc_typecheck tcRnModule' tcRnModule",
+          "isError": false,
+          "actualFlowPresent": false,
+          "steps": 0,
+          "flowTruncated": false,
+          "outputTruncated": false,
+          "storedResponseTruncated": false
+        },
+        {
+          "query": "hscDesugar hscDesugar' deSugar",
+          "isError": false,
+          "actualFlowPresent": false,
+          "steps": 0,
+          "flowTruncated": false,
+          "outputTruncated": false,
+          "storedResponseTruncated": false
+        },
+        {
+          "query": "hscSimplify hscSimplify' core2core",
+          "isError": false,
+          "actualFlowPresent": false,
+          "steps": 0,
+          "flowTruncated": false,
+          "outputTruncated": false,
+          "storedResponseTruncated": false
+        }
+      ],
+      "flowQualification": "Actual Flow comes from ToolHandler on the unchanged historical index. Fresh 3/3 target success does not replace its 0/3 rendered Flow result; final indexed-harness evidence is still required."
+    },
+    "realReferenceSample": {
+      "corpus": "candidate-final-ghc-core-1",
+      "storedIndexState": "complete",
+      "selection": {
+        "filesAvailable": 1440,
+        "rejectedLocalName": 30,
+        "rejectedNoExternalNode": 40,
+        "rejectedNoVisibleImport": 7,
+        "explorationErrors": 0
+      },
+      "method": {
+        "readOnlySnapshot": true,
+        "noLifecycleOrIndexing": true,
+        "noBudgetChanges": true,
+        "instrumentation": "Identity return wrappers and counters only; answers are not independently dual-engine checked",
+        "witnessObserver": "Removed for the singleton-bound version; diagnostic timing is not directly comparable to versions with witness maps",
+        "contextReusedAcrossReferences": true,
+        "desiredReferences": 300,
+        "maxFiles": 40,
+        "maxCandidatesPerFile": 1200,
+        "eligibility": "Stored Haskell reference, visible indexed import route, exported name in another file, no same-name local node",
+        "selection": "Evenly spaced files in metadata path order; up to 15 eligible distinct name/namespace pairs per file; round-robin sample",
+        "caveat": "Eligibility is a conservative import candidate, not proof that the original program reference is imported",
+        "sourceExplorationFirst": true,
+        "timeoutMs": 30000,
+        "maxHeapMiB": 512,
+        "maxCombinedDbWalBytes": 1073741824,
+        "maxReportBytes": 262144
+      },
+      "counts": {
+        "selected": 300,
+        "completed": 300,
+        "resolved": 145,
+        "unresolved": 155,
+        "zeroOracleReferences": 8
+      },
+      "storedStatuses": {
+        "failed": 300
+      },
+      "mappingKinds": {
+        "wildcardPotential": 290,
+        "qualified": 5,
+        "exactNamed": 5
+      },
+      "oracle": {
+        "oracleCalls": 2224747,
+        "outcomes": {
+          "firstVisit": 316018,
+          "completedAbsent": 102220,
+          "localAbsent": 1216911,
+          "singletonCompleted": 18812,
+          "singletonHit": 478920,
+          "budget": 43309,
+          "unknownBound": 48557
+        },
+        "auxiliaryUnits": 4362255,
+        "exportWalks": 1963,
+        "exhaustedWalks": 90,
+        "exactVisitEntries": 2250903,
+        "singletonEarlyReturns": 114,
+        "singletonPredicatePrunes": 497412,
+        "nodeReads": 616,
+        "boundCache": {
+          "local:singletonHit": 478920,
+          "new:unknownBound": 1138,
+          "local:unknownBound": 47419
+        },
+        "boundSuccessors": {
+          "singleton": 242540,
+          "unknown": 1004
+        }
+      },
+      "process": {
+        "exitCode": 0,
+        "signal": null,
+        "timeout": false
+      },
+      "counterQualification": "Oracle outcomes count calls/returns, including repeated cache or exhausted-budget returns, not independent failed lookups.",
+      "comparisons": {
+        "v12": {
+          "report": "absence-oracle-sample-v12-16k-profile-20260919.public.json",
+          "engine": "diagnostic-local-proof-16k-20260919",
+          "resolverSha256": "23221def0e0b152eb7b1e7dc2545b05ce835e5452544e8d82c260275df048a34",
+          "orderedCoordinatesCompared": 300,
+          "orderedCoordinatesEqual": true,
+          "targetIdsComparedIncludingNull": 300,
+          "sameTargetIdsIncludingNull": 300,
+          "preservedPositiveTargets": 145,
+          "lostPositiveTargets": 0,
+          "retargetedPositiveTargets": 0,
+          "newPositiveTargets": 0,
+          "aggregateCountersEqual": true,
+          "fullOrderedPerReferenceCountersEqual": true
+        },
+        "v10": {
+          "report": "absence-oracle-sample-v10-profile-20260919.public.json",
+          "engine": "candidate-owner-cache-20260919",
+          "resolverSha256": "0c146cf1c0a12b8d177a68e92c58eebb484b5d41d16b9ac9b9702a0f3d4c7f02",
+          "orderedCoordinatesCompared": 300,
+          "orderedCoordinatesEqual": true,
+          "targetIdsComparedIncludingNull": 300,
+          "sameTargetIdsIncludingNull": 300,
+          "preservedPositiveTargets": 145,
+          "lostPositiveTargets": 0,
+          "retargetedPositiveTargets": 0,
+          "newPositiveTargets": 0,
+          "aggregateCountersEqual": false,
+          "fullOrderedPerReferenceCountersEqual": false
+        }
+      },
+      "orderedReferences": [
+        {
+          "ordinal": 1,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "unwords",
+          "namespace": "value",
+          "line": 179,
+          "column": 22,
+          "finalTargetNodeId": "function:527be82b3a8d3c7a40c21386fcb7919e",
+          "v12TargetNodeId": "function:527be82b3a8d3c7a40c21386fcb7919e",
+          "v10TargetNodeId": "function:527be82b3a8d3c7a40c21386fcb7919e"
+        },
+        {
+          "ordinal": 2,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "==",
+          "namespace": "value",
+          "line": 78,
+          "column": 35,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 3,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "W8",
+          "namespace": "value",
+          "line": 26,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:0423e42abaf8445ca4ab6a9fa6e52240",
+          "v12TargetNodeId": "enum_member:0423e42abaf8445ca4ab6a9fa6e52240",
+          "v10TargetNodeId": "enum_member:0423e42abaf8445ca4ab6a9fa6e52240"
+        },
+        {
+          "ordinal": 4,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "RV64::allocateReg",
+          "namespace": "value",
+          "line": 78,
+          "column": 20,
+          "finalTargetNodeId": "function:2fd47e2ab6daaba31580099372e01c79",
+          "v12TargetNodeId": "function:2fd47e2ab6daaba31580099372e01c79",
+          "v10TargetNodeId": "function:2fd47e2ab6daaba31580099372e01c79"
+        },
+        {
+          "ordinal": 5,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "nameUnique",
+          "namespace": "value",
+          "line": 233,
+          "column": 27,
+          "finalTargetNodeId": "function:8c11a2312107e794e5bba5e065aae1b2",
+          "v12TargetNodeId": "function:8c11a2312107e794e5bba5e065aae1b2",
+          "v10TargetNodeId": "function:8c11a2312107e794e5bba5e065aae1b2"
+        },
+        {
+          "ordinal": 6,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "char",
+          "namespace": "value",
+          "line": 213,
+          "column": 20,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 7,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "elemVarSet",
+          "namespace": "value",
+          "line": 551,
+          "column": 7,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 8,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "mkWorkerLimit",
+          "namespace": "value",
+          "line": 258,
+          "column": 16,
+          "finalTargetNodeId": "function:68cdeff356bad6f8bd7565f6c09568dd",
+          "v12TargetNodeId": "function:68cdeff356bad6f8bd7565f6c09568dd",
+          "v10TargetNodeId": "function:68cdeff356bad6f8bd7565f6c09568dd"
+        },
+        {
+          "ordinal": 9,
+          "file": "compiler/GHC/Hs/Extension.hs",
+          "name": "GhcPs",
+          "namespace": "value",
+          "line": 150,
+          "column": 12,
+          "finalTargetNodeId": "enum_member:80c7051880023cfcc14b63fff02486af",
+          "v12TargetNodeId": "enum_member:80c7051880023cfcc14b63fff02486af",
+          "v10TargetNodeId": "enum_member:80c7051880023cfcc14b63fff02486af"
+        },
+        {
+          "ordinal": 10,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "hsep",
+          "namespace": "value",
+          "line": 92,
+          "column": 6,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 11,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 128,
+          "column": 49,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 12,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "topRecNameMaker",
+          "namespace": "value",
+          "line": 200,
+          "column": 19,
+          "finalTargetNodeId": "function:5bbd8c634f309c84f6f116d46e031e23",
+          "v12TargetNodeId": "function:5bbd8c634f309c84f6f116d46e031e23",
+          "v10TargetNodeId": "function:5bbd8c634f309c84f6f116d46e031e23"
+        },
+        {
+          "ordinal": 13,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "text",
+          "namespace": "value",
+          "line": 78,
+          "column": 26,
+          "finalTargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142",
+          "v12TargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142",
+          "v10TargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142"
+        },
+        {
+          "ordinal": 14,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "CmmLit",
+          "namespace": "value",
+          "line": 103,
+          "column": 36,
+          "finalTargetNodeId": "enum_member:0e56d8b7b28b0ff611d46c2848c4c6a9",
+          "v12TargetNodeId": "enum_member:0e56d8b7b28b0ff611d46c2848c4c6a9",
+          "v10TargetNodeId": "enum_member:0e56d8b7b28b0ff611d46c2848c4c6a9"
+        },
+        {
+          "ordinal": 15,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "True",
+          "namespace": "value",
+          "line": 57,
+          "column": 51,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 16,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "TcM::tryCaptureConstraints",
+          "namespace": "value",
+          "line": 105,
+          "column": 26,
+          "finalTargetNodeId": "function:9607fb8ec95510100754e1c5bbfda750",
+          "v12TargetNodeId": "function:9607fb8ec95510100754e1c5bbfda750",
+          "v10TargetNodeId": "function:9607fb8ec95510100754e1c5bbfda750"
+        },
+        {
+          "ordinal": 17,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "text",
+          "namespace": "value",
+          "line": 79,
+          "column": 6,
+          "finalTargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142",
+          "v12TargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142",
+          "v10TargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142"
+        },
+        {
+          "ordinal": 18,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "NameShape",
+          "namespace": "value",
+          "line": 80,
+          "column": 26,
+          "finalTargetNodeId": "enum_member:1ef1c659b02745293bd5d6d62e6f72e9",
+          "v12TargetNodeId": "enum_member:1ef1c659b02745293bd5d6d62e6f72e9",
+          "v10TargetNodeId": "enum_member:1ef1c659b02745293bd5d6d62e6f72e9"
+        },
+        {
+          "ordinal": 19,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "reverse",
+          "namespace": "value",
+          "line": 58,
+          "column": 19,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 20,
+          "file": "compiler/GHC/Utils/Monad/State/Strict.hs",
+          "name": "oneShot",
+          "namespace": "value",
+          "line": 74,
+          "column": 22,
+          "finalTargetNodeId": "function:c02fdfaf9f6bb71e9659bec454b63514",
+          "v12TargetNodeId": "function:c02fdfaf9f6bb71e9659bec454b63514",
+          "v10TargetNodeId": "function:c02fdfaf9f6bb71e9659bec454b63514"
+        },
+        {
+          "ordinal": 21,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "<+>",
+          "namespace": "value",
+          "line": 85,
+          "column": 31,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 22,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "buildRoot",
+          "namespace": "value",
+          "line": 18,
+          "column": 17,
+          "finalTargetNodeId": "constant:bf588c7d826ae6737e4541e15c463d55",
+          "v12TargetNodeId": "constant:bf588c7d826ae6737e4541e15c463d55",
+          "v10TargetNodeId": "constant:bf588c7d826ae6737e4541e15c463d55"
+        },
+        {
+          "ordinal": 23,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": "read",
+          "namespace": "value",
+          "line": 17,
+          "column": 15,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 24,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "dataTypeRep",
+          "namespace": "value",
+          "line": 120,
+          "column": 11,
+          "finalTargetNodeId": "function:39d7dcbda320fe2f9e860767f5c1e605",
+          "v12TargetNodeId": "function:39d7dcbda320fe2f9e860767f5c1e605",
+          "v10TargetNodeId": "function:39d7dcbda320fe2f9e860767f5c1e605"
+        },
+        {
+          "ordinal": 25,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "=<<",
+          "namespace": "value",
+          "line": 13,
+          "column": 26,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 26,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "openFile",
+          "namespace": "value",
+          "line": 6,
+          "column": 10,
+          "finalTargetNodeId": "function:e6a6a26ef13fb1190fb0145e4c0d5045",
+          "v12TargetNodeId": "function:e6a6a26ef13fb1190fb0145e4c0d5045",
+          "v10TargetNodeId": "function:e6a6a26ef13fb1190fb0145e4c0d5045"
+        },
+        {
+          "ordinal": 27,
+          "file": "libraries/base/tests/System/getArgs001.hs",
+          "name": "getProgName",
+          "namespace": "value",
+          "line": 3,
+          "column": 19,
+          "finalTargetNodeId": "function:e4762881810b4533d275aad0878ff9e5",
+          "v12TargetNodeId": "function:e4762881810b4533d275aad0878ff9e5",
+          "v10TargetNodeId": "function:e4762881810b4533d275aad0878ff9e5"
+        },
+        {
+          "ordinal": 28,
+          "file": "libraries/base/tests/dynamic004.hs",
+          "name": "typeOf",
+          "namespace": "value",
+          "line": 9,
+          "column": 8,
+          "finalTargetNodeId": "function:fdb06f5025a1f7ea78f868f0c715703e",
+          "v12TargetNodeId": "function:fdb06f5025a1f7ea78f868f0c715703e",
+          "v10TargetNodeId": "function:fdb06f5025a1f7ea78f868f0c715703e"
+        },
+        {
+          "ordinal": 29,
+          "file": "libraries/base/tests/readFixed001.hs",
+          "name": "print",
+          "namespace": "value",
+          "line": 13,
+          "column": 8,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 30,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "throwIO",
+          "namespace": "value",
+          "line": 9,
+          "column": 17,
+          "finalTargetNodeId": "function:df77933004ebefcb7f8765eacab8d481",
+          "v12TargetNodeId": "function:df77933004ebefcb7f8765eacab8d481",
+          "v10TargetNodeId": "function:df77933004ebefcb7f8765eacab8d481"
+        },
+        {
+          "ordinal": 31,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Arr.hs",
+          "name": "I#",
+          "namespace": "value",
+          "line": 161,
+          "column": 22,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 32,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 117,
+          "column": 27,
+          "finalTargetNodeId": "function:cad1d74f5aa83f7ee9e35ddb83f831d8",
+          "v12TargetNodeId": "function:cad1d74f5aa83f7ee9e35ddb83f831d8",
+          "v10TargetNodeId": "function:cad1d74f5aa83f7ee9e35ddb83f831d8"
+        },
+        {
+          "ordinal": 33,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "*",
+          "namespace": "value",
+          "line": 147,
+          "column": 62,
+          "finalTargetNodeId": "method:c2b16c3523e638635e9af0c367c833ab",
+          "v12TargetNodeId": "method:c2b16c3523e638635e9af0c367c833ab",
+          "v10TargetNodeId": "method:c2b16c3523e638635e9af0c367c833ab"
+        },
+        {
+          "ordinal": 34,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Num.hs",
+          "name": "I#",
+          "namespace": "value",
+          "line": 110,
+          "column": 4,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 35,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "annotateCallStackIO",
+          "namespace": "value",
+          "line": 12,
+          "column": 10,
+          "finalTargetNodeId": "function:f9f0a7e170b361b3f84fb5756c92dbe3",
+          "v12TargetNodeId": "function:f9f0a7e170b361b3f84fb5756c92dbe3",
+          "v10TargetNodeId": "function:f9f0a7e170b361b3f84fb5756c92dbe3"
+        },
+        {
+          "ordinal": 36,
+          "file": "linters/lint-notes/Main.hs",
+          "name": "putStrLn",
+          "namespace": "value",
+          "line": 9,
+          "column": 4,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 37,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "Lens",
+          "namespace": "value",
+          "line": 22,
+          "column": 14,
+          "finalTargetNodeId": "enum_member:9e5e760427bdeda2a91c160c5e3a2212",
+          "v12TargetNodeId": "enum_member:9e5e760427bdeda2a91c160c5e3a2212",
+          "v10TargetNodeId": "enum_member:9e5e760427bdeda2a91c160c5e3a2212"
+        },
+        {
+          "ordinal": 38,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": "Array",
+          "namespace": "value",
+          "line": 74,
+          "column": 14,
+          "finalTargetNodeId": "enum_member:84b67bbdf160b3aeea38db048d7b5012",
+          "v12TargetNodeId": "enum_member:84b67bbdf160b3aeea38db048d7b5012",
+          "v10TargetNodeId": "enum_member:84b67bbdf160b3aeea38db048d7b5012"
+        },
+        {
+          "ordinal": 39,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "getArgs",
+          "namespace": "value",
+          "line": 11,
+          "column": 18,
+          "finalTargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769",
+          "v12TargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769",
+          "v10TargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769"
+        },
+        {
+          "ordinal": 40,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 179,
+          "column": 30,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 41,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "text",
+          "namespace": "value",
+          "line": 79,
+          "column": 19,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 42,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "fsLit",
+          "namespace": "value",
+          "line": 26,
+          "column": 9,
+          "finalTargetNodeId": "function:9783a4278899fcd6e90b0fbed647e4a2",
+          "v12TargetNodeId": "function:9783a4278899fcd6e90b0fbed647e4a2",
+          "v10TargetNodeId": "function:9783a4278899fcd6e90b0fbed647e4a2"
+        },
+        {
+          "ordinal": 43,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "RV64::getFreeRegs",
+          "namespace": "value",
+          "line": 79,
+          "column": 20,
+          "finalTargetNodeId": "function:ca2bfdcbd777b9ce3b8f4bcf9af9ae01",
+          "v12TargetNodeId": "function:ca2bfdcbd777b9ce3b8f4bcf9af9ae01",
+          "v10TargetNodeId": "function:ca2bfdcbd777b9ce3b8f4bcf9af9ae01"
+        },
+        {
+          "ordinal": 44,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "length",
+          "namespace": "value",
+          "line": 293,
+          "column": 18,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 45,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "<>",
+          "namespace": "value",
+          "line": 213,
+          "column": 29,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 46,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "pprPanic",
+          "namespace": "value",
+          "line": 566,
+          "column": 4,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 47,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "hsc_dflags",
+          "namespace": "value",
+          "line": 258,
+          "column": 31,
+          "finalTargetNodeId": "field:80aab1c8554b9999a306e8f792dc1e74",
+          "v12TargetNodeId": "field:80aab1c8554b9999a306e8f792dc1e74",
+          "v10TargetNodeId": "field:80aab1c8554b9999a306e8f792dc1e74"
+        },
+        {
+          "ordinal": 48,
+          "file": "compiler/GHC/Hs/Extension.hs",
+          "name": "GhcRn",
+          "namespace": "value",
+          "line": 152,
+          "column": 12,
+          "finalTargetNodeId": "enum_member:247dbdee71c7a2401a64167ec21f9da0",
+          "v12TargetNodeId": "enum_member:247dbdee71c7a2401a64167ec21f9da0",
+          "v10TargetNodeId": "enum_member:247dbdee71c7a2401a64167ec21f9da0"
+        },
+        {
+          "ordinal": 49,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "map",
+          "namespace": "value",
+          "line": 92,
+          "column": 27,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 50,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "map",
+          "namespace": "value",
+          "line": 128,
+          "column": 51,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 51,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "HsBoot",
+          "namespace": "value",
+          "line": 208,
+          "column": 26,
+          "finalTargetNodeId": "enum_member:8361785aa47742ec8ce5dc7072498507",
+          "v12TargetNodeId": "enum_member:8361785aa47742ec8ce5dc7072498507",
+          "v10TargetNodeId": "enum_member:8361785aa47742ec8ce5dc7072498507"
+        },
+        {
+          "ordinal": 52,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "<>",
+          "namespace": "value",
+          "line": 81,
+          "column": 42,
+          "finalTargetNodeId": "method:f69a292e8d009249729236bdc9698b24",
+          "v12TargetNodeId": "method:f69a292e8d009249729236bdc9698b24",
+          "v10TargetNodeId": "method:f69a292e8d009249729236bdc9698b24"
+        },
+        {
+          "ordinal": 53,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "CmmLabel",
+          "namespace": "value",
+          "line": 103,
+          "column": 44,
+          "finalTargetNodeId": "enum_member:9d1674d7232666467472bcfe9476e97a",
+          "v12TargetNodeId": "enum_member:9d1674d7232666467472bcfe9476e97a",
+          "v10TargetNodeId": "enum_member:9d1674d7232666467472bcfe9476e97a"
+        },
+        {
+          "ordinal": 54,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "Just",
+          "namespace": "value",
+          "line": 66,
+          "column": 8,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 55,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "Just",
+          "namespace": "value",
+          "line": 112,
+          "column": 11,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 56,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "<+>",
+          "namespace": "value",
+          "line": 79,
+          "column": 16,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 57,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "emptyOccEnv",
+          "namespace": "value",
+          "line": 80,
+          "column": 48,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 58,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "listToUniqMap",
+          "namespace": "value",
+          "line": 65,
+          "column": 6,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 59,
+          "file": "compiler/GHC/Utils/Monad/State/Strict.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 74,
+          "column": 30,
+          "finalTargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v12TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v10TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c"
+        },
+        {
+          "ordinal": 60,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "on",
+          "namespace": "value",
+          "line": 90,
+          "column": 32,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 61,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "<&>",
+          "namespace": "value",
+          "line": 18,
+          "column": 27,
+          "finalTargetNodeId": "function:24b31b336027c241cb128da707080d60",
+          "v12TargetNodeId": "function:24b31b336027c241cb128da707080d60",
+          "v10TargetNodeId": "function:24b31b336027c241cb128da707080d60"
+        },
+        {
+          "ordinal": 62,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 17,
+          "column": 20,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 63,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "AlgRep",
+          "namespace": "value",
+          "line": 121,
+          "column": 8,
+          "finalTargetNodeId": "enum_member:cbcae50cd89c9e1e0c78d97bb9d89022",
+          "v12TargetNodeId": "enum_member:cbcae50cd89c9e1e0c78d97bb9d89022",
+          "v10TargetNodeId": "enum_member:cbcae50cd89c9e1e0c78d97bb9d89022"
+        },
+        {
+          "ordinal": 64,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "ExitFailure",
+          "namespace": "value",
+          "line": 15,
+          "column": 4,
+          "finalTargetNodeId": "enum_member:071589fdd00467ae22f0f12b6b4b0ac6",
+          "v12TargetNodeId": "enum_member:071589fdd00467ae22f0f12b6b4b0ac6",
+          "v10TargetNodeId": "enum_member:071589fdd00467ae22f0f12b6b4b0ac6"
+        },
+        {
+          "ordinal": 65,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "ReadMode",
+          "namespace": "value",
+          "line": 6,
+          "column": 33,
+          "finalTargetNodeId": "enum_member:10a9b61392ca3424650a621e04b85d89",
+          "v12TargetNodeId": "enum_member:10a9b61392ca3424650a621e04b85d89",
+          "v10TargetNodeId": "enum_member:10a9b61392ca3424650a621e04b85d89"
+        },
+        {
+          "ordinal": 66,
+          "file": "libraries/base/tests/System/getArgs001.hs",
+          "name": "getArgs",
+          "namespace": "value",
+          "line": 5,
+          "column": 18,
+          "finalTargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769",
+          "v12TargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769",
+          "v10TargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769"
+        },
+        {
+          "ordinal": 67,
+          "file": "libraries/base/tests/dynamic004.hs",
+          "name": "-",
+          "namespace": "value",
+          "line": 9,
+          "column": 23,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 68,
+          "file": "libraries/base/tests/readFixed001.hs",
+          "name": "reads",
+          "namespace": "value",
+          "line": 13,
+          "column": 15,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 69,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 9,
+          "column": 25,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 70,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Arr.hs",
+          "name": "&&",
+          "namespace": "value",
+          "line": 226,
+          "column": 14,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 71,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": "fmap",
+          "namespace": "value",
+          "line": 117,
+          "column": 29,
+          "finalTargetNodeId": "method:9cbf80a5a5c4f5b0b0b7ff27babdfab0",
+          "v12TargetNodeId": "method:9cbf80a5a5c4f5b0b0b7ff27babdfab0",
+          "v10TargetNodeId": "method:9cbf80a5a5c4f5b0b0b7ff27babdfab0"
+        },
+        {
+          "ordinal": 72,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "plusPtr",
+          "namespace": "value",
+          "line": 150,
+          "column": 35,
+          "finalTargetNodeId": "function:3a2d1cdbd908cddbfa98a6919df6642b",
+          "v12TargetNodeId": "function:3a2d1cdbd908cddbfa98a6919df6642b",
+          "v10TargetNodeId": "function:3a2d1cdbd908cddbfa98a6919df6642b"
+        },
+        {
+          "ordinal": 73,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 12,
+          "column": 30,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 74,
+          "file": "linters/lint-notes/Main.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 9,
+          "column": 13,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 75,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "checking",
+          "namespace": "value",
+          "line": 27,
+          "column": 32,
+          "finalTargetNodeId": "function:efb8a274dbd9546cd3c185d558f08120",
+          "v12TargetNodeId": "function:efb8a274dbd9546cd3c185d558f08120",
+          "v10TargetNodeId": "function:efb8a274dbd9546cd3c185d558f08120"
+        },
+        {
+          "ordinal": 76,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": "id",
+          "namespace": "value",
+          "line": 77,
+          "column": 11,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 77,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 13,
+          "column": 41,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 78,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "++",
+          "namespace": "value",
+          "line": 181,
+          "column": 2,
+          "finalTargetNodeId": "function:bbfbf7876831c5edacfd4ce40c108ed2",
+          "v12TargetNodeId": "function:bbfbf7876831c5edacfd4ce40c108ed2",
+          "v10TargetNodeId": "function:bbfbf7876831c5edacfd4ce40c108ed2"
+        },
+        {
+          "ordinal": 79,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "<+>",
+          "namespace": "value",
+          "line": 83,
+          "column": 31,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 80,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "W16",
+          "namespace": "value",
+          "line": 27,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:2e74829a7862e0a55f0f3a883cc4789b",
+          "v12TargetNodeId": "enum_member:2e74829a7862e0a55f0f3a883cc4789b",
+          "v10TargetNodeId": "enum_member:2e74829a7862e0a55f0f3a883cc4789b"
+        },
+        {
+          "ordinal": 81,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "RV64::initFreeRegs",
+          "namespace": "value",
+          "line": 80,
+          "column": 21,
+          "finalTargetNodeId": "function:d96421c6a8b8513559f419ca92962c3c",
+          "v12TargetNodeId": "function:d96421c6a8b8513559f419ca92962c3c",
+          "v10TargetNodeId": "function:d96421c6a8b8513559f419ca92962c3c"
+        },
+        {
+          "ordinal": 82,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "++",
+          "namespace": "value",
+          "line": 299,
+          "column": 12,
+          "finalTargetNodeId": "function:bbfbf7876831c5edacfd4ce40c108ed2",
+          "v12TargetNodeId": "function:bbfbf7876831c5edacfd4ce40c108ed2",
+          "v10TargetNodeId": "function:bbfbf7876831c5edacfd4ce40c108ed2"
+        },
+        {
+          "ordinal": 83,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "+",
+          "namespace": "value",
+          "line": 220,
+          "column": 43,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 84,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 566,
+          "column": 31,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 85,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "newIORef",
+          "namespace": "value",
+          "line": 259,
+          "column": 16,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 86,
+          "file": "compiler/GHC/Hs/Extension.hs",
+          "name": "GhcTc",
+          "namespace": "value",
+          "line": 154,
+          "column": 12,
+          "finalTargetNodeId": "enum_member:c5d1c90b41ab063cc95daf93c856576b",
+          "v12TargetNodeId": "enum_member:c5d1c90b41ab063cc95daf93c856576b",
+          "v10TargetNodeId": "enum_member:c5d1c90b41ab063cc95daf93c856576b"
+        },
+        {
+          "ordinal": 87,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "text",
+          "namespace": "value",
+          "line": 92,
+          "column": 46,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 88,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "IfStat",
+          "namespace": "value",
+          "line": 133,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:967cee9c6ba8157349c59e9f235e12fd",
+          "v12TargetNodeId": "enum_member:967cee9c6ba8157349c59e9f235e12fd",
+          "v10TargetNodeId": "enum_member:967cee9c6ba8157349c59e9f235e12fd"
+        },
+        {
+          "ordinal": 89,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "BootBindsPs",
+          "namespace": "value",
+          "line": 208,
+          "column": 33,
+          "finalTargetNodeId": "enum_member:8c32ead90f7215ed8eb68284e82ad615",
+          "v12TargetNodeId": "enum_member:8c32ead90f7215ed8eb68284e82ad615",
+          "v10TargetNodeId": "enum_member:8c32ead90f7215ed8eb68284e82ad615"
+        },
+        {
+          "ordinal": 90,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "brackets",
+          "namespace": "value",
+          "line": 81,
+          "column": 45,
+          "finalTargetNodeId": "function:6cdcad3db988f511efcec39b43693993",
+          "v12TargetNodeId": "function:6cdcad3db988f511efcec39b43693993",
+          "v10TargetNodeId": "function:6cdcad3db988f511efcec39b43693993"
+        },
+        {
+          "ordinal": 91,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "CmmInt",
+          "namespace": "value",
+          "line": 113,
+          "column": 48,
+          "finalTargetNodeId": "enum_member:8a6ec5474e2196d6ea56f2b84acee7c8",
+          "v12TargetNodeId": "enum_member:8a6ec5474e2196d6ea56f2b84acee7c8",
+          "v10TargetNodeId": "enum_member:8a6ec5474e2196d6ea56f2b84acee7c8"
+        },
+        {
+          "ordinal": 92,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 67,
+          "column": 22,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 93,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 112,
+          "column": 23,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 94,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "braces",
+          "namespace": "value",
+          "line": 79,
+          "column": 20,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 95,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 86,
+          "column": 26,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 96,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "unitId",
+          "namespace": "value",
+          "line": 65,
+          "column": 23,
+          "finalTargetNodeId": "field:d81ffa636ea1ddda97a6e11f3b44022b",
+          "v12TargetNodeId": "field:d81ffa636ea1ddda97a6e11f3b44022b",
+          "v10TargetNodeId": "field:d81ffa636ea1ddda97a6e11f3b44022b"
+        },
+        {
+          "ordinal": 97,
+          "file": "compiler/GHC/Utils/Monad/State/Strict.hs",
+          "name": "m",
+          "namespace": "value",
+          "line": 88,
+          "column": 2,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 98,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "filter",
+          "namespace": "value",
+          "line": 94,
+          "column": 28,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 99,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "-/-",
+          "namespace": "value",
+          "line": 18,
+          "column": 31,
+          "finalTargetNodeId": "function:7b7e90396d4282459f1c609853e0276a",
+          "v12TargetNodeId": "function:7b7e90396d4282459f1c609853e0276a",
+          "v10TargetNodeId": "function:7b7e90396d4282459f1c609853e0276a"
+        },
+        {
+          "ordinal": 100,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": "dropWhile",
+          "namespace": "value",
+          "line": 17,
+          "column": 22,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 101,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "IntRep",
+          "namespace": "value",
+          "line": 122,
+          "column": 8,
+          "finalTargetNodeId": "enum_member:99ce697a7658a61e7890e31fe6aa481c",
+          "v12TargetNodeId": "enum_member:99ce697a7658a61e7890e31fe6aa481c",
+          "v10TargetNodeId": "enum_member:99ce697a7658a61e7890e31fe6aa481c"
+        },
+        {
+          "ordinal": 102,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "putStrLn",
+          "namespace": "value",
+          "line": 15,
+          "column": 24,
+          "finalTargetNodeId": "function:010c63b1f15e78153766cf227208cd8d",
+          "v12TargetNodeId": "function:010c63b1f15e78153766cf227208cd8d",
+          "v10TargetNodeId": "function:010c63b1f15e78153766cf227208cd8d"
+        },
+        {
+          "ordinal": 103,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "True",
+          "namespace": "value",
+          "line": 7,
+          "column": 4,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 104,
+          "file": "libraries/base/tests/dynamic004.hs",
+          "name": "print",
+          "namespace": "value",
+          "line": 13,
+          "column": 7,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 105,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "AssertionFailed",
+          "namespace": "value",
+          "line": 9,
+          "column": 27,
+          "finalTargetNodeId": "enum_member:4d427003f701c58fcb2a8b4d0958087c",
+          "v12TargetNodeId": "enum_member:4d427003f701c58fcb2a8b4d0958087c",
+          "v10TargetNodeId": "enum_member:4d427003f701c58fcb2a8b4d0958087c"
+        },
+        {
+          "ordinal": 106,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Arr.hs",
+          "name": "EQ",
+          "namespace": "value",
+          "line": 528,
+          "column": 24,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 107,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": "id",
+          "namespace": "value",
+          "line": 148,
+          "column": 25,
+          "finalTargetNodeId": "function:96cf6bb8f88509868f21ab0087b5ea7f",
+          "v12TargetNodeId": "function:96cf6bb8f88509868f21ab0087b5ea7f",
+          "v10TargetNodeId": "function:96cf6bb8f88509868f21ab0087b5ea7f"
+        },
+        {
+          "ordinal": 108,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 160,
+          "column": 11,
+          "finalTargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6",
+          "v12TargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6",
+          "v10TargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6"
+        },
+        {
+          "ordinal": 109,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "putStrLn",
+          "namespace": "value",
+          "line": 13,
+          "column": 2,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 110,
+          "file": "linters/lint-notes/Main.hs",
+          "name": "unlines",
+          "namespace": "value",
+          "line": 9,
+          "column": 15,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 111,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 27,
+          "column": 60,
+          "finalTargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v12TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v10TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c"
+        },
+        {
+          "ordinal": 112,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": "Bool",
+          "namespace": "value",
+          "line": 80,
+          "column": 11,
+          "finalTargetNodeId": "enum_member:6e1a2ab4cda30f178aaa4a1a9b4c9b45",
+          "v12TargetNodeId": "enum_member:6e1a2ab4cda30f178aaa4a1a9b4c9b45",
+          "v10TargetNodeId": "enum_member:6e1a2ab4cda30f178aaa4a1a9b4c9b45"
+        },
+        {
+          "ordinal": 113,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 13,
+          "column": 48,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 114,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "not",
+          "namespace": "value",
+          "line": 181,
+          "column": 40,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 115,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "ppr",
+          "namespace": "value",
+          "line": 84,
+          "column": 12,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 116,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "W32",
+          "namespace": "value",
+          "line": 28,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:e2149081a00ee5585bba7dbb46ffb6eb",
+          "v12TargetNodeId": "enum_member:e2149081a00ee5585bba7dbb46ffb6eb",
+          "v10TargetNodeId": "enum_member:e2149081a00ee5585bba7dbb46ffb6eb"
+        },
+        {
+          "ordinal": 117,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "RV64::releaseReg",
+          "namespace": "value",
+          "line": 81,
+          "column": 19,
+          "finalTargetNodeId": "function:fc9d31cbc02ab665e1f560e261d49ba8",
+          "v12TargetNodeId": "function:fc9d31cbc02ab665e1f560e261d49ba8",
+          "v10TargetNodeId": "function:fc9d31cbc02ab665e1f560e261d49ba8"
+        },
+        {
+          "ordinal": 118,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "assert",
+          "namespace": "value",
+          "line": 300,
+          "column": 19,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 119,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": ">",
+          "namespace": "value",
+          "line": 227,
+          "column": 10,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 120,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "vcat",
+          "namespace": "value",
+          "line": 567,
+          "column": 4,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 121,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "zip",
+          "namespace": "value",
+          "line": 259,
+          "column": 45,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 122,
+          "file": "compiler/GHC/Hs/Extension.hs",
+          "name": "text",
+          "namespace": "value",
+          "line": 216,
+          "column": 10,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 123,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "char",
+          "namespace": "value",
+          "line": 93,
+          "column": 24,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 124,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "text",
+          "namespace": "value",
+          "line": 134,
+          "column": 37,
+          "finalTargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142",
+          "v12TargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142",
+          "v10TargetNodeId": "method:c99dd7c584631ac9b37a84804bb44142"
+        },
+        {
+          "ordinal": 125,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "pure",
+          "namespace": "value",
+          "line": 209,
+          "column": 10,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 126,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "pprWithCommas",
+          "namespace": "value",
+          "line": 81,
+          "column": 55,
+          "finalTargetNodeId": "function:f706f609d692c441bc29c096b2afad09",
+          "v12TargetNodeId": "function:f706f609d692c441bc29c096b2afad09",
+          "v10TargetNodeId": "function:f706f609d692c441bc29c096b2afad09"
+        },
+        {
+          "ordinal": 127,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "toInteger",
+          "namespace": "value",
+          "line": 113,
+          "column": 56,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 128,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "newEmptyMVar",
+          "namespace": "value",
+          "line": 70,
+          "column": 15,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 129,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "Nothing",
+          "namespace": "value",
+          "line": 113,
+          "column": 11,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 130,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "vcat",
+          "namespace": "value",
+          "line": 79,
+          "column": 28,
+          "finalTargetNodeId": "method:5898d74121b5be3f4c076c11607c8ce2",
+          "v12TargetNodeId": "method:5898d74121b5be3f4c076c11607c8ce2",
+          "v10TargetNodeId": "method:5898d74121b5be3f4c076c11607c8ce2"
+        },
+        {
+          "ordinal": 131,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "mkOccEnv",
+          "namespace": "value",
+          "line": 86,
+          "column": 28,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 132,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "filter",
+          "namespace": "value",
+          "line": 70,
+          "column": 22,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 133,
+          "file": "compiler/GHC/Utils/Monad/State/Strict.hs",
+          "name": "n",
+          "namespace": "value",
+          "line": 88,
+          "column": 8,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 134,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "Nothing",
+          "namespace": "value",
+          "line": 106,
+          "column": 55,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 135,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "lookupValueOrError",
+          "namespace": "value",
+          "line": 54,
+          "column": 4,
+          "finalTargetNodeId": "function:70389c5b2d28a064315181819ee1f61e",
+          "v12TargetNodeId": "function:70389c5b2d28a064315181819ee1f61e",
+          "v10TargetNodeId": "function:70389c5b2d28a064315181819ee1f61e"
+        },
+        {
+          "ordinal": 136,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": "==",
+          "namespace": "value",
+          "line": 17,
+          "column": 32,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 137,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "mkPrimCon",
+          "namespace": "value",
+          "line": 122,
+          "column": 41,
+          "finalTargetNodeId": "function:76e223f52bdb7c3700c85101a1cbcab6",
+          "v12TargetNodeId": "function:76e223f52bdb7c3700c85101a1cbcab6",
+          "v10TargetNodeId": "function:76e223f52bdb7c3700c85101a1cbcab6"
+        },
+        {
+          "ordinal": 138,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "ExitSuccess",
+          "namespace": "value",
+          "line": 16,
+          "column": 4,
+          "finalTargetNodeId": "enum_member:e1877e9c74a0119e9081f500e1e1223c",
+          "v12TargetNodeId": "enum_member:e1877e9c74a0119e9081f500e1e1223c",
+          "v10TargetNodeId": "enum_member:e1877e9c74a0119e9081f500e1e1223c"
+        },
+        {
+          "ordinal": 139,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "hIsSeekable",
+          "namespace": "value",
+          "line": 7,
+          "column": 12,
+          "finalTargetNodeId": "function:13bdaf40f8e50627595d5df7f9dbbd64",
+          "v12TargetNodeId": "function:13bdaf40f8e50627595d5df7f9dbbd64",
+          "v10TargetNodeId": "function:13bdaf40f8e50627595d5df7f9dbbd64"
+        },
+        {
+          "ordinal": 140,
+          "file": "libraries/base/tests/dynamic004.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 13,
+          "column": 13,
+          "finalTargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v12TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v10TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c"
+        },
+        {
+          "ordinal": 141,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "==",
+          "namespace": "value",
+          "line": 13,
+          "column": 14,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 142,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Arr.hs",
+          "name": "LT",
+          "namespace": "value",
+          "line": 528,
+          "column": 32,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 143,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": "Nothing",
+          "namespace": "value",
+          "line": 239,
+          "column": 15,
+          "finalTargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79",
+          "v12TargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79",
+          "v10TargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79"
+        },
+        {
+          "ordinal": 144,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "liftM",
+          "namespace": "value",
+          "line": 169,
+          "column": 23,
+          "finalTargetNodeId": "function:54f27b4f0b1267912649fbab62f9a25d",
+          "v12TargetNodeId": "function:54f27b4f0b1267912649fbab62f9a25d",
+          "v10TargetNodeId": "function:54f27b4f0b1267912649fbab62f9a25d"
+        },
+        {
+          "ordinal": 145,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "print",
+          "namespace": "value",
+          "line": 19,
+          "column": 2,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 146,
+          "file": "linters/lint-notes/Main.hs",
+          "name": "fail",
+          "namespace": "value",
+          "line": 22,
+          "column": 4,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 147,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "findProgram",
+          "namespace": "value",
+          "line": 29,
+          "column": 18,
+          "finalTargetNodeId": "function:bfa7e979673e98f669f2402d50c384a2",
+          "v12TargetNodeId": "function:bfa7e979673e98f669f2402d50c384a2",
+          "v10TargetNodeId": "function:bfa7e979673e98f669f2402d50c384a2"
+        },
+        {
+          "ordinal": 148,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": "String",
+          "namespace": "value",
+          "line": 83,
+          "column": 11,
+          "finalTargetNodeId": "enum_member:20f06afa5e4481b6a15044312be784ee",
+          "v12TargetNodeId": "enum_member:20f06afa5e4481b6a15044312be784ee",
+          "v10TargetNodeId": "enum_member:20f06afa5e4481b6a15044312be784ee"
+        },
+        {
+          "ordinal": 149,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "map",
+          "namespace": "value",
+          "line": 13,
+          "column": 50,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 150,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "==",
+          "namespace": "value",
+          "line": 183,
+          "column": 46,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 151,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "parens",
+          "namespace": "value",
+          "line": 84,
+          "column": 35,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 152,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "W64",
+          "namespace": "value",
+          "line": 29,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:3322a8fea04bd52fe5a031c124725f49",
+          "v12TargetNodeId": "enum_member:3322a8fea04bd52fe5a031c124725f49",
+          "v10TargetNodeId": "enum_member:3322a8fea04bd52fe5a031c124725f49"
+        },
+        {
+          "ordinal": 153,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "foldMap",
+          "namespace": "value",
+          "line": 90,
+          "column": 22,
+          "finalTargetNodeId": "method:b8f205e12d241827d21428e79bdb747f",
+          "v12TargetNodeId": "method:b8f205e12d241827d21428e79bdb747f",
+          "v10TargetNodeId": "method:b8f205e12d241827d21428e79bdb747f"
+        },
+        {
+          "ordinal": 154,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "null",
+          "namespace": "value",
+          "line": 300,
+          "column": 27,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 155,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "||",
+          "namespace": "value",
+          "line": 227,
+          "column": 18,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 156,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "<+>",
+          "namespace": "value",
+          "line": 567,
+          "column": 18,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 157,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "repeat",
+          "namespace": "value",
+          "line": 259,
+          "column": 64,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 158,
+          "file": "compiler/GHC/Hs/Extension.hs",
+          "name": "dataConCantHappen",
+          "namespace": "value",
+          "line": 219,
+          "column": 8,
+          "finalTargetNodeId": "function:a16fcd5a2a1121e3cd5d8cba68fe946b",
+          "v12TargetNodeId": "function:a16fcd5a2a1121e3cd5d8cba68fe946b",
+          "v10TargetNodeId": "function:a16fcd5a2a1121e3cd5d8cba68fe946b"
+        },
+        {
+          "ordinal": 159,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 129,
+          "column": 33,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 160,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "parens",
+          "namespace": "value",
+          "line": 134,
+          "column": 52,
+          "finalTargetNodeId": "function:f25df2df6bc238f27c4fc3363e089636",
+          "v12TargetNodeId": "function:f25df2df6bc238f27c4fc3363e089636",
+          "v10TargetNodeId": "function:f25df2df6bc238f27c4fc3363e089636"
+        },
+        {
+          "ordinal": 161,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 215,
+          "column": 25,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 162,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "putByte",
+          "namespace": "value",
+          "line": 84,
+          "column": 28,
+          "finalTargetNodeId": "function:80023fb079a0403e7c437ab9f1bae108",
+          "v12TargetNodeId": "function:80023fb079a0403e7c437ab9f1bae108",
+          "v10TargetNodeId": "function:80023fb079a0403e7c437ab9f1bae108"
+        },
+        {
+          "ordinal": 163,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "typeWidth",
+          "namespace": "value",
+          "line": 113,
+          "column": 70,
+          "finalTargetNodeId": "function:374717cb35b533e948527b943bf9602a",
+          "v12TargetNodeId": "function:374717cb35b533e948527b943bf9602a",
+          "v10TargetNodeId": "function:374717cb35b533e948527b943bf9602a"
+        },
+        {
+          "ordinal": 164,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "putMVar",
+          "namespace": "value",
+          "line": 72,
+          "column": 22,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 165,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "failM",
+          "namespace": "value",
+          "line": 113,
+          "column": 50,
+          "finalTargetNodeId": "constant:083ce536d354350f1a08aaa3b3663cf3",
+          "v12TargetNodeId": "constant:083ce536d354350f1a08aaa3b3663cf3",
+          "v10TargetNodeId": "constant:083ce536d354350f1a08aaa3b3663cf3"
+        },
+        {
+          "ordinal": 166,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "oneShot",
+          "namespace": "value",
+          "line": 179,
+          "column": 22,
+          "finalTargetNodeId": "function:c02fdfaf9f6bb71e9659bec454b63514",
+          "v12TargetNodeId": "function:c02fdfaf9f6bb71e9659bec454b63514",
+          "v10TargetNodeId": "function:c02fdfaf9f6bb71e9659bec454b63514"
+        },
+        {
+          "ordinal": 167,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "availName",
+          "namespace": "value",
+          "line": 88,
+          "column": 13,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 168,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "not",
+          "namespace": "value",
+          "line": 70,
+          "column": 30,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 169,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "unpackFS",
+          "namespace": "value",
+          "line": 110,
+          "column": 18,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 170,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "Nothing",
+          "namespace": "value",
+          "line": 54,
+          "column": 23,
+          "finalTargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79",
+          "v12TargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79",
+          "v10TargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79"
+        },
+        {
+          "ordinal": 171,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": "filter",
+          "namespace": "value",
+          "line": 17,
+          "column": 42,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 172,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "IntConstr",
+          "namespace": "value",
+          "line": 122,
+          "column": 59,
+          "finalTargetNodeId": "enum_member:c976bf881a1e88ca05490d8b94288670",
+          "v12TargetNodeId": "enum_member:c976bf881a1e88ca05490d8b94288670",
+          "v10TargetNodeId": "enum_member:c976bf881a1e88ca05490d8b94288670"
+        },
+        {
+          "ordinal": 173,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "newEmptyMVar",
+          "namespace": "value",
+          "line": 17,
+          "column": 16,
+          "finalTargetNodeId": "function:8fa8f60515c63a0d3745d89c258e6b96",
+          "v12TargetNodeId": "function:8fa8f60515c63a0d3745d89c258e6b96",
+          "v10TargetNodeId": "function:8fa8f60515c63a0d3745d89c258e6b96"
+        },
+        {
+          "ordinal": 174,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "hSeek",
+          "namespace": "value",
+          "line": 8,
+          "column": 4,
+          "finalTargetNodeId": "function:14d7a8c18cacbb8803c3e0ee4efc4641",
+          "v12TargetNodeId": "function:14d7a8c18cacbb8803c3e0ee4efc4641",
+          "v10TargetNodeId": "function:14d7a8c18cacbb8803c3e0ee4efc4641"
+        },
+        {
+          "ordinal": 175,
+          "file": "libraries/base/tests/dynamic004.hs",
+          "name": "length",
+          "namespace": "value",
+          "line": 13,
+          "column": 15,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 176,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 13,
+          "column": 29,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 177,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Arr.hs",
+          "name": "GT",
+          "namespace": "value",
+          "line": 529,
+          "column": 25,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 178,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": "pure",
+          "namespace": "value",
+          "line": 239,
+          "column": 25,
+          "finalTargetNodeId": "method:109ac1284f8af99ff05a0b6ee370ffb4",
+          "v12TargetNodeId": "method:109ac1284f8af99ff05a0b6ee370ffb4",
+          "v10TargetNodeId": "method:109ac1284f8af99ff05a0b6ee370ffb4"
+        },
+        {
+          "ordinal": 179,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "/=",
+          "namespace": "value",
+          "line": 169,
+          "column": 29,
+          "finalTargetNodeId": "method:4da1a792925f5e9ed05f01cea3dc91d5",
+          "v12TargetNodeId": "method:4da1a792925f5e9ed05f01cea3dc91d5",
+          "v10TargetNodeId": "method:4da1a792925f5e9ed05f01cea3dc91d5"
+        },
+        {
+          "ordinal": 180,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "decodeAndPrintAnnotationFrames",
+          "namespace": "value",
+          "line": 20,
+          "column": 2,
+          "finalTargetNodeId": "function:fb371988bd64615bcdd8ffbc5c806f4e",
+          "v12TargetNodeId": "function:fb371988bd64615bcdd8ffbc5c806f4e",
+          "v10TargetNodeId": "function:fb371988bd64615bcdd8ffbc5c806f4e"
+        },
+        {
+          "ordinal": 181,
+          "file": "linters/lint-notes/Main.hs",
+          "name": "getArgs",
+          "namespace": "value",
+          "line": 26,
+          "column": 12,
+          "finalTargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769",
+          "v12TargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769",
+          "v10TargetNodeId": "function:e6f50c0b7d703b6cdf89961cacb16769"
+        },
+        {
+          "ordinal": 182,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 32,
+          "column": 4,
+          "finalTargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6",
+          "v12TargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6",
+          "v10TargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6"
+        },
+        {
+          "ordinal": 183,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 86,
+          "column": 17,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 184,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "error",
+          "namespace": "value",
+          "line": 15,
+          "column": 21,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 185,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "False",
+          "namespace": "value",
+          "line": 223,
+          "column": 21,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 186,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "pprAsmLabel",
+          "namespace": "value",
+          "line": 84,
+          "column": 43,
+          "finalTargetNodeId": "function:0ba28e9173789437294c90f345500a20",
+          "v12TargetNodeId": "function:0ba28e9173789437294c90f345500a20",
+          "v10TargetNodeId": "function:0ba28e9173789437294c90f345500a20"
+        },
+        {
+          "ordinal": 187,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "pprPanic",
+          "namespace": "value",
+          "line": 30,
+          "column": 9,
+          "finalTargetNodeId": "function:0c975bb93ab9245625d5dfd65dfb1d8c",
+          "v12TargetNodeId": "function:0c975bb93ab9245625d5dfd65dfb1d8c",
+          "v10TargetNodeId": "function:0c975bb93ab9245625d5dfd65dfb1d8c"
+        },
+        {
+          "ordinal": 188,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "registerArch",
+          "namespace": "value",
+          "line": 93,
+          "column": 11,
+          "finalTargetNodeId": "function:b7c2fe3f2857bfc7867fcde23941ea0e",
+          "v12TargetNodeId": "function:b7c2fe3f2857bfc7867fcde23941ea0e",
+          "v10TargetNodeId": "function:b7c2fe3f2857bfc7867fcde23941ea0e"
+        },
+        {
+          "ordinal": 189,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": ">=",
+          "namespace": "value",
+          "line": 313,
+          "column": 14,
+          "finalTargetNodeId": "method:e57996f3594d984c6b6dd9ccb4e02bcb",
+          "v12TargetNodeId": "method:e57996f3594d984c6b6dd9ccb4e02bcb",
+          "v10TargetNodeId": "method:e57996f3594d984c6b6dd9ccb4e02bcb"
+        },
+        {
+          "ordinal": 190,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "&&",
+          "namespace": "value",
+          "line": 227,
+          "column": 35,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 191,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "text",
+          "namespace": "value",
+          "line": 567,
+          "column": 32,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 192,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "hsc_unit_env",
+          "namespace": "value",
+          "line": 264,
+          "column": 17,
+          "finalTargetNodeId": "field:346709059d88d4513454d4ceebcc7048",
+          "v12TargetNodeId": "field:346709059d88d4513454d4ceebcc7048",
+          "v10TargetNodeId": "field:346709059d88d4513454d4ceebcc7048"
+        },
+        {
+          "ordinal": 193,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "foldr",
+          "namespace": "value",
+          "line": 133,
+          "column": 21,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 194,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "==",
+          "namespace": "value",
+          "line": 137,
+          "column": 25,
+          "finalTargetNodeId": "method:743baed50559e51390110c6cc88024fc",
+          "v12TargetNodeId": "method:743baed50559e51390110c6cc88024fc",
+          "v10TargetNodeId": "method:743baed50559e51390110c6cc88024fc"
+        },
+        {
+          "ordinal": 195,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "L",
+          "namespace": "value",
+          "line": 216,
+          "column": 36,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 196,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": ">>",
+          "namespace": "value",
+          "line": 85,
+          "column": 41,
+          "finalTargetNodeId": "method:a92fbdd8d365e5152e22e5ed89d05597",
+          "v12TargetNodeId": "method:a92fbdd8d365e5152e22e5ed89d05597",
+          "v10TargetNodeId": "method:a92fbdd8d365e5152e22e5ed89d05597"
+        },
+        {
+          "ordinal": 197,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "mkStore",
+          "namespace": "value",
+          "line": 121,
+          "column": 4,
+          "finalTargetNodeId": "function:f9bbdbb5e521be82d08e966e72a0ea67",
+          "v12TargetNodeId": "function:f9bbdbb5e521be82d08e966e72a0ea67",
+          "v10TargetNodeId": "function:f9bbdbb5e521be82d08e966e72a0ea67"
+        },
+        {
+          "ordinal": 198,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "Left",
+          "namespace": "value",
+          "line": 72,
+          "column": 39,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 199,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "mkImplicWC",
+          "namespace": "value",
+          "line": 121,
+          "column": 37,
+          "finalTargetNodeId": "function:2e61ced4bc70ecd1b95895f81ba53029",
+          "v12TargetNodeId": "function:2e61ced4bc70ecd1b95895f81ba53029",
+          "v10TargetNodeId": "function:2e61ced4bc70ecd1b95895f81ba53029"
+        },
+        {
+          "ordinal": 200,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 183,
+          "column": 27,
+          "finalTargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v12TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v10TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c"
+        },
+        {
+          "ordinal": 201,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "availNames",
+          "namespace": "value",
+          "line": 88,
+          "column": 27,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 202,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 70,
+          "column": 34,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 203,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 110,
+          "column": 27,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 204,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 54,
+          "column": 36,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 205,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": "/=",
+          "namespace": "value",
+          "line": 17,
+          "column": 49,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 206,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "FloatRep",
+          "namespace": "value",
+          "line": 123,
+          "column": 8,
+          "finalTargetNodeId": "enum_member:651f06c86ba3d9bc1e08e8b39c024073",
+          "v12TargetNodeId": "enum_member:651f06c86ba3d9bc1e08e8b39c024073",
+          "v10TargetNodeId": "enum_member:651f06c86ba3d9bc1e08e8b39c024073"
+        },
+        {
+          "ordinal": 207,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "forkIO",
+          "namespace": "value",
+          "line": 18,
+          "column": 16,
+          "finalTargetNodeId": "function:eb643601c53b250f3fc6b59260f60765",
+          "v12TargetNodeId": "function:eb643601c53b250f3fc6b59260f60765",
+          "v10TargetNodeId": "function:eb643601c53b250f3fc6b59260f60765"
+        },
+        {
+          "ordinal": 208,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "SeekFromEnd",
+          "namespace": "value",
+          "line": 8,
+          "column": 12,
+          "finalTargetNodeId": "enum_member:db3d0773adf77682e832bf45004383cc",
+          "v12TargetNodeId": "enum_member:db3d0773adf77682e832bf45004383cc",
+          "v10TargetNodeId": "enum_member:db3d0773adf77682e832bf45004383cc"
+        },
+        {
+          "ordinal": 209,
+          "file": "libraries/base/tests/dynamic004.hs",
+          "name": "==",
+          "namespace": "value",
+          "line": 13,
+          "column": 66,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 210,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "++",
+          "namespace": "value",
+          "line": 14,
+          "column": 32,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 211,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": "Just",
+          "namespace": "value",
+          "line": 240,
+          "column": 16,
+          "finalTargetNodeId": "enum_member:9ab4edad42ece19006210642f3575db6",
+          "v12TargetNodeId": "enum_member:9ab4edad42ece19006210642f3575db6",
+          "v10TargetNodeId": "enum_member:9ab4edad42ece19006210642f3575db6"
+        },
+        {
+          "ordinal": 212,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 169,
+          "column": 49,
+          "finalTargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v12TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v10TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c"
+        },
+        {
+          "ordinal": 213,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "annotateStackStringIO",
+          "namespace": "value",
+          "line": 23,
+          "column": 28,
+          "finalTargetNodeId": "function:f07e6ef556ee6542b1113fd3db470fe2",
+          "v12TargetNodeId": "function:f07e6ef556ee6542b1113fd3db470fe2",
+          "v10TargetNodeId": "function:f07e6ef556ee6542b1113fd3db470fe2"
+        },
+        {
+          "ordinal": 214,
+          "file": "linters/lint-notes/Main.hs",
+          "name": ".",
+          "namespace": "value",
+          "line": 28,
+          "column": 33,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 215,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "supportsTarget",
+          "namespace": "value",
+          "line": 37,
+          "column": 4,
+          "finalTargetNodeId": "function:403014b79fadfce9f2d7f1051c0295c0",
+          "v12TargetNodeId": "function:403014b79fadfce9f2d7f1051c0295c0",
+          "v10TargetNodeId": "function:403014b79fadfce9f2d7f1051c0295c0"
+        },
+        {
+          "ordinal": 216,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": "map",
+          "namespace": "value",
+          "line": 86,
+          "column": 19,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 217,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "appendFile",
+          "namespace": "value",
+          "line": 16,
+          "column": 10,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 218,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "True",
+          "namespace": "value",
+          "line": 237,
+          "column": 23,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 219,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "maybe",
+          "namespace": "value",
+          "line": 85,
+          "column": 13,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 220,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "ppr",
+          "namespace": "value",
+          "line": 30,
+          "column": 58,
+          "finalTargetNodeId": "method:72cd22d959f14e15307405ff672bae55",
+          "v12TargetNodeId": "method:72cd22d959f14e15307405ff672bae55",
+          "v10TargetNodeId": "method:72cd22d959f14e15307405ff672bae55"
+        },
+        {
+          "ordinal": 221,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "platformArch",
+          "namespace": "value",
+          "line": 93,
+          "column": 25,
+          "finalTargetNodeId": "function:a9a648d9482e6b8ef5545cfb804ab0a5",
+          "v12TargetNodeId": "function:a9a648d9482e6b8ef5545cfb804ab0a5",
+          "v10TargetNodeId": "function:a9a648d9482e6b8ef5545cfb804ab0a5"
+        },
+        {
+          "ordinal": 222,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "&&",
+          "namespace": "value",
+          "line": 313,
+          "column": 19,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 223,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "<",
+          "namespace": "value",
+          "line": 232,
+          "column": 10,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 224,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "False",
+          "namespace": "value",
+          "line": 600,
+          "column": 27,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 225,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "++",
+          "namespace": "value",
+          "line": 266,
+          "column": 30,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 226,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "foldr1",
+          "namespace": "value",
+          "line": 149,
+          "column": 25,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 227,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "BlockStat",
+          "namespace": "value",
+          "line": 137,
+          "column": 28,
+          "finalTargetNodeId": "enum_member:fa569750fef4879a9ccbb4ecb09ec094",
+          "v12TargetNodeId": "enum_member:fa569750fef4879a9ccbb4ecb09ec094",
+          "v10TargetNodeId": "enum_member:fa569750fef4879a9ccbb4ecb09ec094"
+        },
+        {
+          "ordinal": 228,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "addErrAt",
+          "namespace": "value",
+          "line": 217,
+          "column": 4,
+          "finalTargetNodeId": "function:601d45009b65fba149a80e441630ad23",
+          "v12TargetNodeId": "function:601d45009b65fba149a80e441630ad23",
+          "v10TargetNodeId": "function:601d45009b65fba149a80e441630ad23"
+        },
+        {
+          "ordinal": 229,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "getByte",
+          "namespace": "value",
+          "line": 89,
+          "column": 21,
+          "finalTargetNodeId": "function:5b0c825cbc8deb1ef037255e25387b8e",
+          "v12TargetNodeId": "function:5b0c825cbc8deb1ef037255e25387b8e",
+          "v10TargetNodeId": "function:5b0c825cbc8deb1ef037255e25387b8e"
+        },
+        {
+          "ordinal": 230,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "CmmMachOp",
+          "namespace": "value",
+          "line": 121,
+          "column": 17,
+          "finalTargetNodeId": "enum_member:140278c61ba610d8679e50515aaedc4e",
+          "v12TargetNodeId": "enum_member:140278c61ba610d8679e50515aaedc4e",
+          "v10TargetNodeId": "enum_member:140278c61ba610d8679e50515aaedc4e"
+        },
+        {
+          "ordinal": 231,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "forkIO",
+          "namespace": "value",
+          "line": 73,
+          "column": 9,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 232,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "massertPpr",
+          "namespace": "value",
+          "line": 124,
+          "column": 9,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 233,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "f",
+          "namespace": "value",
+          "line": 192,
+          "column": 13,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 234,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 89,
+          "column": 8,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 235,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "null",
+          "namespace": "value",
+          "line": 70,
+          "column": 36,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 236,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "srcSpanFile",
+          "namespace": "value",
+          "line": 110,
+          "column": 29,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 237,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "fromMaybe",
+          "namespace": "value",
+          "line": 84,
+          "column": 24,
+          "finalTargetNodeId": "function:6dabb2cd890b155172de4d396499300e",
+          "v12TargetNodeId": "function:6dabb2cd890b155172de4d396499300e",
+          "v10TargetNodeId": "function:6dabb2cd890b155172de4d396499300e"
+        },
+        {
+          "ordinal": 238,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": "mconcat",
+          "namespace": "value",
+          "line": 20,
+          "column": 21,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 239,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "CharRep",
+          "namespace": "value",
+          "line": 124,
+          "column": 8,
+          "finalTargetNodeId": "enum_member:366072b8869b5ff0b1c44b5a4c2f16d1",
+          "v12TargetNodeId": "enum_member:366072b8869b5ff0b1c44b5a4c2f16d1",
+          "v10TargetNodeId": "enum_member:366072b8869b5ff0b1c44b5a4c2f16d1"
+        },
+        {
+          "ordinal": 240,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 18,
+          "column": 23,
+          "finalTargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v12TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c",
+          "v10TargetNodeId": "function:0ecbb6088ade43ab3b0a2ef90199539c"
+        },
+        {
+          "ordinal": 241,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "hGetChar",
+          "namespace": "value",
+          "line": 9,
+          "column": 9,
+          "finalTargetNodeId": "function:6de6365e20f39500a4a488bdab274e60",
+          "v12TargetNodeId": "function:6de6365e20f39500a4a488bdab274e60",
+          "v10TargetNodeId": "function:6de6365e20f39500a4a488bdab274e60"
+        },
+        {
+          "ordinal": 242,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "show",
+          "namespace": "value",
+          "line": 14,
+          "column": 36,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 243,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": "<$>",
+          "namespace": "value",
+          "line": 240,
+          "column": 31,
+          "finalTargetNodeId": "function:ff9895b15f776311d89305fe78d92e16",
+          "v12TargetNodeId": "function:ff9895b15f776311d89305fe78d92e16",
+          "v10TargetNodeId": "function:ff9895b15f776311d89305fe78d92e16"
+        },
+        {
+          "ordinal": 244,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "castPtr",
+          "namespace": "value",
+          "line": 169,
+          "column": 64,
+          "finalTargetNodeId": "function:e6a54a3e035bef70cbccce3c0c57fd21",
+          "v12TargetNodeId": "function:e6a54a3e035bef70cbccce3c0c57fd21",
+          "v10TargetNodeId": "function:e6a54a3e035bef70cbccce3c0c57fd21"
+        },
+        {
+          "ordinal": 245,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "<=",
+          "namespace": "value",
+          "line": 30,
+          "column": 6,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 246,
+          "file": "linters/lint-notes/Main.hs",
+          "name": "map",
+          "namespace": "value",
+          "line": 28,
+          "column": 45,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 247,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "withTempDir",
+          "namespace": "value",
+          "line": 40,
+          "column": 20,
+          "finalTargetNodeId": "function:73a5c58feaee3a73003ea63416f5aa2f",
+          "v12TargetNodeId": "function:73a5c58feaee3a73003ea63416f5aa2f",
+          "v10TargetNodeId": "function:73a5c58feaee3a73003ea63416f5aa2f"
+        },
+        {
+          "ordinal": 248,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": "Nothing",
+          "namespace": "value",
+          "line": 89,
+          "column": 9,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 249,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "unlines",
+          "namespace": "value",
+          "line": 16,
+          "column": 42,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 250,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "error",
+          "namespace": "value",
+          "line": 319,
+          "column": 28,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 251,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "empty",
+          "namespace": "value",
+          "line": 85,
+          "column": 19,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 252,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "AMO_Add",
+          "namespace": "value",
+          "line": 90,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:cdc102c4a6dd45fe831fe09f341b0fae",
+          "v12TargetNodeId": "enum_member:cdc102c4a6dd45fe831fe09f341b0fae",
+          "v10TargetNodeId": "enum_member:cdc102c4a6dd45fe831fe09f341b0fae"
+        },
+        {
+          "ordinal": 253,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "Unified",
+          "namespace": "value",
+          "line": 94,
+          "column": 8,
+          "finalTargetNodeId": "enum_member:c2a8940d956110059549ad8503c8a4dc",
+          "v12TargetNodeId": "enum_member:c2a8940d956110059549ad8503c8a4dc",
+          "v10TargetNodeId": "enum_member:c2a8940d956110059549ad8503c8a4dc"
+        },
+        {
+          "ordinal": 254,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "lengthExceeds",
+          "namespace": "value",
+          "line": 313,
+          "column": 22,
+          "finalTargetNodeId": "function:22ec1947e31fce49ae5b2424933c65b2",
+          "v12TargetNodeId": "function:22ec1947e31fce49ae5b2424933c65b2",
+          "v10TargetNodeId": "function:22ec1947e31fce49ae5b2424933c65b2"
+        },
+        {
+          "ordinal": 255,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "True",
+          "namespace": "value",
+          "line": 239,
+          "column": 23,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 256,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "True",
+          "namespace": "value",
+          "line": 607,
+          "column": 30,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 257,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "map",
+          "namespace": "value",
+          "line": 272,
+          "column": 59,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 258,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "L",
+          "namespace": "value",
+          "line": 180,
+          "column": 16,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 259,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "DeclStat",
+          "namespace": "value",
+          "line": 139,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:def535f5fe4749a70a2259ee85c9f76d",
+          "v12TargetNodeId": "enum_member:def535f5fe4749a70a2259ee85c9f76d",
+          "v10TargetNodeId": "enum_member:def535f5fe4749a70a2259ee85c9f76d"
+        },
+        {
+          "ordinal": 260,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "locA",
+          "namespace": "value",
+          "line": 217,
+          "column": 14,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 261,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "return",
+          "namespace": "value",
+          "line": 90,
+          "column": 31,
+          "finalTargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6",
+          "v12TargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6",
+          "v10TargetNodeId": "method:b87f8b793e1103a0d43612bf97f9b6d6"
+        },
+        {
+          "ordinal": 262,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "MO_Add",
+          "namespace": "value",
+          "line": 121,
+          "column": 28,
+          "finalTargetNodeId": "enum_member:f61561e5dfe2a56cb74239bc914e8988",
+          "v12TargetNodeId": "enum_member:f61561e5dfe2a56cb74239bc914e8988",
+          "v10TargetNodeId": "enum_member:f61561e5dfe2a56cb74239bc914e8988"
+        },
+        {
+          "ordinal": 263,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "handle",
+          "namespace": "value",
+          "line": 73,
+          "column": 18,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 264,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "isEmptyBag",
+          "namespace": "value",
+          "line": 124,
+          "column": 21,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 265,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "toCodensity",
+          "namespace": "value",
+          "line": 307,
+          "column": 23,
+          "finalTargetNodeId": "function:4de18b58bfe9124546285046598b1edf",
+          "v12TargetNodeId": "function:4de18b58bfe9124546285046598b1edf",
+          "v10TargetNodeId": "function:4de18b58bfe9124546285046598b1edf"
+        },
+        {
+          "ordinal": 266,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "occName",
+          "namespace": "value",
+          "line": 89,
+          "column": 16,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 267,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "nonDetEltsUniqMap",
+          "namespace": "value",
+          "line": 71,
+          "column": 30,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 268,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "GhciNoModuleNameGuess",
+          "namespace": "value",
+          "line": 120,
+          "column": 28,
+          "finalTargetNodeId": "enum_member:ef9d70fe9e47b027ad1136f35c85d0fa",
+          "v12TargetNodeId": "enum_member:ef9d70fe9e47b027ad1136f35c85d0fa",
+          "v10TargetNodeId": "enum_member:ef9d70fe9e47b027ad1136f35c85d0fa"
+        },
+        {
+          "ordinal": 269,
+          "file": "hadrian/src/Oracles/TestSettings.hs",
+          "name": "error",
+          "namespace": "value",
+          "line": 84,
+          "column": 35,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 270,
+          "file": "hadrian/src/Settings/Builders/Haddock.hs",
+          "name": "builder",
+          "namespace": "value",
+          "line": 21,
+          "column": 6,
+          "finalTargetNodeId": "method:fede6ee309de2fa2ab095553bc24a74d",
+          "v12TargetNodeId": "method:fede6ee309de2fa2ab095553bc24a74d",
+          "v10TargetNodeId": "method:fede6ee309de2fa2ab095553bc24a74d"
+        },
+        {
+          "ordinal": 271,
+          "file": "libraries/base/src/Data/Data.hs",
+          "name": "CharConstr",
+          "namespace": "value",
+          "line": 124,
+          "column": 59,
+          "finalTargetNodeId": "enum_member:a9d6a626e78f90a6cc1ae2cc3bf25b5a",
+          "v12TargetNodeId": "enum_member:a9d6a626e78f90a6cc1ae2cc3bf25b5a",
+          "v10TargetNodeId": "enum_member:a9d6a626e78f90a6cc1ae2cc3bf25b5a"
+        },
+        {
+          "ordinal": 272,
+          "file": "libraries/base/tests/IO/T17912.hs",
+          "name": "openFileBlocking",
+          "namespace": "value",
+          "line": 19,
+          "column": 9,
+          "finalTargetNodeId": "function:f8596e079854cf7d22fb68b4a747114d",
+          "v12TargetNodeId": "function:f8596e079854cf7d22fb68b4a747114d",
+          "v10TargetNodeId": "function:f8596e079854cf7d22fb68b4a747114d"
+        },
+        {
+          "ordinal": 273,
+          "file": "libraries/base/tests/IO/hSeek001.hs",
+          "name": "putStr",
+          "namespace": "value",
+          "line": 10,
+          "column": 4,
+          "finalTargetNodeId": "function:3d3ce77786a023159f6f6f2d1fe11773",
+          "v12TargetNodeId": "function:3d3ce77786a023159f6f6f2d1fe11773",
+          "v10TargetNodeId": "function:3d3ce77786a023159f6f6f2d1fe11773"
+        },
+        {
+          "ordinal": 274,
+          "file": "libraries/ghc-compact/tests/compact_autoexpand.hs",
+          "name": "replicate",
+          "namespace": "value",
+          "line": 23,
+          "column": 12,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 275,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Data/Traversable.hs",
+          "name": "liftA2",
+          "namespace": "value",
+          "line": 246,
+          "column": 26,
+          "finalTargetNodeId": "method:836b727e590d315ec1d86da64b3b411a",
+          "v12TargetNodeId": "method:836b727e590d315ec1d86da64b3b411a",
+          "v10TargetNodeId": "method:836b727e590d315ec1d86da64b3b411a"
+        },
+        {
+          "ordinal": 276,
+          "file": "libraries/ghc-internal/src/GHC/Internal/Foreign/Storable.hs",
+          "name": "Ptr",
+          "namespace": "value",
+          "line": 192,
+          "column": 10,
+          "finalTargetNodeId": "enum_member:47a4e0180a7dbaad53a06da31aa7de5c",
+          "v12TargetNodeId": "enum_member:47a4e0180a7dbaad53a06da31aa7de5c",
+          "v10TargetNodeId": "enum_member:47a4e0180a7dbaad53a06da31aa7de5c"
+        },
+        {
+          "ordinal": 277,
+          "file": "libraries/ghc-internal/tests/stack-annotation/ann_frame002.hs",
+          "name": "-",
+          "namespace": "value",
+          "line": 31,
+          "column": 23,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 278,
+          "file": "linters/lint-notes/Main.hs",
+          "name": "++",
+          "namespace": "value",
+          "line": 32,
+          "column": 27,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 279,
+          "file": "utils/ghc-toolchain/src/GHC/Toolchain/Tools/Cxx.hs",
+          "name": "</>",
+          "namespace": "value",
+          "line": 41,
+          "column": 21,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 280,
+          "file": "utils/haddock/haddock-api/src/Haddock/Utils/Json.hs",
+          "name": "Null",
+          "namespace": "value",
+          "line": 89,
+          "column": 19,
+          "finalTargetNodeId": "enum_member:0ed4bdd99034ca7e14bde569b4b07df0",
+          "v12TargetNodeId": "enum_member:0ed4bdd99034ca7e14bde569b4b07df0",
+          "v10TargetNodeId": "enum_member:0ed4bdd99034ca7e14bde569b4b07df0"
+        },
+        {
+          "ordinal": 281,
+          "file": "utils/testremove/wouldrm.hs",
+          "name": "show",
+          "namespace": "value",
+          "line": 16,
+          "column": 56,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 282,
+          "file": ".gitlab/generate-ci/gen_ci.hs",
+          "name": "intercalate",
+          "namespace": "value",
+          "line": 364,
+          "column": 2,
+          "finalTargetNodeId": "function:ae5619ce855d2af3b19a8caccbbdd9de",
+          "v12TargetNodeId": "function:ae5619ce855d2af3b19a8caccbbdd9de",
+          "v10TargetNodeId": "function:ae5619ce855d2af3b19a8caccbbdd9de"
+        },
+        {
+          "ordinal": 283,
+          "file": "compiler/GHC/Cmm/DebugBlock.hs",
+          "name": "<>",
+          "namespace": "value",
+          "line": 86,
+          "column": 37,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 284,
+          "file": "compiler/GHC/CmmToAsm/CPrim.hs",
+          "name": "AMO_Sub",
+          "namespace": "value",
+          "line": 96,
+          "column": 2,
+          "finalTargetNodeId": "enum_member:852c5af6e4a6875864a09b34a54d8ad9",
+          "v12TargetNodeId": "enum_member:852c5af6e4a6875864a09b34a54d8ad9",
+          "v10TargetNodeId": "enum_member:852c5af6e4a6875864a09b34a54d8ad9"
+        },
+        {
+          "ordinal": 285,
+          "file": "compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.hs",
+          "name": "Separate",
+          "namespace": "value",
+          "line": 95,
+          "column": 8,
+          "finalTargetNodeId": "enum_member:6ad96f2091ad7d49c50100a8cb333d0e",
+          "v12TargetNodeId": "enum_member:6ad96f2091ad7d49c50100a8cb333d0e",
+          "v10TargetNodeId": "enum_member:6ad96f2091ad7d49c50100a8cb333d0e"
+        },
+        {
+          "ordinal": 286,
+          "file": "compiler/GHC/Core/Class.hs",
+          "name": "!!",
+          "namespace": "value",
+          "line": 314,
+          "column": 12,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 287,
+          "file": "compiler/GHC/Core/Opt/SetLevels.hs",
+          "name": "False",
+          "namespace": "value",
+          "line": 240,
+          "column": 23,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 288,
+          "file": "compiler/GHC/Core/Unify.hs",
+          "name": "mkEmptySubst",
+          "namespace": "value",
+          "line": 668,
+          "column": 38,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 289,
+          "file": "compiler/GHC/Driver/Downsweep.hs",
+          "name": "ModuleNodeCompile",
+          "namespace": "value",
+          "line": 272,
+          "column": 63,
+          "finalTargetNodeId": "enum_member:ba7ec3a79e64a0acc693f1dc4339506e",
+          "v12TargetNodeId": "enum_member:ba7ec3a79e64a0acc693f1dc4339506e",
+          "v10TargetNodeId": "enum_member:ba7ec3a79e64a0acc693f1dc4339506e"
+        },
+        {
+          "ordinal": 290,
+          "file": "compiler/GHC/HsToCore/Pmc/Types.hs",
+          "name": "RealSrcSpan",
+          "namespace": "value",
+          "line": 180,
+          "column": 19,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 291,
+          "file": "compiler/GHC/JS/Ppr.hs",
+          "name": "Nothing",
+          "namespace": "value",
+          "line": 139,
+          "column": 13,
+          "finalTargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79",
+          "v12TargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79",
+          "v10TargetNodeId": "enum_member:49d12d59ed42d54cf052d6d4aa506c79"
+        },
+        {
+          "ordinal": 292,
+          "file": "compiler/GHC/Rename/Bind.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 218,
+          "column": 2,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 293,
+          "file": "compiler/GHC/Stg/EnforceEpt/TagSig.hs",
+          "name": "<$>",
+          "namespace": "value",
+          "line": 91,
+          "column": 40,
+          "finalTargetNodeId": "function:ff9895b15f776311d89305fe78d92e16",
+          "v12TargetNodeId": "function:ff9895b15f776311d89305fe78d92e16",
+          "v10TargetNodeId": "function:ff9895b15f776311d89305fe78d92e16"
+        },
+        {
+          "ordinal": 294,
+          "file": "compiler/GHC/StgToCmm/Utils.hs",
+          "name": "CmmLoad",
+          "namespace": "value",
+          "line": 121,
+          "column": 53,
+          "finalTargetNodeId": "enum_member:ff6524afad9db4d717b399cf8b891332",
+          "v12TargetNodeId": "enum_member:ff6524afad9db4d717b399cf8b891332",
+          "v10TargetNodeId": "enum_member:ff6524afad9db4d717b399cf8b891332"
+        },
+        {
+          "ordinal": 295,
+          "file": "compiler/GHC/SysTools/Process.hs",
+          "name": "hGetContents'",
+          "namespace": "value",
+          "line": 74,
+          "column": 16,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 296,
+          "file": "compiler/GHC/Tc/Solver.hs",
+          "name": "traceTc",
+          "namespace": "value",
+          "line": 134,
+          "column": 9,
+          "finalTargetNodeId": "function:edd11370a795b1b16a92d691410e85f7",
+          "v12TargetNodeId": "function:edd11370a795b1b16a92d691410e85f7",
+          "v10TargetNodeId": "function:edd11370a795b1b16a92d691410e85f7"
+        },
+        {
+          "ordinal": 297,
+          "file": "compiler/GHC/Tc/Zonk/Env.hs",
+          "name": "fromCodensity",
+          "namespace": "value",
+          "line": 313,
+          "column": 26,
+          "finalTargetNodeId": "function:5bda2a9119a67886086ccccd96538117",
+          "v12TargetNodeId": "function:5bda2a9119a67886086ccccd96538117",
+          "v10TargetNodeId": "function:5bda2a9119a67886086ccccd96538117"
+        },
+        {
+          "ordinal": 298,
+          "file": "compiler/GHC/Types/Name/Shape.hs",
+          "name": "ns_mod_name",
+          "namespace": "value",
+          "line": 109,
+          "column": 22,
+          "finalTargetNodeId": "field:51356d978de81744978a47b7cc17a721",
+          "v12TargetNodeId": "field:51356d978de81744978a47b7cc17a721",
+          "v10TargetNodeId": "field:51356d978de81744978a47b7cc17a721"
+        },
+        {
+          "ordinal": 299,
+          "file": "compiler/GHC/Unit/External/Validate.hs",
+          "name": "map",
+          "namespace": "value",
+          "line": 72,
+          "column": 38,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        },
+        {
+          "ordinal": 300,
+          "file": "ghc/GHCi/UI/Info.hs",
+          "name": "($)",
+          "namespace": "value",
+          "line": 120,
+          "column": 50,
+          "finalTargetNodeId": null,
+          "v12TargetNodeId": null,
+          "v10TargetNodeId": null
+        }
+      ],
+      "qualification": "All 300 references were stored failed in the historical index and selected by import eligibility, not a representative random sample. Exact target parity is not proof of precision; no expanded old-resolver oracle certifies all new real targets."
+    },
+    "originalSnapshotPreservation": {
+      "recordedDatabaseAndWalContentFingerprintsAgreeAcrossInputs": true,
+      "reports": {
+        "explore": {
+          "report": "ghc-local-proof-16k-final-explore-20260919.internal.json",
+          "reportedDatabaseAndWalUnchanged": true,
+          "recordedBeforeAndAfterFingerprintsEqual": true,
+          "recordedOriginalFingerprints": {
+            "database": {
+              "size": 370737152,
+              "mtimeMs": 1789751245173.7134,
+              "sha256": "3920d9292990840cee4930be73e4455ba187fbc5f7a83d135cd893b981c35eb8"
+            },
+            "wal": {
+              "size": 0,
+              "mtimeMs": 1789794321110.3052,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        "resolver": {
+          "report": "ghc-local-proof-16k-final-resolver-20260919.internal.json",
+          "reportedDatabaseAndWalUnchanged": true,
+          "recordedBeforeAndAfterFingerprintsEqual": true,
+          "recordedOriginalFingerprints": {
+            "database": {
+              "size": 370737152,
+              "mtimeMs": 1789751245173.7134,
+              "sha256": "3920d9292990840cee4930be73e4455ba187fbc5f7a83d135cd893b981c35eb8"
+            },
+            "wal": {
+              "size": 0,
+              "mtimeMs": 1789794321110.3052,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        "v13": {
+          "report": "absence-oracle-sample-v13-final-20260919.public.json",
+          "reportedDatabaseAndWalUnchanged": true,
+          "recordedBeforeAndAfterFingerprintsEqual": true,
+          "recordedOriginalFingerprints": {
+            "database": {
+              "size": 370737152,
+              "mtimeMs": 1789751245173.7134,
+              "sha256": "3920d9292990840cee4930be73e4455ba187fbc5f7a83d135cd893b981c35eb8"
+            },
+            "wal": {
+              "size": 0,
+              "mtimeMs": 1789794321110.3052,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        "v12": {
+          "report": "absence-oracle-sample-v12-16k-profile-20260919.public.json",
+          "reportedDatabaseAndWalUnchanged": true,
+          "recordedBeforeAndAfterFingerprintsEqual": true,
+          "recordedOriginalFingerprints": {
+            "database": {
+              "size": 370737152,
+              "mtimeMs": 1789751245173.7134,
+              "sha256": "3920d9292990840cee4930be73e4455ba187fbc5f7a83d135cd893b981c35eb8"
+            },
+            "wal": {
+              "size": 0,
+              "mtimeMs": 1789794321110.3052,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        "v10": {
+          "report": "absence-oracle-sample-v10-profile-20260919.public.json",
+          "reportedDatabaseAndWalUnchanged": true,
+          "recordedBeforeAndAfterFingerprintsEqual": true,
+          "recordedOriginalFingerprints": {
+            "database": {
+              "size": 370737152,
+              "mtimeMs": 1789751245173.7134,
+              "sha256": "3920d9292990840cee4930be73e4455ba187fbc5f7a83d135cd893b981c35eb8"
+            },
+            "wal": {
+              "size": 0,
+              "mtimeMs": 1789794321110.3052,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        }
+      },
+      "assemblyQualification": "JSON-only assembly. No SQLite, copying, hashing, source reads, profiling or resolver execution. Recorded fingerprints are reused from completed diagnostics."
+    },
+    "limitations": [
+      "The expanded frozen-resolver oracle certifies 27 new synthetic targets only, separately from the real 300-reference sample.",
+      "Diagnostic timings are intentionally omitted: no macro performance claim.",
+      "No whole-corpus precision/recall claim; final indexed graph deltas and rendered Flow remain separate evidence."
+    ],
+    "retainedSourceReportLabels": {
+      "identity": "local-proof-16k-engine-identity-20260919.json",
+      "differential": "absence-differential-local-proof-16k-20260919.public.json",
+      "history": "haskell-depth-cache-history-local-proof-16k-20260919.public.json",
+      "explore": "ghc-local-proof-16k-final-explore-20260919.internal.json",
+      "resolver": "ghc-local-proof-16k-final-resolver-20260919.internal.json",
+      "v13": "absence-oracle-sample-v13-final-20260919.public.json",
+      "v12": "absence-oracle-sample-v12-16k-profile-20260919.public.json",
+      "v10": "absence-oracle-sample-v10-profile-20260919.public.json"
+    }
+  }
+}

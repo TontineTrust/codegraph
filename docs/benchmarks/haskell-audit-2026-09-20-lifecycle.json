@@ -1,0 +1,1177 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "evidenceKind": "real-normal-and-ghc-campaign-lifecycle-with-separate-stub-smoke",
+  "status": "finished_with_incomplete_corpora",
+  "assembly": {
+    "assembledAt": "2026-09-20T07:59:51.532221+00:00",
+    "method": "Bounded existing public JSON/NDJSON only; no new hashes, SQL, engine/corpus reads, tests or measurements.",
+    "sourceArtifactLabels": [
+      "normal-driver-lifecycle-20260920.public.json",
+      "ghc-driver-lifecycle-20260920.public.json",
+      "durable-driver-smoke-20260920.public.json"
+    ],
+    "sourceArtifactBytes": {
+      "normal-driver-lifecycle-20260920.public.json": 26518,
+      "ghc-driver-lifecycle-20260920.public.json": 6257,
+      "durable-driver-smoke-20260920.public.json": 1355
+    },
+    "inputAndOutputLimitBytesPerFile": 2097152,
+    "referencePolicy": "Only publicReference/publicReferences objects designate published companion links. Other evidence/report/ledger/log/input filenames are retained source-artifact labels, not links and not a claim that private inputs accompany this publication. Labels preserve original execution provenance. Private raw inputs are not included.",
+    "qualification": "Publication wrapper and explicit links are new; original execution dates, engine/index lineage and observations are preserved. Source documents are untouched."
+  },
+  "realCampaigns": {
+    "normal": {
+      "schemaVersion": 1,
+      "auditDate": "2026-09-20",
+      "purpose": "Durable campaign lifecycle only; not graph, source, timing-comparison or corpus validation",
+      "generatedAt": "2026-09-20T07:50:44.932287+00:00",
+      "statusUpdatedAt": "2026-09-20T05:32:54.188290+00:00",
+      "campaign": "normal",
+      "expectedArms": {
+        "baseline": "baseline-20260920",
+        "candidate": "candidate-local-proof-16k-20260920"
+      },
+      "phase": "complete",
+      "exitCode": 0,
+      "stopReason": null,
+      "completedPlan": true,
+      "elapsedSeconds": 625.316,
+      "nodeTimeoutSeconds": 600,
+      "totalCapSeconds": 18720,
+      "plannedStepCount": 24,
+      "recordedStepCount": 24,
+      "completedStepCount": 24,
+      "skippedStepCount": 0,
+      "plannedAttemptCount": 24,
+      "uniqueReferencedAttemptCount": 24,
+      "recordedAttemptCount": 24,
+      "completeAttemptCount": 24,
+      "attemptStatusCounts": {
+        "complete": 24
+      },
+      "lastRecordedStep": {
+        "index": 24,
+        "arm": "candidate-local-proof-16k-20260920",
+        "scope": "express",
+        "repeatThrough": 3
+      },
+      "steps": [
+        {
+          "index": 1,
+          "arm": "baseline-20260920",
+          "scope": "xmonad",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 2.042,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-xmonad-1",
+              "arm": "baseline-20260920",
+              "scope": "xmonad",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.021927917,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "xmonad",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 2.069,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-xmonad-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "xmonad",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.051826916,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "arm": "baseline-20260920",
+          "scope": "pandoc",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 24.946,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-pandoc-1",
+              "arm": "baseline-20260920",
+              "scope": "pandoc",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 24.660024958999998,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "pandoc",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 25.72,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-pandoc-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "pandoc",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.402521874999998,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "arm": "baseline-20260920",
+          "scope": "hls",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 129.126,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-hls-1",
+              "arm": "baseline-20260920",
+              "scope": "hls",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 128.900984792,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "hls",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 21.817,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-hls-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "hls",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 21.562785292,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "arm": "baseline-20260920",
+          "scope": "express",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 0.935,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-express-1",
+              "arm": "baseline-20260920",
+              "scope": "express",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.8941224589999877,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "express",
+          "repeatThrough": 1,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 0.948,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-express-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "express",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.9150884169999927,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "arm": "baseline-20260920",
+          "scope": "xmonad",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 2.14,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-xmonad-1",
+              "arm": "baseline-20260920",
+              "scope": "xmonad",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.021927917,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            },
+            {
+              "tag": "baseline-20260920-xmonad-2",
+              "arm": "baseline-20260920",
+              "scope": "xmonad",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.1211658750000026,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "xmonad",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 1.904,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-xmonad-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "xmonad",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.051826916,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-xmonad-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "xmonad",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 1.8844319170000006,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "arm": "baseline-20260920",
+          "scope": "pandoc",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 25.388,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-pandoc-1",
+              "arm": "baseline-20260920",
+              "scope": "pandoc",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 24.660024958999998,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            },
+            {
+              "tag": "baseline-20260920-pandoc-2",
+              "arm": "baseline-20260920",
+              "scope": "pandoc",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.084986125,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "pandoc",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 25.857,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-pandoc-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "pandoc",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.402521874999998,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-pandoc-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "pandoc",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.519085624999974,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            }
+          ]
+        },
+        {
+          "index": 13,
+          "arm": "baseline-20260920",
+          "scope": "hls",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 131.46,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-hls-1",
+              "arm": "baseline-20260920",
+              "scope": "hls",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 128.900984792,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            },
+            {
+              "tag": "baseline-20260920-hls-2",
+              "arm": "baseline-20260920",
+              "scope": "hls",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 131.22693833300002,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            }
+          ]
+        },
+        {
+          "index": 14,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "hls",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 22.613,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-hls-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "hls",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 21.562785292,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-hls-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "hls",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 22.36213220899998,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            }
+          ]
+        },
+        {
+          "index": 15,
+          "arm": "baseline-20260920",
+          "scope": "express",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 0.942,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-express-1",
+              "arm": "baseline-20260920",
+              "scope": "express",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.8941224589999877,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            },
+            {
+              "tag": "baseline-20260920-express-2",
+              "arm": "baseline-20260920",
+              "scope": "express",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.9035274170000207,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            }
+          ]
+        },
+        {
+          "index": 16,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "express",
+          "repeatThrough": 2,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 0.879,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-express-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "express",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.9150884169999927,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-express-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "express",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.844668041000034,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            }
+          ]
+        },
+        {
+          "index": 17,
+          "arm": "baseline-20260920",
+          "scope": "xmonad",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 1.918,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-xmonad-1",
+              "arm": "baseline-20260920",
+              "scope": "xmonad",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.021927917,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            },
+            {
+              "tag": "baseline-20260920-xmonad-2",
+              "arm": "baseline-20260920",
+              "scope": "xmonad",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.1211658750000026,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            },
+            {
+              "tag": "baseline-20260920-xmonad-3",
+              "arm": "baseline-20260920",
+              "scope": "xmonad",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 1.8997443339999904,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            }
+          ]
+        },
+        {
+          "index": 18,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "xmonad",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 1.919,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-xmonad-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "xmonad",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 2.051826916,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-xmonad-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "xmonad",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 1.8844319170000006,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-xmonad-3",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "xmonad",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 1.9030517500000315,
+              "timeoutSeconds": 600,
+              "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+            }
+          ]
+        },
+        {
+          "index": 19,
+          "arm": "baseline-20260920",
+          "scope": "pandoc",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 26.022,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-pandoc-1",
+              "arm": "baseline-20260920",
+              "scope": "pandoc",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 24.660024958999998,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            },
+            {
+              "tag": "baseline-20260920-pandoc-2",
+              "arm": "baseline-20260920",
+              "scope": "pandoc",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.084986125,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            },
+            {
+              "tag": "baseline-20260920-pandoc-3",
+              "arm": "baseline-20260920",
+              "scope": "pandoc",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.706303665999997,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "pandoc",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 26.041,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-pandoc-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "pandoc",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.402521874999998,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-pandoc-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "pandoc",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.519085624999974,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-pandoc-3",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "pandoc",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 25.704669000000024,
+              "timeoutSeconds": 600,
+              "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+            }
+          ]
+        },
+        {
+          "index": 21,
+          "arm": "baseline-20260920",
+          "scope": "hls",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 127.012,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-hls-1",
+              "arm": "baseline-20260920",
+              "scope": "hls",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 128.900984792,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            },
+            {
+              "tag": "baseline-20260920-hls-2",
+              "arm": "baseline-20260920",
+              "scope": "hls",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 131.22693833300002,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            },
+            {
+              "tag": "baseline-20260920-hls-3",
+              "arm": "baseline-20260920",
+              "scope": "hls",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 126.77399858400003,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            }
+          ]
+        },
+        {
+          "index": 22,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "hls",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 21.287,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-hls-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "hls",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 21.562785292,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-hls-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "hls",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 22.36213220899998,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-hls-3",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "hls",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 21.055071459000033,
+              "timeoutSeconds": 600,
+              "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+            }
+          ]
+        },
+        {
+          "index": 23,
+          "arm": "baseline-20260920",
+          "scope": "express",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 0.914,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-express-1",
+              "arm": "baseline-20260920",
+              "scope": "express",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.8941224589999877,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            },
+            {
+              "tag": "baseline-20260920-express-2",
+              "arm": "baseline-20260920",
+              "scope": "express",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.9035274170000207,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            },
+            {
+              "tag": "baseline-20260920-express-3",
+              "arm": "baseline-20260920",
+              "scope": "express",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.8804240419999587,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            }
+          ]
+        },
+        {
+          "index": 24,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "express",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 0.835,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-express-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "express",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.9150884169999927,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-express-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "express",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.844668041000034,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-express-3",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "express",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 0.8035791670000663,
+              "timeoutSeconds": 600,
+              "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+            }
+          ]
+        }
+      ],
+      "closureEvidence": {
+        "recognizedTerminalStatus": true,
+        "recordedActiveOwnedGroupCount": 0,
+        "globalCampaignLeaseHeldAtStatusProbe": false,
+        "terminalCleanupEvidenceAccepted": true,
+        "qualification": "Terminal status records no owned groups and the status command observed the global lease free.",
+        "socketRemovalChecked": false,
+        "workerProcessExitIndependentlyChecked": false
+      },
+      "statusCommand": {
+        "exitCode": 0,
+        "stderrPresent": false,
+        "timeoutSeconds": 5
+      },
+      "sanitization": "Explicit labels, fixed reason codes, numbers, timestamps and pinned digests only. Private stdout is not saved; no PID, process group ID, socket, token, command, source text or local path copied.",
+      "limits": {
+        "statusInputBytes": 1048576,
+        "statusStdoutBytes": 2097152,
+        "statusStderrBytes": 8192,
+        "publicOutputBytes": 262144
+      },
+      "qualification": "Per-step attempt lists repeat earlier checkpoints; counts deduplicate tags. This is a point-in-time lease observation, not a process inventory. Run records and semantic verification remain separate evidence."
+    },
+    "ghc": {
+      "schemaVersion": 1,
+      "auditDate": "2026-09-20",
+      "purpose": "Durable campaign lifecycle only; not graph, source, timing-comparison or corpus validation",
+      "generatedAt": "2026-09-20T07:50:45.052064+00:00",
+      "statusUpdatedAt": "2026-09-20T07:50:19.978352+00:00",
+      "campaign": "ghc",
+      "expectedArms": {
+        "baseline": "baseline-20260920",
+        "candidate": "candidate-local-proof-16k-20260920"
+      },
+      "phase": "finished_with_incomplete_corpora",
+      "exitCode": 2,
+      "stopReason": null,
+      "completedPlan": false,
+      "elapsedSeconds": 8162.306,
+      "nodeTimeoutSeconds": 1800,
+      "totalCapSeconds": 23760,
+      "plannedStepCount": 4,
+      "recordedStepCount": 4,
+      "completedStepCount": 2,
+      "skippedStepCount": 0,
+      "plannedAttemptCount": 12,
+      "uniqueReferencedAttemptCount": 8,
+      "recordedAttemptCount": 8,
+      "completeAttemptCount": 6,
+      "attemptStatusCounts": {
+        "complete": 6,
+        "timeout": 1,
+        "failed": 1
+      },
+      "lastRecordedStep": {
+        "index": 4,
+        "arm": "baseline-20260920",
+        "scope": "ghc",
+        "repeatThrough": 3
+      },
+      "steps": [
+        {
+          "index": 1,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "ghc-core",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 3549.281,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-ghc-core-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "ghc-core",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 1178.215132458,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-ghc-core-2",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "ghc-core",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 1179.730149333,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            },
+            {
+              "tag": "candidate-local-proof-16k-20260920-ghc-core-3",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "ghc-core",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 1182.8875054999999,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "arm": "baseline-20260920",
+          "scope": "ghc-core",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": true,
+          "skipped": false,
+          "runnerElapsedSeconds": 1383.17,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-ghc-core-1",
+              "arm": "baseline-20260920",
+              "scope": "ghc-core",
+              "repeat": 1,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 452.9626779170003,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            },
+            {
+              "tag": "baseline-20260920-ghc-core-2",
+              "arm": "baseline-20260920",
+              "scope": "ghc-core",
+              "repeat": 2,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 451.22147062500017,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            },
+            {
+              "tag": "baseline-20260920-ghc-core-3",
+              "arm": "baseline-20260920",
+              "scope": "ghc-core",
+              "repeat": 3,
+              "status": "complete",
+              "exitCode": 0,
+              "elapsedSeconds": 470.6502399589999,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "arm": "candidate-local-proof-16k-20260920",
+          "scope": "ghc",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": false,
+          "skipped": false,
+          "runnerElapsedSeconds": 1803.034,
+          "attempts": [
+            {
+              "tag": "candidate-local-proof-16k-20260920-ghc-1",
+              "arm": "candidate-local-proof-16k-20260920",
+              "scope": "ghc",
+              "repeat": 1,
+              "status": "timeout",
+              "exitCode": 143,
+              "elapsedSeconds": 1800.21430375,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "arm": "baseline-20260920",
+          "scope": "ghc",
+          "repeatThrough": 3,
+          "runnerExitCode": 0,
+          "complete": false,
+          "skipped": false,
+          "runnerElapsedSeconds": 1426.063,
+          "attempts": [
+            {
+              "tag": "baseline-20260920-ghc-1",
+              "arm": "baseline-20260920",
+              "scope": "ghc",
+              "repeat": 1,
+              "status": "failed",
+              "exitCode": 1,
+              "elapsedSeconds": 1423.2954828330003,
+              "timeoutSeconds": 1800,
+              "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+            }
+          ]
+        }
+      ],
+      "closureEvidence": {
+        "recognizedTerminalStatus": true,
+        "recordedActiveOwnedGroupCount": 0,
+        "globalCampaignLeaseHeldAtStatusProbe": false,
+        "terminalCleanupEvidenceAccepted": true,
+        "qualification": "Terminal status records no owned groups and the status command observed the global lease free.",
+        "socketRemovalChecked": false,
+        "workerProcessExitIndependentlyChecked": false
+      },
+      "statusCommand": {
+        "exitCode": 0,
+        "stderrPresent": false,
+        "timeoutSeconds": 5
+      },
+      "sanitization": "Explicit labels, fixed reason codes, numbers, timestamps and pinned digests only. Private stdout is not saved; no PID, process group ID, socket, token, command, source text or local path copied.",
+      "limits": {
+        "statusInputBytes": 1048576,
+        "statusStdoutBytes": 2097152,
+        "statusStderrBytes": 8192,
+        "publicOutputBytes": 262144
+      },
+      "qualification": "Per-step attempt lists repeat earlier checkpoints; counts deduplicate tags. This is a point-in-time lease observation, not a process inventory. Run records and semantic verification remain separate evidence."
+    }
+  },
+  "stubLifecycleSmoke": {
+    "schemaVersion": 1,
+    "purpose": "Driver lifecycle only; no corpus or package validation",
+    "completed": true,
+    "productionDriverSha256Before": "9eca056e7f6601669dc39c37457625b2735f97b2b54a78d1e9936ac14f86be86",
+    "cases": {
+      "complete": {
+        "steps": 24,
+        "stubChildren": 24,
+        "childSleepSeconds": 0.02,
+        "exitCode": 0,
+        "allOwnedGroupsClosed": true,
+        "workerGroupClosed": true,
+        "leaseReleased": true,
+        "controlSocketRemoved": true,
+        "statusCommandPassed": true
+      },
+      "stop": {
+        "childSleepSeconds": 20,
+        "stubChildrenStarted": 1,
+        "secondCampaignLaunchRefused": true,
+        "socketStopAccepted": true,
+        "exitCode": 130,
+        "allOwnedGroupsClosed": true,
+        "workerGroupClosed": true,
+        "leaseReleased": true,
+        "controlSocketRemoved": true
+      }
+    },
+    "realRunsOpened": false,
+    "benchmarkExecuted": false,
+    "originalRunnerModified": false,
+    "productionAstAndHelpPassed": true,
+    "cleanup": [
+      {
+        "case": "complete",
+        "leaseReleased": true,
+        "workerGroupClosed": true
+      },
+      {
+        "case": "stop",
+        "leaseReleased": true,
+        "workerGroupClosed": true
+      }
+    ],
+    "productionDriverSha256After": "9eca056e7f6601669dc39c37457625b2735f97b2b54a78d1e9936ac14f86be86",
+    "productionDriverUnchanged": true,
+    "elapsedSeconds": 8.466
+  },
+  "recordedOutcome": {
+    "distinctRealAttempts": 32,
+    "completeRealAttempts": 30,
+    "fullGhcTimeoutAttempts": 1,
+    "fullGhcFailedAttempts": 1,
+    "fullGhcRepeatsNotAttempted": 4,
+    "bothRecordedOwnedGroupCountsZero": true,
+    "bothLeaseStatusProbesFree": true,
+    "independentWorkerProcessInventoryEstablished": false,
+    "realControlSocketRemovalEstablished": false
+  },
+  "publicReferences": [
+    {
+      "file": "haskell-audit-2026-09-20-lifecycle.json",
+      "pointer": "/realCampaigns/normal",
+      "role": "Actual 24-step normal campaign terminal record"
+    },
+    {
+      "file": "haskell-audit-2026-09-20-lifecycle.json",
+      "pointer": "/realCampaigns/ghc",
+      "role": "Actual GHC campaign terminal record with two incomplete full-scope attempts"
+    },
+    {
+      "file": "haskell-audit-2026-09-20-lifecycle.json",
+      "pointer": "/stubLifecycleSmoke",
+      "role": "Separate stub-only complete/stop lifecycle smoke"
+    }
+  ],
+  "qualification": "Real terminal records and stub lifecycle smoke are separate. The real campaigns retain their actual outcomes, including GHC exit 2. Zero recorded owned groups and free lease probes are point-in-time controller evidence, not an independent process inventory or verification of real socket removal. Stub cleanup does not establish recovery from every host failure."
+}

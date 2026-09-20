@@ -1,0 +1,868 @@
+{
+  "schemaVersion": 1,
+  "reviewDate": "2026-09-20",
+  "sourceRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+  "status": "qualified-static-review",
+  "sourceOrDependenciesModified": false,
+  "method": "Lecture des deux audits déjà collectés, manifests/lock, configs et recherches textuelles bornées dans le dépôt ; avis primaires consultés. Aucun audit/npm/install/build/test/SQL/hash exécuté pendant ce triage.",
+  "auditSnapshot": {
+    "collectedAt": "2026-09-20T08:34:33Z",
+    "allCounts": {
+      "info": 0,
+      "low": 0,
+      "moderate": 5,
+      "high": 4,
+      "critical": 1,
+      "total": 10
+    },
+    "omitDevCounts": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "affectedPackageEntries": 10,
+    "uniqueAdvisoryUrls": 14,
+    "allExitCode": 1,
+    "omitDevExitCode": 0,
+    "originalPublicEvidence": "npm-audit-constructor-recall-20260920.public.json"
+  },
+  "interpretation": "Les dix entrées sont des dépendances de développement selon le lock et absentes de l’audit omit-dev. Cela exclut ces alertes du graphe de dépendances installé filtré, mais ne démontre ni leur inexécution au build/test ni leur absence des assets déjà compilés, et ne conclut pas à la non-exploitabilité.",
+  "packages": [
+    {
+      "package": "@sveltejs/vite-plugin-svelte",
+      "auditSeverity": "moderate",
+      "isDirectAccordingToAudit": true,
+      "declaredDirectDevDependency": true,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/@sveltejs/vite-plugin-svelte",
+          "version": "4.0.4",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Plugin Svelte direct des tests workspace UI",
+      "scope": "test-only",
+      "lockfileDependencyPaths": [
+        "root devDependencies → @sveltejs/vite-plugin-svelte 4.0.4"
+      ],
+      "directAdvisories": [],
+      "inheritedViaPackages": [
+        "@sveltejs/vite-plugin-svelte-inspector",
+        "vite"
+      ],
+      "npmFixAvailableMetadata": {
+        "name": "@sveltejs/vite-plugin-svelte",
+        "version": "7.3.0",
+        "isSemVerMajor": true
+      },
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "@sveltejs/vite-plugin-svelte-inspector",
+      "auditSeverity": "moderate",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/@sveltejs/vite-plugin-svelte-inspector",
+          "version": "3.0.1",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Plugin inspecteur transitif du plugin Svelte de tests",
+      "scope": "test-only",
+      "lockfileDependencyPaths": [
+        "@sveltejs/vite-plugin-svelte 4.0.4 → inspector 3.0.1"
+      ],
+      "directAdvisories": [],
+      "inheritedViaPackages": [
+        "@sveltejs/vite-plugin-svelte",
+        "vite"
+      ],
+      "npmFixAvailableMetadata": {
+        "name": "@sveltejs/vite-plugin-svelte",
+        "version": "7.3.0",
+        "isSemVerMajor": true
+      },
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "@vitest/mocker",
+      "auditSeverity": "moderate",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/@vitest/mocker",
+          "version": "2.1.9",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Infrastructure de mocks transitive des tests",
+      "scope": "test-only",
+      "lockfileDependencyPaths": [
+        "vitest 2.1.9 → @vitest/mocker 2.1.9"
+      ],
+      "directAdvisories": [
+        "GHSA-82fw-gwwq-j7x9"
+      ],
+      "inheritedViaPackages": [
+        "vite"
+      ],
+      "npmFixAvailableMetadata": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      },
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "esbuild",
+      "auditSeverity": "moderate",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/esbuild",
+          "version": "0.21.5",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Transformateur transitif de Vite 5 ; instance viewer distincte",
+      "scope": "test-tooling-affected-instance",
+      "lockfileDependencyPaths": [
+        "vite 5.4.21 → esbuild 0.21.5"
+      ],
+      "directAdvisories": [
+        "GHSA-67mh-4wv8-2f99"
+      ],
+      "inheritedViaPackages": [],
+      "npmFixAvailableMetadata": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      },
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "nanoid",
+      "auditSeverity": "high",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/nanoid",
+          "version": "3.3.11",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Générateur transitif via PostCSS des tests/build viewer",
+      "scope": "test-and-viewer-build",
+      "lockfileDependencyPaths": [
+        "vite 5.4.21 / ui vite 7.3.6 → postcss 8.5.6 → nanoid 3.3.11"
+      ],
+      "directAdvisories": [
+        "GHSA-28wg-ghj8-5hjv",
+        "GHSA-2v37-7h3g-55p8",
+        "GHSA-xwg4-73v4-xw9w"
+      ],
+      "inheritedViaPackages": [],
+      "npmFixAvailableMetadata": true,
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "postcss",
+      "auditSeverity": "high",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/postcss",
+          "version": "8.5.6",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Traitement CSS transitif partagé par tests et build viewer",
+      "scope": "test-and-viewer-build",
+      "lockfileDependencyPaths": [
+        "vite 5.4.21 → postcss 8.5.6",
+        "ui vite 7.3.6 → postcss 8.5.6"
+      ],
+      "directAdvisories": [
+        "GHSA-qx2v-qp2m-jg93",
+        "GHSA-6g55-p6wh-862q",
+        "GHSA-fxqj-rqcc-2cmp",
+        "GHSA-r28c-9q8g-f849"
+      ],
+      "inheritedViaPackages": [],
+      "npmFixAvailableMetadata": true,
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "rollup",
+      "auditSeverity": "high",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/rollup",
+          "version": "4.57.1",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Bundler transitif partagé par tests et build viewer",
+      "scope": "test-and-viewer-build",
+      "lockfileDependencyPaths": [
+        "vite 5.4.21 → rollup 4.57.1",
+        "ui vite 7.3.6 → rollup 4.57.1"
+      ],
+      "directAdvisories": [
+        "GHSA-mw96-cpmx-2vgc"
+      ],
+      "inheritedViaPackages": [],
+      "npmFixAvailableMetadata": true,
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "vite",
+      "auditSeverity": "high",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/vite",
+          "version": "5.4.21",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Vite 5 transitif pour tests ; Vite 7 distinct pour build viewer",
+      "scope": "test-tooling-affected-instance",
+      "lockfileDependencyPaths": [
+        "vitest 2.1.9 → vite 5.4.21",
+        "@sveltejs/vite-plugin-svelte 4.0.4 → peer vite 5.4.21"
+      ],
+      "directAdvisories": [
+        "GHSA-4w7w-66w2-5vf9",
+        "GHSA-v6wh-96g9-6wx3",
+        "GHSA-fx2h-pf6j-xcff"
+      ],
+      "inheritedViaPackages": [
+        "esbuild"
+      ],
+      "npmFixAvailableMetadata": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      },
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "vite-node",
+      "auditSeverity": "moderate",
+      "isDirectAccordingToAudit": false,
+      "declaredDirectDevDependency": false,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/vite-node",
+          "version": "2.1.9",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Exécution/transformation des tests transitive",
+      "scope": "test-only",
+      "lockfileDependencyPaths": [
+        "vitest 2.1.9 → vite-node 2.1.9"
+      ],
+      "directAdvisories": [],
+      "inheritedViaPackages": [
+        "vite"
+      ],
+      "npmFixAvailableMetadata": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      },
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    },
+    {
+      "package": "vitest",
+      "auditSeverity": "critical",
+      "isDirectAccordingToAudit": true,
+      "declaredDirectDevDependency": true,
+      "affectedInstalledNodes": [
+        {
+          "path": "node_modules/vitest",
+          "version": "2.1.9",
+          "lockDev": true
+        }
+      ],
+      "absentFromOmitDevAudit": true,
+      "role": "Outil de tests direct",
+      "scope": "test-only",
+      "lockfileDependencyPaths": [
+        "root devDependencies → vitest 2.1.9"
+      ],
+      "directAdvisories": [
+        "GHSA-5xrq-8626-4rwp",
+        "GHSA-82fw-gwwq-j7x9"
+      ],
+      "inheritedViaPackages": [
+        "@vitest/mocker",
+        "vite",
+        "vite-node"
+      ],
+      "npmFixAvailableMetadata": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      },
+      "viewerBundlePresence": "No direct source import found in bounded application source scan; transitive bundle membership not measured.",
+      "affectedVersionEstablished": true,
+      "attackerControlledPathToVulnerableOperationProven": false,
+      "exploitObserved": false
+    }
+  ],
+  "advisories": [
+    {
+      "id": "GHSA-82fw-gwwq-j7x9",
+      "auditTitle": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+      "auditSeverity": "moderate",
+      "auditUrl": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+      "primarySources": [
+        "https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "@vitest/mocker",
+          "range": ">=2.1.0 <4.1.11"
+        },
+        {
+          "package": "vitest",
+          "range": ">=2.1.0 <4.1.11"
+        }
+      ],
+      "conditionsFromPrimarySources": "Un client pouvant atteindre le WebSocket du serveur de développement peut enregistrer une redirection de mock vers un fichier interdit. La voie non authentifiée concerne les exports publics mockerPlugin/interceptorPlugin ; le Browser Mode propre à Vitest passe par un RPC avec token.",
+      "repositoryAssessment": "Aucun usage de ces plugins publics dans les configs inspectées ; jsdom n’est pas le Browser Mode Vitest. Le paquet est utilisé par les tests, pas importé directement par le viewer.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "4.1.11",
+          "5.0.0-rc.2"
+        ],
+        "note": "Le mainteneur indique que les anciennes branches 2.1.x/3.x ne recevront pas ce correctif."
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-67mh-4wv8-2f99",
+      "auditTitle": "esbuild enables any website to send any requests to the development server and read the response",
+      "auditSeverity": "moderate",
+      "auditUrl": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+      "primarySources": [
+        "https://github.com/evanw/esbuild/security/advisories/GHSA-67mh-4wv8-2f99"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "esbuild",
+          "range": "<=0.24.2"
+        }
+      ],
+      "conditionsFromPrimarySources": "Le serveur serve propre à esbuild doit être actif ; une page malveillante visitée peut lire ses réponses grâce au CORS permissif, y compris en loopback.",
+      "repositoryAssessment": "Le build emploie esbuild comme transformateur via Vite. Aucun lancement esbuild serve observé dans les manifests/configs examinés ; utiliser esbuild via Vite ne prouve pas à lui seul l’activation du serveur esbuild.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "0.25.0"
+        ]
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-28wg-ghj8-5hjv",
+      "auditTitle": "nanoid: non-secure generators can loop indefinitely with negative size",
+      "auditSeverity": "high",
+      "auditUrl": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+      "primarySources": [
+        "https://github.com/ai/nanoid/pull/600",
+        "https://github.com/ai/nanoid/commit/e835c9b71eab832bc6106944bdd26ea96cf2c66d"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "nanoid",
+          "range": "<3.3.16"
+        }
+      ],
+      "conditionsFromPrimarySources": "Une taille négative non validée transmise à nanoid ou customAlphabet du module non-secure bloque la boucle de génération et peut épuiser mémoire/CPU.",
+      "repositoryAssessment": "Le seul consommateur déclaré de Nanoid dans le lock est PostCSS ; son appel local observé est nanoid(6), donc pas une taille contrôlée par CSS. Ce seul chemin ne déclenche pas la condition publiée ; ce n’est pas une analyse exhaustive des imports dynamiques.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "5.1.16"
+        ],
+        "auditDatabase": [
+          "3.3.16",
+          "5.1.16"
+        ],
+        "note": "Backport 3.x donné par le GHSA ; PR/commit amont consultés pour le comportement."
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-2v37-7h3g-55p8",
+      "auditTitle": "nanoid: custom generators can loop indefinitely when size is zero",
+      "auditSeverity": "high",
+      "auditUrl": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+      "primarySources": [
+        "https://github.com/ai/nanoid/commit/cb3626d0f3342fdf179cd425fd9c4fbb92c7d0e7",
+        "https://github.com/ai/nanoid/commit/e10f8d40ce9d1ab47f66d65a16b48086432730d0"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "nanoid",
+          "range": "<3.3.18"
+        }
+      ],
+      "conditionsFromPrimarySources": "Une taille égale à zéro transmise à un générateur customAlphabet/customRandom vulnérable peut bloquer indéfiniment le thread appelant.",
+      "repositoryAssessment": "Le chemin PostCSS observé utilise nanoid/non-secure avec la taille constante 6, pas un générateur personnalisé de taille zéro.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "auditDatabase": [
+          "3.3.18",
+          "5.1.6"
+        ],
+        "note": "Commits amont consultés pour les gardes taille zéro ; version branche 3.x conservée du GHSA."
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-xwg4-73v4-xw9w",
+      "auditTitle": "nanoid: Integer Overflow or Wraparound",
+      "auditSeverity": "high",
+      "auditUrl": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w",
+      "primarySources": [
+        "https://github.com/ai/nanoid/security/advisories/GHSA-xwg4-73v4-xw9w"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "nanoid",
+          "range": "<3.3.12"
+        }
+      ],
+      "conditionsFromPrimarySources": "Une taille influencée par un attaquant, notamment >=2^31, passée au nanoid sécurisé Node peut déborder le compteur et rendre les identifiants suivants prévisibles dans le processus.",
+      "repositoryAssessment": "Le chemin PostCSS observé utilise le générateur non-secure à taille 6, pas le pool CSPRNG décrit. Aucun appel direct dans le code applicatif inspecté.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "3.3.12",
+          "5.1.11"
+        ]
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-qx2v-qp2m-jg93",
+      "auditTitle": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+      "auditSeverity": "moderate",
+      "auditUrl": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+      "primarySources": [
+        "https://github.com/postcss/postcss/security/advisories/GHSA-qx2v-qp2m-jg93"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "postcss",
+          "range": "<8.5.10"
+        }
+      ],
+      "conditionsFromPrimarySources": "Du CSS contrôlé par un attaquant est parsé puis sérialisé et inséré sans échappement dans une balise HTML style ; une fermeture de balise contenue dans le CSS permet une sortie du contexte.",
+      "repositoryAssessment": "PostCSS est dans la chaîne de build. Aucun endpoint applicatif de transformation de CSS utilisateur trouvé dans la recherche bornée. L’impact sur un artefact généré reste à examiner si des entrées CSS/plugins non fiables sont admis.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "8.5.10"
+        ]
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-6g55-p6wh-862q",
+      "auditTitle": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+      "auditSeverity": "high",
+      "auditUrl": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+      "primarySources": [
+        "https://github.com/postcss/postcss/security/advisories/GHSA-6g55-p6wh-862q"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "postcss",
+          "range": "<=8.5.11"
+        }
+      ],
+      "conditionsFromPrimarySources": "Un CSS non fiable contenant sourceMappingURL est traité sous Node sans désactiver le chargement des anciennes maps ; PostCSS peut lire un chemin accessible au processus. Une erreur de parsing exposée peut divulguer un préfixe du fichier.",
+      "repositoryAssessment": "PostCSS 8.5.6 est partagé par les builds viewer et tests. Le risque porte sur le traitement d’entrées CSS non fiables avec les permissions de build. build.sourcemap=false dans Vite ne prouve pas opts.map=false à tous les appels PostCSS.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "8.5.12"
+        ],
+        "note": "Ce seuil ne corrige pas tous les autres avis PostCSS du snapshot."
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-fxqj-rqcc-2cmp",
+      "auditTitle": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+      "auditSeverity": "moderate",
+      "auditUrl": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+      "primarySources": [
+        "https://github.com/postcss/postcss/security/advisories/GHSA-fxqj-rqcc-2cmp"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "postcss",
+          "range": "<=8.5.22"
+        }
+      ],
+      "conditionsFromPrimarySources": "Sans option from, une ancienne map désignée par un sourceMappingURL absolu ou traversant peut être lue ; la condition reste active sauf map:false. Le contenu de la map peut être divulgué dans la sortie.",
+      "repositoryAssessment": "Même frontière CSS/source-map que les deux autres avis de lecture. L’exposition réelle dépend des entrées, options et sorties du pipeline ; elle n’a pas été reproduite.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "8.5.23"
+        ]
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-r28c-9q8g-f849",
+      "auditTitle": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+      "auditSeverity": "high",
+      "auditUrl": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+      "primarySources": [
+        "https://github.com/postcss/postcss/security/advisories/GHSA-r28c-9q8g-f849"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "postcss",
+          "range": "<=8.5.17"
+        }
+      ],
+      "conditionsFromPrimarySources": "Le chargement automatique d’une ancienne source map indiqué par du CSS non fiable traverse les répertoires ; le contenu d’une map lisible peut se retrouver dans une map résultante rendue à l’attaquant.",
+      "repositoryAssessment": "Chemin de build partagé ; aucune preuve de fuite effective sur ce dépôt, et aucune preuve générale d’inaccessibilité tirée du seul omit-dev.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "8.5.18"
+        ],
+        "note": "Ce seuil ne corrige pas tous les autres avis PostCSS du snapshot."
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-mw96-cpmx-2vgc",
+      "auditTitle": "Rollup 4 has Arbitrary File Write via Path Traversal",
+      "auditSeverity": "high",
+      "auditUrl": "https://github.com/advisories/GHSA-mw96-cpmx-2vgc",
+      "primarySources": [
+        "https://github.com/rollup/rollup/security/advisories/GHSA-mw96-cpmx-2vgc"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "rollup",
+          "range": ">=4.0.0 <4.59.0"
+        }
+      ],
+      "conditionsFromPrimarySources": "Un attaquant contrôle des noms de sortie via entrées CLI nommées, alias de chunks ou plugins ; des traversées peuvent écrire hors outDir avec les droits du processus de build.",
+      "repositoryAssessment": "Rollup 4.57.1 sert aussi au build viewer via Vite 7.3.6. La config examinée a un outDir fixe et ne prend pas ces noms depuis une requête viewer ; cela ne protège pas d’une entrée/config/plugin de build malveillant.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "2.80.0",
+          "3.30.0",
+          "4.59.0"
+        ],
+        "installedMajorBranchFix": "4.59.0"
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-4w7w-66w2-5vf9",
+      "auditTitle": "Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling",
+      "auditSeverity": "moderate",
+      "auditUrl": "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+      "primarySources": [
+        "https://github.com/vitejs/vite/security/advisories/GHSA-4w7w-66w2-5vf9"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "vite",
+          "range": "<=6.4.1"
+        }
+      ],
+      "conditionsFromPrimarySources": "Un serveur de développement Vite accessible et un chemin prévisible vers une source map sensible permettent la lecture hors projet par traitement des requêtes .map de dépendances optimisées.",
+      "repositoryAssessment": "L’instance signalée est Vite 5.4.21 des tests. Le viewer build/dev utilise 7.3.6, hors plages de cet avis ; son host configuré est 127.0.0.1. Le serveur livré CodeGraph est distinct et statique.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "6.4.2",
+          "7.3.2",
+          "8.0.5"
+        ]
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-v6wh-96g9-6wx3",
+      "auditTitle": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+      "auditSeverity": "moderate",
+      "auditUrl": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+      "primarySources": [
+        "https://github.com/vitejs/launch-editor/security/advisories/GHSA-v6wh-96g9-6wx3"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "vite",
+          "range": "<=6.4.2"
+        }
+      ],
+      "conditionsFromPrimarySources": "Sous Windows avec NTLM actif, une page malveillante envoie une requête à un middleware launch-editor actif et connu ; l’ouverture d’un chemin UNC peut transmettre un hash NTLMv2 à un serveur SMB hostile.",
+      "repositoryAssessment": "Condition Windows absente des validations Darwin/Linux observées. Vite 5.4.21 est signalé ; Vite viewer 7.3.6 est hors plage. Cela ne constitue pas une validation Windows ni une garantie sur les options des contributeurs.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primaryVite": [
+          "6.4.3",
+          "7.3.5",
+          "8.0.16"
+        ],
+        "primaryLaunchEditor": [
+          "2.14.1"
+        ]
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-fx2h-pf6j-xcff",
+      "auditTitle": "vite: `server.fs.deny` bypass on Windows alternate paths",
+      "auditSeverity": "high",
+      "auditUrl": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+      "primarySources": [
+        "https://github.com/vitejs/vite/security/advisories/GHSA-fx2h-pf6j-xcff"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "vite",
+          "range": "<=6.4.2"
+        }
+      ],
+      "conditionsFromPrimarySources": "Le serveur dev Vite est exposé, le fichier sensible est sous fs.allow et des chemins alternatifs NTFS/Windows 8.3 contournent fs.deny.",
+      "repositoryAssessment": "L’instance signalée est Vite 5.4.21 des tests ; Vite viewer 7.3.6 est corrigé pour cet avis. Aucun test Windows n’a été effectué dans cette validation.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "6.4.3",
+          "7.3.5",
+          "8.0.16"
+        ]
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    },
+    {
+      "id": "GHSA-5xrq-8626-4rwp",
+      "auditTitle": "When Vitest UI server is listening, arbitrary file can be read and executed",
+      "auditSeverity": "critical",
+      "auditUrl": "https://github.com/advisories/GHSA-5xrq-8626-4rwp",
+      "primarySources": [
+        "https://github.com/vitest-dev/vitest/security/advisories/GHSA-5xrq-8626-4rwp"
+      ],
+      "consultedOn": "2026-09-20",
+      "affectedAuditPackages": [
+        {
+          "package": "vitest",
+          "range": "<3.2.6"
+        }
+      ],
+      "conditionsFromPrimarySources": "Un serveur API/UI Vitest explicitement exposé au réseau, ou UI/Browser Mode sous Windows, permet les opérations de lecture/écriture/exécution décrites par le mainteneur.",
+      "repositoryAssessment": "La commande validée est vitest run, avec projets node/jsdom ; aucune activation UI, API réseau ou Browser Mode dans les deux configs inspectées. Cette configuration ne réalise pas les préconditions publiées ; des options utilisateur différentes peuvent les réaliser.",
+      "exploitReproduced": false,
+      "reportedPatchedVersions": {
+        "primary": [
+          "3.2.5",
+          "4.1.0"
+        ],
+        "auditDatabase": [
+          "3.2.6",
+          "4.1.0"
+        ],
+        "note": "Désaccord de seuil conservé ; aucune version choisie pour une migration."
+      },
+      "reachabilityStatus": "Preconditions not demonstrated in this repository; affected version and tooling role are established separately."
+    }
+  ],
+  "viewerAssessment": {
+    "affectedBuildDependencies": [
+      "rollup@4.57.1",
+      "postcss@8.5.6",
+      "nanoid@3.3.11"
+    ],
+    "separateUiToolVersions": {
+      "vite": "7.3.6",
+      "@sveltejs/vite-plugin-svelte": "6.2.4",
+      "@sveltejs/vite-plugin-svelte-inspector": "5.0.2",
+      "esbuild": "0.28.2"
+    },
+    "uiViteListedByCollectedAudit": false,
+    "bundleEvidence": "package.json build:ui exécute vite build dans ui ; ui/vite.config.ts écrit dist/viewer, qui est publié. src/ui-server/index.ts emploie node:http et les fichiers statiques, sans démarrer Vite/Vitest/esbuild.",
+    "directApplicationImportsOfAffectedPackagesFound": false,
+    "directImportSearchScope": [
+      "src hors __tests__ et fixtures",
+      "ui/src hors tests"
+    ],
+    "actualTransitiveBundleMembershipAudited": false,
+    "knownNanoidConsumer": "lock : seul PostCSS déclare nanoid ; lecture node_modules/postcss/lib/input.js lignes 3 et 80 : générateur non-secure avec taille constante 6.",
+    "sourceMapCaveat": "Vite build.sourcemap=false ne démontre pas que toute invocation interne de PostCSS désactive les anciennes maps ; aucune équivalence supposée.",
+    "conclusion": "Risques de chaîne de build à conserver. Aucun chemin d’exploitation du viewer livré démontré par ce triage, aucune preuve exhaustive d’absence.",
+    "buildDependencyChainStatus": "Declared/resolved tooling chain established from immutable lock and build configuration; vulnerable sink reachability with attacker-controlled input not demonstrated."
+  },
+  "localEvidence": [
+    {
+      "file": "package.json",
+      "role": "scripts, root devDependencies, shipped dist"
+    },
+    {
+      "file": "ui/package.json",
+      "role": "workspace Vite 7 build and dependencies"
+    },
+    {
+      "file": "package-lock.json",
+      "role": "exact versions, dev flags and declared dependency paths"
+    },
+    {
+      "file": "vitest.config.mts",
+      "lines": [
+        9,
+        41
+      ],
+      "role": "node environment, no enabled API/UI/browser mode"
+    },
+    {
+      "file": "vitest.workspace.mts",
+      "lines": [
+        27,
+        63
+      ],
+      "role": "engine node + UI jsdom, Svelte plugin 4 from root"
+    },
+    {
+      "file": "ui/vite.config.ts",
+      "lines": [
+        16,
+        47
+      ],
+      "role": "fixed output, production build, sourcemap false, dev loopback"
+    },
+    {
+      "file": "src/ui-server/index.ts",
+      "lines": [
+        19,
+        35,
+        169,
+        183,
+        195
+      ],
+      "role": "node:http and static asset serving"
+    },
+    {
+      "file": "node_modules/postcss/lib/input.js",
+      "lines": [
+        3,
+        80
+      ],
+      "role": "bounded installed source read for actual nanoid caller; no source copied into public report"
+    }
+  ],
+  "sourceDiscrepancies": [
+    "Vitest critical : le snapshot npm/GitHub Database donne <3.2.6 ; l’avis mainteneur affiche <3.2.5. La version installée 2.1.9 est affectée dans les deux. Aucun choix de version de mise à jour déduit de cet écart.",
+    "Rollup : npm/GitHub Database le classe high, l’en-tête de l’avis mainteneur moderate. Les comptes publiés conservent la classification du snapshot npm sans réécriture."
+  ],
+  "environmentQualification": {
+    "currentValidationDate": "2026-09-20",
+    "currentMac": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "vitest": "2.1.9",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "27.0.0",
+      "v8": "13.6.233.17-node.50",
+      "sqlite": "3.53.1"
+    },
+    "previousMacObservation": {
+      "date": "2026-09-19",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "25.6.0",
+      "evidence": "final-validation-local-proof-16k-20260919.public.json"
+    },
+    "reportingRule": "Pour la validation et les mesures du 20 septembre, citer la capture contemporaine Darwin 27.0.0 ; ne pas reporter Darwin 25.6.0 du 19. Ne pas convertir ce numéro noyau en nom marketing macOS non vérifié. Aucun nouveau benchmark environnement demandé ni effectué."
+  },
+  "limitations": [
+    "Triage statique des alertes déjà observées, pas audit de sécurité exhaustif ni preuve dynamique d’exploitation.",
+    "Aucune reconstruction de bundle, SBOM des assets, test réseau, test Windows ou instrumentation transitive exécutée.",
+    "La recherche textuelle d’imports directs ne couvre pas toute résolution dynamique ou dépendance transitive du bundle.",
+    "Le passage des suites/package checks ne prouve pas l’absence de code vulnérable dans les assets.",
+    "Les sévérités/ranges sont ceux du snapshot ; les conditions sont attribuées aux sources primaires consultées le 20 septembre.",
+    "Aucune mise à jour automatique recommandée comme sûre : les propositions npm concernant Vitest/plugin impliquent des majeures et exigeraient un travail séparé.",
+    "Les versions corrigées sont des métadonnées d’avis, pas un plan de migration validé. Aucun changement ne doit être appliqué au moteur ou node_modules gelés pendant la campagne."
+  ]
+}

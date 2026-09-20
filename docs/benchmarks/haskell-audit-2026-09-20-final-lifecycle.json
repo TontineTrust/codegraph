@@ -1,0 +1,626 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-20",
+  "assembledAt": "2026-09-20T10:18:40.995355+00:00",
+  "evidenceKind": "Final172 candidate-only normal and GHC controller closure",
+  "candidate": {
+    "arm": "candidate-constructor-recall-20260920",
+    "codeRevision": "172fd3b01986dc62554ffe3fc1dc4b93fa1e6a0c",
+    "distSha256": "a70124c4ca4f4d4324a114f24bc8ab7b848406da721795c7341a18f8b5b5af75",
+    "distFiles": 1042,
+    "builtFrom": "Successful full npm run build; full-build-constructor-recall-20260920.log",
+    "sourceDistByteIdentical": true,
+    "createdAt": "2026-09-20T08:21:05.344843+00:00"
+  },
+  "normal": {
+    "schemaVersion": 1,
+    "auditDate": "2026-09-20",
+    "purpose": "Durable campaign lifecycle only; not graph, source, timing-comparison or corpus validation",
+    "generatedAt": "2026-09-20T08:37:55.152412+00:00",
+    "statusUpdatedAt": "2026-09-20T08:37:40.486344+00:00",
+    "campaign": "normal",
+    "expectedArms": {
+      "baseline": "baseline-20260920",
+      "candidate": "candidate-constructor-recall-20260920"
+    },
+    "phase": "complete",
+    "exitCode": 0,
+    "stopReason": null,
+    "completedPlan": true,
+    "elapsedSeconds": 154.317,
+    "nodeTimeoutSeconds": 600,
+    "totalCapSeconds": 18720,
+    "plannedStepCount": 12,
+    "recordedStepCount": 12,
+    "completedStepCount": 12,
+    "skippedStepCount": 0,
+    "plannedAttemptCount": 12,
+    "uniqueReferencedAttemptCount": 12,
+    "recordedAttemptCount": 12,
+    "completeAttemptCount": 12,
+    "attemptStatusCounts": {
+      "complete": 12
+    },
+    "lastRecordedStep": {
+      "index": 12,
+      "arm": "candidate-constructor-recall-20260920",
+      "scope": "express",
+      "repeatThrough": 3
+    },
+    "steps": [
+      {
+        "index": 1,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "xmonad",
+        "repeatThrough": 1,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 2.106,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-xmonad-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "xmonad",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 2.069755083,
+            "timeoutSeconds": 600,
+            "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "pandoc",
+        "repeatThrough": 1,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 26.14,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-pandoc-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "pandoc",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 25.83429575,
+            "timeoutSeconds": 600,
+            "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "hls",
+        "repeatThrough": 1,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 22.871,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-hls-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "hls",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 22.648906041999997,
+            "timeoutSeconds": 600,
+            "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "express",
+        "repeatThrough": 1,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 0.943,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-express-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "express",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 0.9083180840000011,
+            "timeoutSeconds": 600,
+            "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "xmonad",
+        "repeatThrough": 2,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 2.086,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-xmonad-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "xmonad",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 2.069755083,
+            "timeoutSeconds": 600,
+            "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-xmonad-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "xmonad",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 2.0654367500000035,
+            "timeoutSeconds": 600,
+            "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "pandoc",
+        "repeatThrough": 2,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 25.832,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-pandoc-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "pandoc",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 25.83429575,
+            "timeoutSeconds": 600,
+            "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-pandoc-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "pandoc",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 25.561369958,
+            "timeoutSeconds": 600,
+            "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "hls",
+        "repeatThrough": 2,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 22.452,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-hls-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "hls",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 22.648906041999997,
+            "timeoutSeconds": 600,
+            "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-hls-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "hls",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 22.206539665999998,
+            "timeoutSeconds": 600,
+            "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+          }
+        ]
+      },
+      {
+        "index": 8,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "express",
+        "repeatThrough": 2,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 0.931,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-express-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "express",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 0.9083180840000011,
+            "timeoutSeconds": 600,
+            "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-express-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "express",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 0.8902887910000032,
+            "timeoutSeconds": 600,
+            "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "xmonad",
+        "repeatThrough": 3,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 1.975,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-xmonad-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "xmonad",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 2.069755083,
+            "timeoutSeconds": 600,
+            "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-xmonad-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "xmonad",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 2.0654367500000035,
+            "timeoutSeconds": 600,
+            "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-xmonad-3",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "xmonad",
+            "repeat": 3,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 1.9577801249999993,
+            "timeoutSeconds": 600,
+            "sourceSha": "1a875b3413e72a766ce2b1d4c39b8f796c1ac311"
+          }
+        ]
+      },
+      {
+        "index": 10,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "pandoc",
+        "repeatThrough": 3,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 25.569,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-pandoc-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "pandoc",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 25.83429575,
+            "timeoutSeconds": 600,
+            "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-pandoc-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "pandoc",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 25.561369958,
+            "timeoutSeconds": 600,
+            "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-pandoc-3",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "pandoc",
+            "repeat": 3,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 25.243422249999995,
+            "timeoutSeconds": 600,
+            "sourceSha": "b913622e1ff87c69ab8b1a606577122e220925cd"
+          }
+        ]
+      },
+      {
+        "index": 11,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "hls",
+        "repeatThrough": 3,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 22.061,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-hls-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "hls",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 22.648906041999997,
+            "timeoutSeconds": 600,
+            "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-hls-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "hls",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 22.206539665999998,
+            "timeoutSeconds": 600,
+            "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-hls-3",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "hls",
+            "repeat": 3,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 21.79712162499999,
+            "timeoutSeconds": 600,
+            "sourceSha": "c98343b869786994a0ece7830910551bd8a0c195"
+          }
+        ]
+      },
+      {
+        "index": 12,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "express",
+        "repeatThrough": 3,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 0.834,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-express-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "express",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 0.9083180840000011,
+            "timeoutSeconds": 600,
+            "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-express-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "express",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 0.8902887910000032,
+            "timeoutSeconds": 600,
+            "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-express-3",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "express",
+            "repeat": 3,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 0.7946871670000064,
+            "timeoutSeconds": 600,
+            "sourceSha": "3ce6d0eb86e9d93529ff3191c6bb5db8ce6e72c8"
+          }
+        ]
+      }
+    ],
+    "closureEvidence": {
+      "recognizedTerminalStatus": true,
+      "recordedActiveOwnedGroupCount": 0,
+      "globalCampaignLeaseHeldAtStatusProbe": false,
+      "terminalCleanupEvidenceAccepted": true,
+      "qualification": "Terminal status records no owned groups and the status command observed the global lease free.",
+      "socketRemovalChecked": false,
+      "workerProcessExitIndependentlyChecked": false
+    },
+    "statusCommand": {
+      "exitCode": 0,
+      "stderrPresent": false,
+      "timeoutSeconds": 5
+    },
+    "sanitization": "Explicit labels, fixed reason codes, numbers, timestamps and pinned digests only. Private stdout is not saved; no PID, process group ID, socket, token, command, source text or local path copied.",
+    "limits": {
+      "statusInputBytes": 1048576,
+      "statusStdoutBytes": 2097152,
+      "statusStderrBytes": 8192,
+      "publicOutputBytes": 262144
+    },
+    "qualification": "Per-step attempt lists repeat earlier checkpoints; counts deduplicate tags. This is a point-in-time lease observation, not a process inventory. Run records and semantic verification remain separate evidence.",
+    "controllerDeadlineCapacityAttempts": 24,
+    "baselineMeasurementsReused": true,
+    "baselineExecutedByThisCampaign": false,
+    "deadlineQualification": "Controller retains its former two-arm deadline capacity; only the candidate-only plan is executed. Earlier baseline attempts are not counted as fresh executions or owned children of this campaign."
+  },
+  "ghc": {
+    "schemaVersion": 1,
+    "auditDate": "2026-09-20",
+    "purpose": "Durable campaign lifecycle only; not graph, source, timing-comparison or corpus validation",
+    "generatedAt": "2026-09-20T10:17:30.840093+00:00",
+    "statusUpdatedAt": "2026-09-20T10:16:18.431694+00:00",
+    "campaign": "ghc",
+    "expectedArms": {
+      "baseline": "baseline-20260920",
+      "candidate": "candidate-constructor-recall-20260920"
+    },
+    "phase": "finished_with_incomplete_corpora",
+    "exitCode": 2,
+    "stopReason": null,
+    "completedPlan": false,
+    "elapsedSeconds": 5896.258,
+    "nodeTimeoutSeconds": 1800,
+    "totalCapSeconds": 23760,
+    "plannedStepCount": 2,
+    "recordedStepCount": 2,
+    "completedStepCount": 1,
+    "skippedStepCount": 0,
+    "plannedAttemptCount": 6,
+    "uniqueReferencedAttemptCount": 4,
+    "recordedAttemptCount": 4,
+    "completeAttemptCount": 3,
+    "attemptStatusCounts": {
+      "complete": 3,
+      "timeout": 1
+    },
+    "lastRecordedStep": {
+      "index": 2,
+      "arm": "candidate-constructor-recall-20260920",
+      "scope": "ghc",
+      "repeatThrough": 3
+    },
+    "steps": [
+      {
+        "index": 1,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "ghc-core",
+        "repeatThrough": 3,
+        "runnerExitCode": 0,
+        "complete": true,
+        "skipped": false,
+        "runnerElapsedSeconds": 4090.665,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-ghc-core-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "ghc-core",
+            "repeat": 1,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 1228.461049583,
+            "timeoutSeconds": 1800,
+            "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-ghc-core-2",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "ghc-core",
+            "repeat": 2,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 1311.8041793749999,
+            "timeoutSeconds": 1800,
+            "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+          },
+          {
+            "tag": "candidate-constructor-recall-20260920-ghc-core-3",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "ghc-core",
+            "repeat": 3,
+            "status": "complete",
+            "exitCode": 0,
+            "elapsedSeconds": 1542.190988166,
+            "timeoutSeconds": 1800,
+            "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "arm": "candidate-constructor-recall-20260920",
+        "scope": "ghc",
+        "repeatThrough": 3,
+        "runnerExitCode": 0,
+        "complete": false,
+        "skipped": false,
+        "runnerElapsedSeconds": 1804.335,
+        "attempts": [
+          {
+            "tag": "candidate-constructor-recall-20260920-ghc-1",
+            "arm": "candidate-constructor-recall-20260920",
+            "scope": "ghc",
+            "repeat": 1,
+            "status": "timeout",
+            "exitCode": 143,
+            "elapsedSeconds": 1800.3862378750005,
+            "timeoutSeconds": 1800,
+            "sourceSha": "82c73b223a985bc0bcc00cb6252b2b535082d831"
+          }
+        ]
+      }
+    ],
+    "closureEvidence": {
+      "recognizedTerminalStatus": true,
+      "recordedActiveOwnedGroupCount": 0,
+      "globalCampaignLeaseHeldAtStatusProbe": false,
+      "terminalCleanupEvidenceAccepted": true,
+      "qualification": "Terminal status records no owned groups and the status command observed the global lease free.",
+      "socketRemovalChecked": false,
+      "workerProcessExitIndependentlyChecked": false
+    },
+    "statusCommand": {
+      "exitCode": 0,
+      "stderrPresent": false,
+      "timeoutSeconds": 5
+    },
+    "sanitization": "Explicit labels, fixed reason codes, numbers, timestamps and pinned digests only. Private stdout is not saved; no PID, process group ID, socket, token, command, source text or local path copied.",
+    "limits": {
+      "statusInputBytes": 1048576,
+      "statusStdoutBytes": 2097152,
+      "statusStderrBytes": 8192,
+      "publicOutputBytes": 262144
+    },
+    "qualification": "Per-step attempt lists repeat earlier checkpoints; counts deduplicate tags. This is a point-in-time lease observation, not a process inventory. Run records and semantic verification remain separate evidence.",
+    "controllerDeadlineCapacityAttempts": 12,
+    "baselineMeasurementsReused": true,
+    "baselineExecutedByThisCampaign": false,
+    "deadlineQualification": "Controller retains its former two-arm deadline capacity; only the candidate-only plan is executed. Earlier baseline attempts are not counted as fresh executions or owned children of this campaign."
+  },
+  "qualification": [
+    "The final candidate runs are new executions; the baseline measurements from earlier 20 September are reused and were not interleaved with this candidate.",
+    "A terminal controller and released lease establish recorded process closure, not successful completion of the full GHC corpus. The full attempt timed out and repetitions 2 and 3 were not launched.",
+    "The unchanged controller deadline retains former two-arm capacity; actual selected plans contain 12 normal and 6 maximum GHC candidate attempts. Four GHC attempts actually ran: 3 complete core and 1 timed-out full.",
+    "Postmeasurement comparisons, health checks and source review are separate evidence and do not run inside the macro measurement window."
+  ]
+}
