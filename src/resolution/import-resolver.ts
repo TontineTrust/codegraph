@@ -3445,6 +3445,22 @@ function resolveHaskellImportedReference(
     if (target) explicitTargets.push(target);
     else hasUnresolvedExplicitImport = true;
   }
+  // T(..) also imports a same-spelled value constructor T, when one exists.
+  // Its parent entry is type-only, so obtain an authorized child witness from
+  // the parent-wide route before considering unrelated wildcard facades. This
+  // lets it use the same global uniqueness check as other explicit imports.
+  // An absent/ambiguous child is not evidence that T denotes a constructor;
+  // leave the ordinary wildcard ambiguity check in charge in that case.
+  if (valueContext && !hasExplicitImport) {
+    for (const imp of importIndex.wildcards) {
+      if (imp.parentExport !== referenceName) continue;
+      const target = findInModule(imp.source, referenceName, imp);
+      if (!target) continue;
+      explicitTargets.push(target);
+      hasExplicitImport = true;
+      break;
+    }
+  }
   // An explicit route that points outside the index is still authoritative.
   // Falling back merely because it produced no local target can attach the
   // reference to an unrelated same-named symbol from a wildcard import, and
