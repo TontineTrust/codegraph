@@ -87,3 +87,7 @@ target-linux/
 # once committed three of these, 7.9 MB, into a feature branch).
 *.bundle
 *.gitbundle
+
+# Audit measurement evidence stays local, outside pull requests.
+/docs/benchmarks/haskell-audit-*.json
+/scripts/benchmarks/haskell-audit-corpora.json

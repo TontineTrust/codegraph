@@ -1,5 +1,9 @@
 # Intermediate campaign 204 — Haskell audit, 19–20 September 2026
 
+Evidence JSON files named in this report are retained locally and are not
+included in the PR. Their basenames identify local evidence; no JSON download
+links are provided.
+
 This is the closed evidence record for intermediate engine **`204ce9b`**.
 All timestamps are UTC. Results below belong to that engine and the unchanged
 remote baseline `80b8969`; they are not validation of a successor.
@@ -40,9 +44,9 @@ arms. The validation dates below remain 19 September; no rerun is implied.
 Each attempt uses a fresh disposable archive and separate index. Existing
 filters still apply: Haskell `.hs` is supported, `.lhs` is excluded; submodules
 and corpus dependencies are not installed. These are static graph checks,
-not corpus builds or typechecks. The [manifest](../../scripts/benchmarks/haskell-audit-corpora.json),
-[runner](../../scripts/benchmarks/haskell-audit-matrix.py) and
-[harness](../../scripts/benchmarks/haskell-corpus.cjs) retain the protocol.
+not corpus builds or typechecks. The
+[Python matrix driver with embedded pins and options](../../scripts/benchmarks/haskell-audit-matrix.py)
+and [harness](../../scripts/benchmarks/haskell-corpus.cjs) retain the protocol.
 
 Measurements are serial, without concurrent heavy validation or diagnostics,
 with profiling cleared and `CODEGRAPH_KERNEL=0`. Whole-harness caps are 600 s
@@ -52,7 +56,7 @@ Express, baseline followed by candidate for each pair. GHC core runs three
 candidates then three baselines. Neither order is randomized; caches are not
 flushed. Fresh archives do not establish cold operating-system caches.
 
-The [matrix](haskell-audit-2026-09-20-intermediate-results.json) contains **32 attempts**:
+The matrix (`haskell-audit-2026-09-20-intermediate-results.json`, retained locally) contains **32 attempts**:
 24 qualified normal runs, six qualified GHC-core runs and two incomplete
 full-GHC attempts. Timings below are median [minimum–maximum], n=3 per arm,
 unless explicitly labeled otherwise. RSS is the process high-water mark,
@@ -138,8 +142,8 @@ reviewed predecessors, allowing source-review reuse without timing reuse.
 All 33 Pandoc and seven prior HLS additions retain the prior review; all 37
 new HLS additions are source-supported (25 calls, 12 references), and the four
 historical `Test.Hls.kick` calls remain. HLS has two parse-warning files despite
-zero fatal file errors. [Graph evidence](haskell-audit-2026-09-20-normal-graphs.json)
-and [HLS source review](haskell-audit-2026-09-20-hls-source-review.json)
+zero fatal file errors. Graph evidence (`haskell-audit-2026-09-20-normal-graphs.json`, retained locally)
+and HLS source review (`haskell-audit-2026-09-20-hls-source-review.json`, retained locally)
 retain scopes, heuristics, CPP qualifications and preservation.
 
 ## GHC core: gain in paths, substantial indexing cost
@@ -175,10 +179,10 @@ Exact EXCEPT counts and bounded streaming classification agree: versus baseline,
 node changes; versus `f4dc4df`, 146,025 / 10 / zero, with all semantic nodes equal.
 The original helper's 100,000-row guard remains recorded separately from the
 successful streaming pass. Both representative pairs pass full integrity/FK
-checks. [Graph evidence](haskell-audit-2026-09-20-ghc-graphs.json)
+checks. Graph evidence (`haskell-audit-2026-09-20-ghc-graphs.json`, retained locally)
 retains every selected sample and all 24 comparison-specific removal records.
 
-The [source bundle](haskell-audit-2026-09-20-ghc-source-review.json) joins frozen
+The source bundle (`haskell-audit-2026-09-20-ghc-source-review.json`, retained locally) joins frozen
 ordinals 1–99 exactly: **99 source-supported**, zero contradicted/unresolved.
 It also covers the complete 14-identity removal union: **12 justified removals
 and two confirmed constructor-call regressions**. These are FieldLabelString
@@ -202,7 +206,7 @@ warnings. Phase is flows, `ok=false`, and its three queries surface no Flow.
 The harness aborts before synchronization; final after/stable records are absent.
 Neither arm attempts repetitions 2–3 or contributes a qualified timing group.
 
-Later completed [snapshot diagnostics](haskell-audit-2026-09-20-ghc-full-diagnostics.json)
+Later completed snapshot diagnostics (`haskell-audit-2026-09-20-ghc-full-diagnostics.json`, retained locally)
 inspect isolated read-only copies; they do not complete or heal either index.
 
 | Snapshot observation | Baseline | Intermediate 204 |
@@ -230,7 +234,7 @@ The normal matrix executes **72 actual ToolHandler queries**, zero tool errors,
 and no truncated retained Flow excerpts: xmonad 0/3, Pandoc 2/3, HLS 2/3,
 Express 0/3, identically in all repeats/arms. There are 24 three-step responses
 and 48 without Flow. Full-response truncation is not independently recorded.
-The [matrix](haskell-audit-2026-09-20-intermediate-results.json) preserves every fixed prompt.
+The matrix (`haskell-audit-2026-09-20-intermediate-results.json`, retained locally) preserves every fixed prompt.
 The 18 GHC-core queries show 0/3 baseline versus 3/3 candidate each repeat:
 `hsc_typecheck → tcRnModule' → tcRnModule`, `hscDesugar → hscDesugar' → deSugar`,
 and `hscSimplify → hscSimplify' → core2core`, with no tool/excerpt error.
@@ -241,8 +245,8 @@ source-supported positive paths and an absent negative control. Express has
 one supported path (`send json stringify`), one wrong target (`sendStatus type
 set`, ending at app.set rather than the response header setter), two missing
 intended paths and an absent negative control. This pre-existing JavaScript
-defect is not credited as success. [Source review](haskell-audit-2026-09-20-express-source-review.json)
-and [supplemental replay](haskell-audit-2026-09-20-supplemental-flows.json)
+defect is not credited as success. Source review (`haskell-audit-2026-09-20-express-source-review.json`, retained locally)
+and supplemental replay (`haskell-audit-2026-09-20-supplemental-flows.json`, retained locally)
 remain separate from frozen prompts and performance samples.
 
 Engine 204 keeps exact-walk limits of 10,000 visits/depth 64 and an independent
@@ -252,7 +256,7 @@ targets. Haskell ancestor tracking is restored in finally. Immutable owner
 patterns use a 1,024-entry FIFO cache and 1,024-UTF-16-unit keys, not node outcomes.
 These bounds do not guarantee total CPU/memory ceilings; failed proofs add work.
 
-[Diagnostics](haskell-audit-2026-09-20-resolver-diagnostics.json)
+Diagnostics (`haskell-audit-2026-09-20-resolver-diagnostics.json`, retained locally)
 record 1,000 differential queries: old `f4dc4df` completes 916/exhausts 84;
 407 returned targets remain and 27 additions match a 200,000-visit oracle,
 with zero mismatches. The 57 both-unresolved cases are not proved equivalence.
@@ -285,8 +289,8 @@ pass. A clean macOS consumer uses default CLI runtime flags, three Haskell files
 Separately installed **MCP SDK 1.30.0** verifies real stdio `alpha → beta → gamma`
 (1,401 response bytes). Consumer processes close and original inputs remain.
 This validates the source npm package, not platform-bundled releases or Windows.
-[Validation](haskell-audit-2026-09-20-validation.json) and
-[package evidence](haskell-audit-2026-09-20-package.json)
+Validation (`haskell-audit-2026-09-20-validation.json`, retained locally) and
+package evidence (`haskell-audit-2026-09-20-package.json`, retained locally)
 retain the actual dates: validation closes 19 September 07:52:02 before the
 first candidate macro at 07:52:27. Those successes did not catch the two later
 confirmed constructor regressions and cannot validate successor 172fd3b.
@@ -301,7 +305,7 @@ indexing. Unchanged-code Pandoc takes 25.901/25.709 s on 19 September and 9.536 
 after recovery, so those mixed-day runs are excluded from primary timing groups.
 The 20 September contemporaneous comparison was created to address that drift.
 
-The [real lifecycle records and separate stub smoke](haskell-audit-2026-09-20-lifecycle.json)
+The real lifecycle records and separate stub smoke (`haskell-audit-2026-09-20-lifecycle.json`, retained locally)
 distinguish controller behavior from corpus results. Normal finishes 05:32:54.188
 with complete/exit 0; GHC finishes 07:50:19.978 with incomplete corpora/exit 2.
 Both report zero active owned groups and free lease. Those terminal records do
@@ -319,7 +323,7 @@ Agent-eval A/B was **not executed**: refreshed 20 September 05:27:42 presence
 checks lack Claude, tmux and credential environment prerequisites. The prescribed
 Sonnet/high-effort, two-runs-per-arm, prewarmed-MCP comparison is not replaced by
 deterministic probes. Parallels prerequisites are absent; Windows is untested.
-The [preconditions](haskell-audit-2026-09-20-preconditions.json)
+The preconditions (`haskell-audit-2026-09-20-preconditions.json`, retained locally)
 contain presence checks only, without secret values. Raw machine-path logs stay
-private. The dated companions describe this intermediate campaign; successor
+private. The locally retained JSON evidence describes this intermediate campaign; successor
 results require their own identities and evidence.

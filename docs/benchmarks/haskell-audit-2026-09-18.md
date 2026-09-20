@@ -1,9 +1,13 @@
 # Haskell audit — 2026-09-18
 
+Evidence JSON files named in this report are retained locally and are not
+included in the PR. Their basenames identify local evidence; no JSON download
+links are provided.
+
 This audit starts from `80b89692056381a4e95b2d855f8d3516a5b8535c` on
 `TontineTrust/codegraph:feat/haskell-support-clean`, after PR #4 and the earlier
 scope, provenance, traversal-budget and performance corrections. Package
-version remains **1.6.0**. The [companion results JSON](haskell-audit-2026-09-18-results.json)
+version remains **1.6.0**. The companion results JSON (`haskell-audit-2026-09-18-results.json`, retained locally)
 contains sanitized per-run evidence. Extraction revision advances from 28 to 29: rebuild
 existing indexes to obtain the corrected scopes and import visibility.
 
@@ -91,9 +95,9 @@ files and starts without `.git` or `.codegraph`.
 
 ## Reproduction
 
-The checked-in `scripts/benchmarks/haskell-audit-corpora.json` pins every public
-revision, all 15 query strings (GHC's three queries in both scopes), and exact
-edit substitutions. `haskell-audit-matrix.py` clones pinned revisions read-only,
+The [Python matrix driver](../../scripts/benchmarks/haskell-audit-matrix.py)
+embeds every public revision, all 15 query strings (GHC's three queries in
+both scopes), and exact edit substitutions. It clones pinned revisions read-only,
 archives disposable copies, sanitizes profiling settings, sets
 `CODEGRAPH_KERNEL=0`, and runs one workload at a time with a 600-second cap.
 
@@ -111,7 +115,7 @@ node scripts/benchmarks/haskell-import-scan.cjs /absolute/candidate-engine /new/
 ```
 
 For the separate HLS diagnostic, archive the pinned HLS revision into another
-fresh directory and copy its manifest options with `skipSyncEdits: true`.
+fresh directory and copy its embedded HLS options with `skipSyncEdits: true`.
 Run the following once per engine, outside the normal matrix:
 
 ```sh
@@ -132,13 +136,13 @@ all other node fields, edge positions, metadata and provenance participate.
 It uses `EXCEPT` plus row counts, so row changes are not inferred from counts.
 The harness's ordered hashes additionally preserve multiplicity.
 
-The commands above reproduce raw measurement JSON; the companion results file
+The commands above reproduce raw measurement JSON; the locally retained results file
 contains the sanitized summaries and per-run observations from this campaign.
 Campaign-specific staging and aggregation are not required to run the published
 measurement protocol. Raw outputs contain local paths and should be reviewed
 before sharing.
 
-The supplemental diagnostics are also checked in. Stop all measured processes
+The supplemental diagnostic helpers are also checked in. Stop all measured processes
 first and keep each indexed corpus inactive throughout the probes. Use a new
 output filename for every invocation. The Flow/health helpers internally copy
 the database and WAL, enforce their documented process/memory/input caps, and

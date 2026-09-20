@@ -1,5 +1,9 @@
 # Haskell audit — 20 September 2026, candidate 172fd3b
 
+Evidence JSON files named in this report are retained locally and are not
+included in the PR. Their basenames identify local evidence; no JSON download
+links are provided.
+
 **Completed bounded audit campaign; full GHC remains incomplete under its cap.**
 This report separates completed evidence for `172fd3b` from the intermediate
 `204ce9b` campaign. All dates and times are UTC. No intermediate GHC timing,
@@ -52,7 +56,7 @@ are not installed. These are static graph checks, not corpus typechecks.
 
 ## Constructor recall and evidence boundaries
 
-The [source-review bundle](haskell-audit-2026-09-20-ghc-source-review.json)
+The source-review bundle (`haskell-audit-2026-09-20-ghc-source-review.json`, retained locally)
 records the exact intermediate-204 delta: 99 frozen selected additions are
 source-supported, and all 14 distinct removals are reviewed. Twelve removals
 are justified; two lose valid constructor calls. This purposive selection
@@ -61,7 +65,7 @@ does not certify every GHC addition or measure whole-graph precision.
 Twenty new regression cases cover the constructor correction. Before the fix,
 two direct fixtures pass but their variants with 65 unrelated facade hops fail.
 The new focused and full suites include these cases. The
-[actual-reference probes](haskell-audit-2026-09-20-constructor-recall.json)
+actual-reference probes (`haskell-audit-2026-09-20-constructor-recall.json`, retained locally)
 use the preserved 204 GHC-core graph, fresh native read-only contexts and the
 public `resolveViaImport` API, with caches cleared before each reference.
 
@@ -98,13 +102,13 @@ the validation summary closes at 08:34:40 before the first candidate macro.
 Fresh archives do not establish cold OS caches. Same-day eligibility in the
 aggregator does not remove time-of-day, thermal or filesystem-cache confounding.
 
-The completed [normal metadata aggregate](haskell-audit-2026-09-20-final-results.json)
+The completed normal metadata aggregate (`haskell-audit-2026-09-20-final-results.json`, retained locally)
 retains every observation and original precision. Tables show median
 [minimum–maximum], n=3 per cell. RSS is the process high-water mark, not a
 phase-isolated or descendant-summed peak. Resolution/synthesis is the recorded
 index remainder after parsing, not an isolated resolver microbenchmark.
 
-The [final results](haskell-audit-2026-09-20-final-results.json) retain all
+The final results (`haskell-audit-2026-09-20-final-results.json`, retained locally) retain all
 32 primary attempts: 30 qualified completions and two excluded full-GHC attempts.
 Earlier experiments and interrupted observations remain separately labeled.
 
@@ -184,7 +188,7 @@ errors or truncated retained Flow excerpts. Together with the reused baseline,
 does not independently record whole-response truncation. HLS has two warning
 files despite zero fatal file errors; the other normal corpora have none.
 
-All eight [exact normal comparisons](haskell-audit-2026-09-20-final-graphs.json)
+All eight exact normal comparisons (`haskell-audit-2026-09-20-final-graphs.json`, retained locally)
 complete on disposable snapshots, with original DB/WAL preserved. Full semantic
 rows for all four normal corpora are identical between 204 and 172. Against
 baseline, only the previously reviewed 33 Pandoc and 44 HLS edges are added;
@@ -201,13 +205,13 @@ has one supported path, one wrong target, two missing paths and an absent
 negative control. The wrong `sendStatus type set` target is not credited.
 All 27 responses have no tool error or recorded response/Flow truncation.
 
-The [graph comparison companion](haskell-audit-2026-09-20-final-graphs.json)
+The graph comparison companion (`haskell-audit-2026-09-20-final-graphs.json`, retained locally)
 retains all ten completed comparisons, original-preservation checks, bounded
 streaming ledgers and the unchanged strict reuse gate.
 
 ## GHC core: three completed repeats with a substantial cost
 
-The [completed matrix](haskell-audit-2026-09-20-final-results.json) records
+The completed matrix (`haskell-audit-2026-09-20-final-results.json`, retained locally) records
 three qualified 172 core runs, all exit 0, with the same 1,800-second cap as the
 reused baseline. Candidate starts are 08:38:05, 08:58:36 and 09:20:31; baseline
 starts were 06:33:30, 06:41:05 and 06:48:39. The baseline was not rerun by this
@@ -251,7 +255,7 @@ confirms **56 additions: 13 calls and 43 references**, with all existing nodes
 and edges unchanged. Both lost constructor calls are restored, and all 99 prior
 source-review identity joins remain valid. The strict exactly-two-additions
 gate returns exit 2 because it finds 56 additions; it is not a failed index run.
-The [exhaustive new-delta source review](haskell-audit-2026-09-20-final-source-review.json)
+The exhaustive new-delta source review (`haskell-audit-2026-09-20-final-source-review.json`, retained locally)
 now covers all 56 identities: 41 target value constructors and 15 target record
 fields. The field sites are explicit record labels, including labels whose
 right-hand expressions have locally bound names; they are not additional calls.
@@ -287,7 +291,7 @@ result. The reused baseline full attempt failed with two parser timeouts
 arm has a qualified run or n=3 distribution; repeats 2–3 are unattempted under
 the stop rule.
 
-New [postmeasurement diagnostics](haskell-audit-2026-09-20-final-postmeasurement.json)
+New postmeasurement diagnostics (`haskell-audit-2026-09-20-final-postmeasurement.json`, retained locally)
 inspect disposable copies, without reindexing or resuming the source snapshot.
 Its persisted state remains `indexing`: 232,604 nodes, 433,693 edges, 14,891 file
 records, 201,894 failed and **374,955 pending reference records**. Full integrity
@@ -306,7 +310,7 @@ digests agree before and after. The allowlisted summary excludes raw responses
 and project metadata. These diagnostics do not make the timed-out benchmark a
 success or supply its missing synchronization/three-repeat measurements.
 
-The [candidate GHC lifecycle](haskell-audit-2026-09-20-final-lifecycle.json)
+The candidate GHC lifecycle (`haskell-audit-2026-09-20-final-lifecycle.json`, retained locally)
 closes at **10:16:18.431694**, `finished_with_incomplete_corpora`/exit 2, with
 three core completions and one full timeout. It records zero active owned groups
 and a free global lease, not independent worker-exit or socket-removal proof.
@@ -316,7 +320,7 @@ probes are separate evidence from this lifecycle and its failed full run.
 
 ## Fresh validation and packaging on 20 September
 
-The [final-candidate validation](haskell-audit-2026-09-20-final-validation.json)
+The final-candidate validation (`haskell-audit-2026-09-20-final-validation.json`, retained locally)
 identifies source 172 and its frozen dist throughout. Recorded process groups
 close, the disposable Linux container and package consumer are removed, and a
 bounded final inventory finds no matching validation processes or containers.
@@ -359,7 +363,7 @@ Read-only `npm audit` reports **10 affected package entries** when development
 dependencies are included: five moderate, four high and one critical. The
 production-filtered command reports zero; all ten entries are omitted under
 that filter. This registry snapshot is not an exploitability assessment or
-proof about every bundle. The [dependency triage](haskell-audit-2026-09-20-dependency-triage.json)
+proof about every bundle. The dependency triage (`haskell-audit-2026-09-20-dependency-triage.json`, retained locally)
 qualifies 14 distinct advisories against the locked versions and maintainer
 conditions. Rollup, PostCSS and Nanoid also participate in the viewer build;
 the delivered server itself uses `node:http` and static assets. The observed
@@ -374,12 +378,13 @@ The mandated agent-eval A/B has not run: refreshed presence checks lack Claude,
 tmux and credential-environment prerequisites. The prescribed Sonnet/high-effort,
 two-runs-per-arm, prewarmed-MCP workflow is not replaced by deterministic probes.
 Parallels prerequisites are absent and Windows remains untested. The
-[preconditions record](haskell-audit-2026-09-20-preconditions.json)
+preconditions record (`haskell-audit-2026-09-20-preconditions.json`, retained locally)
 contains presence results, not secret values.
 
 The intermediate companion preserves interruption/recovery, failed pilots,
 the operator stop, original-sidecar caveat and dated evidence. Raw logs and
-source captures remain private; published companions contain reviewed metadata
-and pinned public-source references. The source and frozen dist seals still
+source captures remain private; the locally retained JSON evidence contains
+reviewed metadata and pinned public-source references and is excluded from
+the PR. The source and frozen dist seals still
 match after the campaign. The existing draft PR carries the corrections and
 this report; merging remains for review. The daily recurrence is retained.
