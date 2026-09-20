@@ -363,7 +363,10 @@ function parseModuleExports(node: SyntaxNode, source: string): HaskellModuleExpo
       result.allChildren.add(name);
       continue;
     }
-    const names = new Map<string, Set<HaskellNamespace>>();
+    // A parent may appear in several export entries (`T(A), T(B)`). Each
+    // entry contributes to the exported set; replacing the earlier children
+    // silently hides valid constructors/selectors from import resolution.
+    const names = result.children.get(name) ?? new Map<string, Set<HaskellNamespace>>();
     for (const child of groupedChildExports(children, source)) {
       const namespaces = names.get(child.name) ?? new Set<HaskellNamespace>();
       for (const namespace of child.namespaces) namespaces.add(namespace);
@@ -580,9 +583,11 @@ function isRecursiveDo(node: SyntaxNode): boolean {
 }
 
 /** Scope kinds a lexical-range decorator reports the span of. */
-const LEXICAL_RANGE_CONTAINERS = new Set(['let_in', 'alternative', 'function', 'do', 'list_comprehension']);
+const LEXICAL_RANGE_CONTAINERS = new Set([
+  'let_in', 'alternative', 'function', 'bind', 'match', 'do', 'list_comprehension',
+]);
 
-function lexicalRangeDecorator(node: SyntaxNode): string | null {
+function lexicalRangeDecorators(node: SyntaxNode): string[] {
   let ancestor = node.parent;
   let bindingStatement: SyntaxNode | null = null;
   while (ancestor) {
@@ -591,15 +596,41 @@ function lexicalRangeDecorator(node: SyntaxNode): string | null {
       // A do-let declaration scopes over its own RHS and later statements,
       // including its enclosing recursive group when present. An mdo keeps
       // every declaration recursive across the whole block.
-      const start = ancestor.type === 'do' && bindingStatement && !isRecursiveDo(ancestor)
+      const startsAtStatement = bindingStatement && (
+        ancestor.type === 'match'
+        || (ancestor.type === 'do' && !isRecursiveDo(ancestor))
+      );
+      // A where group belongs to its owner's matches/RHS, never its LHS view
+      // patterns. Include value bindings as owners even when they do not get
+      // graph nodes of their own; their helpers must not escape into a let body.
+      const ownerMatch = ['function', 'bind', 'alternative'].includes(ancestor.type)
+        ? getChildByField(ancestor, 'match')
+        : null;
+      const start = startsAtStatement && bindingStatement
         ? bindingStatement.startPosition
-        : ancestor.startPosition;
+        : ownerMatch?.startPosition ?? ancestor.startPosition;
       const end = ancestor.endPosition;
-      return `haskell-lexical-range:${start.row + 1}:${start.column}:${end.row + 1}:${end.column}`;
+      const decorators = [
+        `haskell-lexical-range:${start.row + 1}:${start.column}:${end.row + 1}:${end.column}`,
+      ];
+      if (ancestor.type === 'list_comprehension' && bindingStatement) {
+        // The output precedes qualifiers in source but sees every binder.
+        // Keep the enclosing span for nested-scope precedence and exclude the
+        // gap containing qualifiers that precede this sequential let binding.
+        const output = getChildByField(ancestor, 'expression');
+        if (output) {
+          const gapStart = output.endPosition;
+          const gapEnd = bindingStatement.startPosition;
+          decorators.push(
+            `haskell-lexical-exclusion:${gapStart.row + 1}:${gapStart.column}:${gapEnd.row + 1}:${gapEnd.column}`,
+          );
+        }
+      }
+      return decorators;
     }
     ancestor = ancestor.parent;
   }
-  return null;
+  return [];
 }
 
 function groupedNode(key: string, ctx: ExtractorContext) {
@@ -1223,8 +1254,16 @@ function isLexicallyBound(
       if (patternContainsName(synonym, name, source, node.startIndex)) return true;
     }
     if (ancestor.type === 'alternative') {
+      const pattern = getChildByField(ancestor, 'pattern');
+      const whereBinds = getChildByField(ancestor, 'binds');
+      // An alternative's where declarations shadow its pattern and outer
+      // bindings in the guards and RHS, but not in LHS view expressions.
+      if (whereBinds && !nodeContains(pattern, node)) {
+        const binding = bindingAt(whereBinds, name, source, null, stateOwner);
+        if (binding) return !binding.materializedNode;
+      }
       if (patternContainsName(
-        getChildByField(ancestor, 'pattern'),
+        pattern,
         name,
         source,
         node.startIndex,
@@ -1910,7 +1949,7 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
       ? isNameExported(node, ctx.source, name, ctx.nodes as object)
       : owner?.kind === 'trait' && isNameExported(node, ctx.source, name, ctx.nodes as object, owner.name),
     decorators: !isTopLevel && kind === 'function'
-      ? [lexicalRangeDecorator(node)].filter((value): value is string => value !== null)
+      ? lexicalRangeDecorators(node)
       : undefined,
   });
   if (!bindingNode) return true;
@@ -1959,7 +1998,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
       ? isNameExported(node, ctx.source, name, ctx.nodes as object)
       : parent?.kind === 'trait' && isNameExported(node, ctx.source, name, ctx.nodes as object, parent.name),
     decorators: !isTopLevel && kind === 'function'
-      ? [lexicalRangeDecorator(node)].filter((value): value is string => value !== null)
+      ? lexicalRangeDecorators(node)
       : undefined,
   });
   if (!functionNode) return true;

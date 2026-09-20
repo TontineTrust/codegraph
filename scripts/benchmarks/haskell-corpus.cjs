@@ -3,6 +3,7 @@
 // node haskell-corpus.cjs ENGINE_ROOT CORPUS_COPY OUTPUT_JSON OPTIONS_JSON
 // Options: { queries: string[], editFile?: string, explicitExports?: boolean,
 //   editReplacementFile?: string, skipSyncEdits?: boolean, config?: object,
+//   bodyEdit?: { from: string, to: string }, importEdit?: { from: string, to: string },
 //   integrityCheck?: 'quick_check' | 'integrity_check' }
 // Optional HASKELL_PROFILE=1 measures canonical-origin exports without changing
 // ResolutionContext identity or the engine's cache ownership.
@@ -136,6 +137,20 @@ function fingerprint() {
 
 }
 function sameFingerprint(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function databaseSize() {
+  return Object.fromEntries(['codegraph.db', 'codegraph.db-wal'].map(name => {
+    const file = path.join(root, '.codegraph', name);
+    return [name, fs.existsSync(file) ? fs.statSync(file).size : 0];
+  }));
+}
+function replaceOnce(source, replacement) {
+  if (!replacement || typeof replacement.from !== 'string' || !replacement.from
+    || typeof replacement.to !== 'string'
+    || source.split(replacement.from).length !== 2) {
+    throw new Error('Edit requires one exact, nonempty source match.');
+  }
+  return source.replace(replacement.from, () => replacement.to);
+}
 // Capture only the actual compact Flow list. The following dynamic-boundary
 // and source sections can contain implementation snippets, so never include
 // them. Guard annotations also quote conditions from the source; omit those.
@@ -280,13 +295,19 @@ async function editAndRestore(kind, changedSource) {
     report.initCpu = process.cpuUsage(initCpu);
     activePhase = 'indexing';
     const indexStart = performance.now(), indexCpu = process.cpuUsage();
-    let lastProgress = 0, lastPhase;
+    let lastProgress = 0, lastPhase, phaseStarted = indexStart;
+    report.indexPhases = [];
     report.indexed = await graph.indexAll({ onProgress: p => {
       const now = performance.now();
+      if (p.phase !== lastPhase) {
+        if (lastPhase) report.indexPhases.push({ phase: lastPhase, wallMs: now - phaseStarted });
+        phaseStarted = now;
+      }
       if (p.phase !== lastPhase || now - lastProgress >= 1000 || p.current === p.total) {
         progress('index-progress', { progress: p }); lastProgress = now; lastPhase = p.phase;
       }
     } });
+    if (lastPhase) report.indexPhases.push({ phase: lastPhase, wallMs: performance.now() - phaseStarted });
     report.indexMs = performance.now() - indexStart;
     report.indexCpu = process.cpuUsage(indexCpu);
     report.indexMaxRSSKiB = process.resourceUsage().maxRSS;
@@ -294,6 +315,7 @@ async function editAndRestore(kind, changedSource) {
     checkpoint(); // Keep completed index metrics even if later verification is interrupted.
     activePhase = 'verification';
     report.before = fingerprint();
+    report.initialDatabaseSize = databaseSize();
     report.stats = graph.getStats();
     report.fileErrors = rows("SELECT path, errors FROM files WHERE errors IS NOT NULL AND errors <> '[]'");
     report.languages = rows('SELECT language, COUNT(*) AS files FROM files GROUP BY language');
@@ -320,12 +342,15 @@ async function editAndRestore(kind, changedSource) {
     }
     if (editPath) {
       await editAndRestore('comment', originalSource + '\n-- CodeGraph disposable corpus benchmark comment.\n');
+      if (options.bodyEdit) await editAndRestore('body', replaceOnce(originalSource, options.bodyEdit));
+      if (options.importEdit) await editAndRestore('import', replaceOnce(originalSource, options.importEdit));
       const replacement = options.editReplacementFile
         ? fs.readFileSync(options.editReplacementFile, 'utf8') : topologySource(originalSource);
       await editAndRestore('topology', replacement);
     }
     await recordFlows();
     report.after = fingerprint();
+    report.finalDatabaseSize = databaseSize();
     report.stable = sameFingerprint(report.before, report.after);
     report.ok = report.stable && report.warnings.length === 0 && report.flows.every(flow => !flow.isError);
     if (!report.ok) process.exitCode = 1;

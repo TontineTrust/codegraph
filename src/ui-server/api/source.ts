@@ -38,6 +38,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { FileRecord } from '../../types';
 import type { CodeGraph } from '../../index';
+import { readSourceSync } from '../../source-reader';
 import { resolveProjectFile } from '../security';
 import { highlightLines, type HighlightResult } from '../highlight';
 import { ApiError, badRequest, intParam, notFound, textParam } from './respond';
@@ -178,7 +179,8 @@ export function readIndexedFileText(
     const absolute = resolveProjectFile(projectRoot, found.storedPath);
     const stats = fs.statSync(absolute);
     if (!stats.isFile() || stats.size > maxBytes) return null;
-    return fs.readFileSync(absolute, 'utf8');
+    const source = readSourceSync(absolute, maxBytes);
+    return source.stats.size > maxBytes ? null : source.content;
   } catch {
     return null;
   }
@@ -210,8 +212,9 @@ export function hasDriftedOnDisk(
       return false;
     }
     if (stats.size > MAX_SOURCE_BYTES) return true;
-    const content = fs.readFileSync(absolute, 'utf-8');
-    return createHash('sha256').update(content).digest('hex') !== record.contentHash;
+    const source = readSourceSync(absolute, MAX_SOURCE_BYTES);
+    return source.stats.size > MAX_SOURCE_BYTES
+      || createHash('sha256').update(source.content).digest('hex') !== record.contentHash;
   } catch {
     return false;
   }
@@ -249,7 +252,11 @@ export function readFileShape(
     if (stats.size > MAX_SOURCE_BYTES) {
       return { drift: false, totalLines: null, reason: 'The file is too large to read here.' };
     }
-    const content = fs.readFileSync(absolute, 'utf-8');
+    const source = readSourceSync(absolute, MAX_SOURCE_BYTES);
+    if (source.stats.size > MAX_SOURCE_BYTES) {
+      return { drift: false, totalLines: null, reason: 'The file is too large to read here.' };
+    }
+    const content = source.content;
     const drift = createHash('sha256').update(content).digest('hex') !== record.contentHash;
     return {
       drift,
@@ -383,8 +390,17 @@ export async function buildSource(
 
   let content: string;
   try {
-    content = fs.readFileSync(absolute, 'utf-8');
+    const source = readSourceSync(absolute, MAX_SOURCE_BYTES);
+    // A writer can grow the source after the preliminary stat above. Retain
+    // the same 400 response, without allocating or rendering its extra bytes.
+    if (source.stats.size > MAX_SOURCE_BYTES) {
+      throw badRequest(
+        `${base.file} is ${Math.round(source.stats.size / 1024 / 1024)} MB — too large to serve as source.`
+      );
+    }
+    content = source.content;
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     throw new ApiError(
       'internal',
       `Could not read ${base.file}: ${err instanceof Error ? err.message : String(err)}`

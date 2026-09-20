@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'fs';
+import { readSourceTextSync } from '../source-reader';
 import * as path from 'path';
 import {
   Node,
@@ -1269,7 +1270,7 @@ export class ContextBuilder {
     }
 
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const content = readSourceTextSync(filePath);
       const lines = content.split('\n');
 
       // Extract lines (1-indexed to 0-indexed)

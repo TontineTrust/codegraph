@@ -13,7 +13,7 @@ vi.mock('child_process', async importOriginal => {
 });
 vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
-  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+  return { ...actual, openSync: vi.fn(actual.openSync) };
 });
 
 describe('git index currency across commits and restores (#1829)', () => {
@@ -132,12 +132,14 @@ describe('git index currency across commits and restores (#1829)', () => {
 
   it('keeps a committed path pending when sync cannot read it', async () => {
     write('new.ts', 'newSymbol'); commit();
-    const real = fs.readFileSync;
+    // Source reads now open a bounded descriptor instead of readFileSync.
+    // Keep injecting the same transient inability to read this source only.
+    const real = fs.openSync;
     let injected = 0;
-    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) => {
+    vi.spyOn(fs, 'openSync').mockImplementation(((file: any, ...args: any[]) => {
       if (String(file) === path.join(root, 'new.ts')) { injected++; throw new Error('Injected transient read error'); }
       return (real as any)(file, ...args);
-    }) as typeof fs.readFileSync);
+    }) as typeof fs.openSync);
     await cg.sync();
     expect(injected).toBeGreaterThan(0);
     expect(symbols('newSymbol')).not.toContain('newSymbol');
