@@ -7,9 +7,17 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { isWslWindowsDrive } from './sync/watch-policy';
 
 /** The default per-project data directory name. */
-const DEFAULT_CODEGRAPH_DIR = '.codegraph';
+export const DEFAULT_CODEGRAPH_DIR = '.codegraph';
+
+/**
+ * The data directory name WSL gives a fresh project on a Windows drive, so it
+ * never shares one index with CodeGraph on Windows (issue #995). Indexing and
+ * watching skip every `.codegraph-*` sibling on both sides (#636).
+ */
+export const WSL_CODEGRAPH_DIR = '.codegraph-wsl';
 
 let warnedBadDirName = false;
 
@@ -80,10 +88,37 @@ export function isCodeGraphDataDir(name: string): boolean {
 }
 
 /**
+ * The data directory name for one project: {@link codeGraphDirName}, except
+ * for a project on a Windows drive under WSL (`/mnt/c/...`) with no
+ * `CODEGRAPH_DIR` set. Windows-native CodeGraph opens `.codegraph` in that
+ * same tree, and SQLite's locking doesn't hold across the 9p/DrvFs bridge, so
+ * the two sharing one index fails with "disk I/O error" (issue #995). There:
+ *
+ *   1. `.codegraph-wsl/` exists → it. Once WSL has its own index it keeps it,
+ *      even after Windows builds a `.codegraph` beside it.
+ *   2. `.codegraph/codegraph.db` exists → `.codegraph`. An index built before
+ *      this default is kept rather than silently rebuilt somewhere else.
+ *   3. neither → `.codegraph-wsl`, so a fresh WSL index never shares.
+ *
+ * Every other host keeps the plain name without a stat: the WSL check is
+ * cached per process.
+ */
+export function codeGraphDirNameFor(projectRoot: string): string {
+  if (process.env.CODEGRAPH_DIR?.trim() || !isWslWindowsDrive(projectRoot)) return codeGraphDirName();
+  try {
+    if (fs.statSync(path.join(projectRoot, WSL_CODEGRAPH_DIR)).isDirectory()) return WSL_CODEGRAPH_DIR;
+  } catch {
+    // absent — fall through
+  }
+  if (fs.existsSync(path.join(projectRoot, DEFAULT_CODEGRAPH_DIR, 'codegraph.db'))) return DEFAULT_CODEGRAPH_DIR;
+  return WSL_CODEGRAPH_DIR;
+}
+
+/**
  * Get the .codegraph directory path for a project
  */
 export function getCodeGraphDir(projectRoot: string): string {
-  return path.join(projectRoot, codeGraphDirName());
+  return path.join(projectRoot, codeGraphDirNameFor(projectRoot));
 }
 
 /**
@@ -153,6 +188,46 @@ export function unsafeIndexRootReason(projectRoot: string): string | null {
     return 'a parent of your home directory';
   }
   return null;
+}
+
+/**
+ * `dev:ino` for a path, or null if it can't be stat'd or the platform doesn't
+ * report a usable inode. Read as bigints: WSL DrvFs (`/mnt/c`) reports inodes
+ * above 2^53, where a plain number rounds nearby inodes onto one value. Windows
+ * st_ino is unreliable across handle reopens, so we deliberately return null
+ * there — the deleted-but-open-inode hazard this guards (#925) is a POSIX
+ * file-semantics issue that doesn't arise on Windows (an open file can't be
+ * unlinked).
+ */
+export function statInode(p: string): string | null {
+  if (process.platform === 'win32') return null;
+  try {
+    const s = fs.statSync(p, { bigint: true });
+    return `${s.dev}:${s.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether two resolved index roots are one index spelled two ways — a symlinked
+ * checkout, or a case-variant on a case-insensitive mount (macOS, NTFS, WSL
+ * DrvFs `/mnt/c`), where `realpathSync` keeps the caller's casing (#1057).
+ * Compares the identity of both data directories as they are NOW, so an inode
+ * reused after a delete can't match: the deleted root no longer stats. Windows
+ * has no usable inode, so it compares the on-disk-cased native realpaths.
+ */
+export function isSameIndexRoot(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (process.platform === 'win32') {
+    try {
+      return fs.realpathSync.native(getCodeGraphDir(a)) === fs.realpathSync.native(getCodeGraphDir(b));
+    } catch {
+      return false;
+    }
+  }
+  const id = statInode(getCodeGraphDir(a));
+  return id !== null && id === statInode(getCodeGraphDir(b));
 }
 
 export function findNearestCodeGraphRoot(startPath: string): string | null {
@@ -310,8 +385,9 @@ const NOT_WORD_AFTER = /(?![\p{L}\p{N}_])/u.source;
  * Structural keywords matched as EXACT words (boundary on both sides): short
  * or ambiguous tokens where prefix matching would false-positive ("flow" in
  * "flower", "path" in "pathological"). Grouped by language; a term appears once
- * even when several languages share it ("como" is Portuguese for how AND
- * unaccented-typed Spanish "cómo").
+ * even when several languages share it. Ambiguous everyday words like PT/ES
+ * "como" and DE "wie" are excluded: the hook instead requires another strong
+ * keyword, a verified code token, or indexed prose segments (#1654).
  */
 const STRUCTURAL_WORDS = [
   // English — the pre-#1126 list minus what moved to STRUCTURAL_STEMS: the
@@ -320,17 +396,16 @@ const STRUCTURAL_WORDS = [
   'how', 'where', 'tracing', 'flows?', 'paths?', 'reach(?:es|ed)?', 'wired?', 'breaks?', 'why does',
   // French (où=where, flux=flow, chemin=path, casse=breaks)
   'comment', 'où', 'flux', 'chemins?', 'casse',
-  // Spanish (cómo/como=how, dónde/donde=where, flujo=flow, ruta/camino=path,
+  // Spanish (cómo=how, dónde/donde=where, flujo=flow, ruta/camino=path,
   // rompe=breaks, llaman / quién llama = call(s) — bare "llama" is excluded:
   // it's also the animal/model name in English prompts)
   'cómo', 'dónde', 'donde', 'flujos?', 'rutas?', 'caminos?', 'rompe', 'llaman', 'quién llama', 'quien llama',
-  // Portuguese (como=how — also covers unaccented Spanish; onde=where,
-  // fluxo=flow, caminho=path)
-  'como', 'onde', 'fluxos?', 'caminhos?',
-  // German (wie=how, wo/woher/wohin=where, Pfad=path, Fluss/Ablauf=flow,
+  // Portuguese (onde=where, fluxo=flow, caminho=path)
+  'onde', 'fluxos?', 'caminhos?',
+  // German (wo/woher/wohin=where, Pfad=path, Fluss/Ablauf=flow,
   // bricht/kaputt=breaks, ruft=calls, hängt=depends — "hängt … von X ab"
   // splits the separable verb "abhängen", so the "abhäng" stem can't catch it)
-  'wie', 'wo', 'woher', 'wohin', 'pfade?', 'fluss', 'ablauf', 'bricht', 'kaputt', 'ruft', 'hängt',
+  'wo', 'woher', 'wohin', 'pfade?', 'fluss', 'ablauf', 'bricht', 'kaputt', 'ruft', 'hängt',
   // Italian (dove=where, flusso=flow, percorso/i=path)
   'dove', 'flusso', 'percors[oi]',
   // Russian (как=how, где=where, путь/пути=path, работает=works)
@@ -898,4 +973,15 @@ export function validateDirectory(projectRoot: string): {
     valid: errors.length === 0,
     errors,
   };
+}
+
+/**
+ * Claude Code injects `<task-notification>…</task-notification>` blocks as
+ * `user` messages when a background agent finishes, and UserPromptSubmit
+ * hooks receive them exactly like typed prompts (#1832). The whole prompt
+ * must be that single envelope; a user question that merely mentions the
+ * marker is still a prompt.
+ */
+export function isTaskNotification(prompt: string): boolean {
+  return /^\s*<task-notification>[\s\S]*<\/task-notification>\s*$/.test(prompt);
 }
