@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE } from '../types';
 import { QueryBuilder } from '../db/queries';
+import { SynthesisStage } from '../db/synthesis-stage';
 import {
   UnresolvedRef,
   ResolvedRef,
@@ -15,11 +16,14 @@ import {
   ResolutionContext,
   FrameworkResolver,
   ImportMapping,
-  SUPERTYPE_TARGET_KINDS,
+  isSupertypeTarget,
   isInheritanceRef,
   isImportableKind,
+  CPP_DEFINE_SIGNATURE,
 } from './types';
-import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesKnownFamily, dumpNameMatcherProfile, clearNameMatcherMemos } from './name-matcher';
+import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos } from './name-matcher';
+import { isVisibleCppMacro, clearCppMacroVisibility } from './cpp-macro-visibility';
+import { isCppConstructorRef, matchCppConstructor } from './cpp-constructor';
 import { resolveViaImport, resolvePhpImportedStaticCall, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
 import { haskellCombinatorHasCanonicalOrigin } from './haskell-combinators';
 import { ResolverPool, minRefsForPool } from './resolver-pool';
@@ -27,6 +31,7 @@ import { resolveAliasBinding } from './alias-binding';
 import { detectFrameworks } from './frameworks';
 import { synthesizeCallbackEdges } from './callback-synthesizer';
 import { createYielder, type MaybeYield } from './cooperative-yield';
+import { MAX_SOURCE_FILE_SIZE_BYTES } from '../file-limits';
 import { loadProjectAliases, type AliasMap } from './path-aliases';
 import { loadGoModule, type GoModule } from './go-module';
 import { loadWorkspacePackages, type WorkspacePackages } from './workspace-packages';
@@ -429,6 +434,7 @@ export class ReferenceResolver {
     if (this.context) {
       clearImportResolverMemos(this.context);
       clearNameMatcherMemos(this.context);
+      clearCppMacroVisibility(this.context);
     }
   }
 
@@ -439,6 +445,14 @@ export class ReferenceResolver {
     }
     const fullPath = path.join(this.projectRoot, filePath);
     try {
+      // Import resolvers may follow package metadata to an archive (`file:*.har`,
+      // for example). Reject anything extraction would not accept before UTF-8
+      // decoding can multiply a large binary blob into gigabytes of V8 heap.
+      const stats = fs.statSync(fullPath);
+      if (!stats.isFile() || stats.size > MAX_SOURCE_FILE_SIZE_BYTES) {
+        this.fileCache.set(filePath, null);
+        return null;
+      }
       const content = fs.readFileSync(fullPath, 'utf-8');
       this.fileCache.set(filePath, content);
       return content;
@@ -642,7 +656,9 @@ export class ReferenceResolver {
         if (hit && hit.gen === this.supertypeGen) return hit.supers;
         const typeNodes = this.context
           .getNodesByName(typeName)
-          .filter((n) => SUPERTYPE_BEARING_KINDS.has(n.kind) && n.language === language);
+          // Scala singletons can inherit members even though they cannot be parents.
+          .filter((n) => n.language === language && (SUPERTYPE_BEARING_KINDS.has(n.kind) ||
+            (n.language === 'scala' && n.kind === 'module')));
         let supers: string[];
         if (typeNodes.length === 0) {
           supers = [];
@@ -1498,7 +1514,14 @@ export class ReferenceResolver {
    * the alias names (see ./alias-binding), regardless of the strategy.
    */
   resolveOne(ref: UnresolvedRef): ResolvedRef | null {
-    const resolved = this.gateTargetKind(this.resolveOneInner(ref), ref);
+    // A C/C++ "call" whose name is a function-like macro visible in this
+    // translation unit is a macro expansion, not a call — it must never bind
+    // to a same-named function in another file (#1838).
+    if (isVisibleCppMacro(ref, this.context)) return null;
+    const candidate = this.gateTargetKind(this.resolveOneInner(ref), ref);
+    const resolved = candidate?.resolvedBy === 'framework'
+      ? this.gateFrameworkLanguage(candidate, ref)
+      : this.gateLanguage(candidate, ref);
     if (!resolved || ref.referenceKind !== 'calls') return resolved;
 
     const target = this.queries.getNodeById(resolved.targetNodeId);
@@ -1509,11 +1532,11 @@ export class ReferenceResolver {
     const forwarded = resolveAliasBinding(target, memberName, this.context);
     if (!forwarded || forwarded.id === resolved.targetNodeId) return resolved;
 
-    return {
+    return this.gateLanguage({
       ...resolved,
       targetNodeId: forwarded.id,
       confidence: Math.min(resolved.confidence, 0.85),
-    };
+    }, ref);
   }
 
   /** Resolve the operand as a value, then prove the combinator's execution semantics. */
@@ -1553,6 +1576,9 @@ export class ReferenceResolver {
     if (combinator) {
       return this.resolveHaskellCombinator(ref, combinator.slice(HASKELL_COMBINATOR_PREFIX.length));
     }
+    // A local C++ object construction (`T obj(args)`, ref `ns::T::T/1`)
+    // resolves ONLY to a constructor of the lexically nearest `T` (#1839).
+    if (isCppConstructorRef(ref)) return matchCppConstructor(ref, this.context);
 
     // Skip built-in/external references
     if (this.isBuiltInOrExternal(ref)) {
@@ -1633,6 +1659,9 @@ export class ReferenceResolver {
       if (ref.referenceName.startsWith('this.')) {
         return this.gateLanguage(this.resolveThisMemberFnRef(ref), ref);
       }
+      if ((ref.language === 'python' || ref.language === 'go') && ref.referenceName.includes('.')) {
+        return this.gateLanguage(matchFunctionRef(ref, this.context), ref);
+      }
       const viaImport = this.gateLanguage(resolveViaImport(ref, this.context), ref);
       if (viaImport) {
         const target = this.queries.getNodeById(viaImport.targetNodeId);
@@ -1687,9 +1716,7 @@ export class ReferenceResolver {
 
     // Strategy 1: Try framework-specific resolution. Cross-language bridges
     // are deliberately preserved (Drupal `routing.yml` → PHP controller, RN
-    // JS → native `calls`) — `gateFrameworkLanguage` drops type/import edges
-    // between two KNOWN families and all accidental Haskell crossings (there
-    // is no supported Haskell framework/FFI bridge).
+    // JS → native `calls`); other code references obey the shared family gate.
     const tFw = this.profileStages ? process.hrtime.bigint() : 0n;
     let fwEarly: ResolvedRef | null = null;
     for (const framework of this.frameworks) {
@@ -2401,7 +2428,8 @@ export class ReferenceResolver {
        *  each per-batch DELETE's B-tree work (DatabaseConnection.beginBulkRefLoad). */
       refIndexLoad?: { begin: () => void; end: () => void | Promise<void> };
       backpressure?: () => Promise<void> | null;
-    }
+    },
+    synthesize: boolean = true
   ): Promise<ResolutionResult> {
     // Resolution runs on the indexer's MAIN thread, and the #850 liveness
     // watchdog SIGKILLs a process whose event loop stalls past its window (60s
@@ -2823,7 +2851,7 @@ export class ReferenceResolver {
     // loop. See docs/design/callback-edge-synthesis.md.
     const tSynth = Date.now();
     try {
-      aggregateStats.byMethod['callback-synthesis'] = await synthesizeCallbackEdges(
+      if (synthesize) aggregateStats.byMethod['callback-synthesis'] = await synthesizeCallbackEdges(
         this.queries,
         this.context,
         onSynthesisProgress,
@@ -2849,6 +2877,25 @@ export class ReferenceResolver {
       unresolved: [],
       stats: aggregateStats,
     };
+  }
+
+  /** Replace synthesis only after every base-resolution pass has finished. */
+  async refreshSynthesis(
+    dbPath: string,
+    onProgress?: (done: number, total: number) => void,
+    backpressure?: () => Promise<void> | null
+  ): Promise<number> {
+    this.clearCaches();
+    const stage = new SynthesisStage(dbPath);
+    try {
+      const fresh = new ReferenceResolver(this.projectRoot, stage.queries);
+      const count = await synthesizeCallbackEdges(stage.queries, fresh.context, onProgress, null, backpressure);
+      await stage.publish(backpressure);
+      return count;
+    } finally {
+      stage.close();
+      this.clearCaches();
+    }
   }
 
   /**
@@ -3043,18 +3090,6 @@ export class ReferenceResolver {
     return node?.language || 'unknown';
   }
 
-  /**
-   * Drop an import/name-strategy resolution that crosses a language family.
-   * Two regimes (mirrors `applyLanguageGate`'s candidate filter):
-   *  - `references` (type usage): STRICT — a `Type.member` static read names a
-   *    same-family type, never a coincidentally same-named symbol in another
-   *    language. Drops any non-same-family target.
-   *  - `imports` (import binding / `#include`): both-known — a C++ `#include
-   *    "X.h"` must not resolve to a same-named ObjC header on another platform
-   *    (basename collision), but a singleton-family / SFC language (`vue` →
-   *    `.ts`) importing across is left alone.
-   * Applies to the import (strategy 2) + name-match (strategy 3) results.
-   */
   /**
    * Collect the `@using` namespaces in scope for a `.razor`/`.cshtml` file: its
    * own `@using` directives plus every `_Imports.razor` from the file's folder up
@@ -3369,12 +3404,28 @@ export class ReferenceResolver {
    *     referent. Without this, filtering by kind alone just relocates the
    *     false edge onto the next same-named local type.
    *
-   * Direction is one-way: this only ever REMOVES an edge, never adds one. A
-   * dropped ref stays in `unresolved_refs` as `failed`, which is the honest
-   * record for a supertype that lives outside the repo — silent beats wrong.
+   * One exception to (1): a TypeScript VALUE that shares its name with a type
+   * in the same file. `export const IFoo = createDecorator<IFoo>('foo')` beside
+   * `export interface IFoo` is how VS Code declares every service, and an
+   * import of `IFoo` resolves to the file with both — a strategy that takes the
+   * first export of that name gets the value. The strategy found the right
+   * file and name; the type declared there is the supertype, so the edge moves
+   * to it rather than being dropped (dropping it lost ~900 `implements` edges
+   * on vscode).
+   *
+   * Otherwise this only ever REMOVES an edge, never adds one. A dropped ref
+   * stays in `unresolved_refs` as `failed`, which is the honest record for a
+   * supertype that lives outside the repo — silent beats wrong.
    */
   private gateTargetKind(result: ResolvedRef | null, ref: UnresolvedRef): ResolvedRef | null {
     if (!result) return result;
+
+    // A `#define` is a value, never a callee (#1838): a macro defined only in
+    // an unrelated file is not what `NAME(x)` here expands to either.
+    if (ref.referenceKind === 'calls') {
+      const target = this.queries.getNodeById(result.targetNodeId);
+      if (target?.kind === 'constant' && CPP_DEFINE_SIGNATURE.test(target.signature ?? '')) return null;
+    }
 
     // An `imports` reference names something importable — never a member that
     // only exists inside a type.
@@ -3385,47 +3436,48 @@ export class ReferenceResolver {
 
     if (!isInheritanceRef(ref)) return result;
     const target = this.queries.getNodeById(result.targetNodeId);
-    if (target && !SUPERTYPE_TARGET_KINDS.has(target.kind)) return null;
+    if (target && !isSupertypeTarget(target)) {
+      const type = this.sameNamedTypeOfValue(target);
+      if (!type) return null;
+      result = { ...result, targetNodeId: type.id };
+    }
     if (isBoundToOutOfRepoImport(ref, this.context)) return null;
     return result;
+  }
+
+  /** The one supertype-kind node a TypeScript value shares its name and file with. */
+  private sameNamedTypeOfValue(value: Node): Node | null {
+    if (value.kind !== 'constant' && value.kind !== 'variable') return null;
+    if (value.language !== 'typescript' && value.language !== 'tsx') return null;
+    const types = this.context
+      .getNodesInFile(value.filePath)
+      .filter((n) => n.name === value.name && isSupertypeTarget(n));
+    return types.length === 1 ? types[0]! : null;
   }
 
   private gateLanguage(result: ResolvedRef | null, ref: UnresolvedRef): ResolvedRef | null {
     if (!result) return result;
     const tgt = this.getLanguageFromNodeId(result.targetNodeId);
-    if (!tgt || !ref.language) return result;
-    // No Haskell FFI/framework bridge is modelled. A result crossing this
-    // boundary is therefore always a coincidental symbol-name match, whether
-    // it came from a generic matcher or a specialized JVM/Razor/import path.
+    // Haskell has no supported framework or FFI bridge, including markup.
     if (this.isUnsupportedHaskellBoundary(tgt, ref.language)) return null;
-    if ((ref.referenceKind === 'references' || ref.referenceKind === 'function_ref') && !sameLanguageFamily(tgt, ref.language)) return null;
-    if (ref.referenceKind === 'imports' && crossesKnownFamily(tgt, ref.language)) return null;
-    return result;
+    return gateLanguageMatch(result, ref, this.context);
   }
 
   /**
-   * Drop a FRAMEWORK-strategy resolution that crosses an unsupported language
-   * boundary. Haskell has no framework or FFI resolver, so any Haskell↔other
-   * language result here is a name collision, including `calls` accidentally
-   * claimed by React's hook matcher. For other languages, keep the historical
-   * behavior: legitimate bridges are `calls` (RN/Expo JS → native) or
-   * config↔code edges, while a type/import edge between two known families is
-   * always coincidental.
+   * Framework calls carry bridge evidence (RN/Expo JS → native). Other
+   * framework results obey the same code-family boundary as name matches;
+   * markup/config transitions remain open outside Haskell.
    */
   private gateFrameworkLanguage(result: ResolvedRef | null, ref: UnresolvedRef): ResolvedRef | null {
     if (!result) return result;
-    // No framework resolver models Haskell. Letting React/Vue/etc. inspect a
-    // Haskell `use*`/component-shaped name would bypass Haskell's import,
-    // hiding, and ambiguity rules even when the eventual target is Haskell.
-    // Lexical Haskell resolution already ran above; imports run immediately
-    // after frameworks, so reject this strategy wholesale for Haskell sources.
+    // Framework name matches must not bypass Haskell import/hiding rules.
     if (ref.language === 'haskell') return null;
     const tgt = this.getLanguageFromNodeId(result.targetNodeId);
     if (this.isUnsupportedHaskellBoundary(tgt, ref.language)) return null;
-    if (ref.referenceKind !== 'references' && ref.referenceKind !== 'imports') return result;
+    if (ref.referenceKind === 'calls') return result;
     // Package imports cannot target prose found by a framework's name lookup.
     if (ref.referenceKind === 'imports' && (tgt as string) === 'markdown' && (ref.language as string) !== 'markdown') return null;
-    if (tgt && ref.language && crossesKnownFamily(tgt, ref.language)) return null;
+    if (tgt && ref.language && crossesCodeBoundary(tgt, ref.language)) return null;
     return result;
   }
 
