@@ -21,10 +21,12 @@ import {
   isImportableKind,
   CPP_DEFINE_SIGNATURE,
 } from './types';
-import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos } from './name-matcher';
+import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope } from './name-matcher';
 import { isVisibleCppMacro, clearCppMacroVisibility } from './cpp-macro-visibility';
 import { isCppConstructorRef, matchCppConstructor } from './cpp-constructor';
-import { resolveViaImport, resolvePhpImportedStaticCall, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
+import { gateSwiftTypeTarget, clearSwiftTypeVisibility, swiftExtendedConformances } from './swift-type-visibility';
+import { gateTypeParameter, clearTypeParameterMemos } from './type-parameters';
+import { resolveViaImport, resolvePhpImportedStaticCall, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, isExternalImport, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
 import { haskellCombinatorHasCanonicalOrigin } from './haskell-combinators';
 import { ResolverPool, minRefsForPool } from './resolver-pool';
 import { resolveAliasBinding } from './alias-binding';
@@ -40,11 +42,23 @@ import { lexicalPathWithinRoot } from '../utils';
 import type { ReExport } from './types';
 import { LRUCache } from './lru-cache';
 import { JS_BUILT_INS } from './js-builtins';
+import { builtinModules } from 'module';
+import { parse as parseJsonc } from 'jsonc-parser';
+
+const NODE_BUILTINS = new Set(builtinModules);
 
 /** Node kinds that can declare supertypes (extends/implements). */
 const SUPERTYPE_BEARING_KINDS = new Set<Node['kind']>([
   'class', 'struct', 'interface', 'trait', 'protocol', 'enum',
 ]);
+
+/**
+ * The only edges resolving a reference reads (getSupertypes' walk). The batch
+ * loop commits a batch that made any of these before the next batch fans out;
+ * its other edges land while that batch resolves. A resolution strategy that
+ * reads another edge kind must be added here.
+ */
+const RESOLUTION_READ_EDGE_KINDS: Edge['kind'][] = ['implements', 'extends'];
 
 // SUPERTYPE_TARGET_KINDS (the kinds an extends/implements edge may TARGET)
 // lives in ./types — the name-matcher needs the same set to restrict its
@@ -249,6 +263,12 @@ export class ReferenceResolver {
   private haskellModuleNodeCache: LRUCache<string, Node | null>;
   private haskellRecordMembersCache: LRUCache<string, Map<string, Node[]>>;
   private haskellRecordFieldCache: LRUCache<string, Omit<ResolvedRef, 'original'> | null>;
+  // id → node for the resolver's own point reads. Every resolved reference
+  // re-reads its target a few times (kind gate, language gate, alias
+  // following, edge creation) and targets recur ~5× on large repos; the query
+  // layer's cache is too small for that working set. Same stable window as the
+  // name caches above; absent ids are not cached.
+  private nodeByIdCache: LRUCache<string, Node>;
   private methodMatchCache: LRUCache<string, Node[]>; // lang\0Type::method → matching method nodes
   // Per-(language, methodName) owner index for getMethodMatches: buckets a
   // method name's candidates by their qualifiedName's last two segments so a
@@ -285,6 +305,8 @@ export class ReferenceResolver {
   // resolution pass (same lifetime assumption as nameCache); clearCaches() resets
   // it between passes. Callers must treat the returned array as read-only.
   private nodesByKindCache = new Map<Node['kind'], Node[]>();
+  // Filesystem existence probes behind context.fileExists (paths not in knownFiles).
+  private fileExistsMemo = new Map<string, boolean>();
   private knownNames: Set<string> | null = null; // all known symbol names for fast pre-filtering
   private knownFiles: Set<string> | null = null;
   private cachesWarmed = false;
@@ -315,6 +337,7 @@ export class ReferenceResolver {
     // Split-lines arrays are heavier than content strings; refs arrive
     // file-ordered, so a small cache still hits nearly always.
     this.fileLinesCache = new LRUCache(contentLimit);
+    this.nodeByIdCache = new LRUCache(Math.max(limit * 4, 20_000));
     this.methodMatchCache = new LRUCache(limit);
     this.haskellNodeByIdCache = new LRUCache(limit);
     this.haskellParentCache = new LRUCache(limit);
@@ -404,6 +427,15 @@ export class ReferenceResolver {
     this.cachesWarmed = true;
   }
 
+  /** `queries.getNodeById` through the resolver's own id → node cache. */
+  private nodeById(id: string): Node | null {
+    const cached = this.nodeByIdCache.get(id);
+    if (cached !== undefined) return cached;
+    const node = this.queries.getNodeById(id);
+    if (node) this.nodeByIdCache.set(id, node);
+    return node;
+  }
+
   /**
    * Clear internal caches
    */
@@ -416,6 +448,7 @@ export class ReferenceResolver {
     this.lowerNameCache.clear();
     this.qualifiedNameCache.clear();
     this.fileLinesCache.clear();
+    this.nodeByIdCache.clear();
     this.methodMatchCache.clear();
     this.haskellNodeByIdCache.clear();
     this.haskellParentCache.clear();
@@ -426,6 +459,8 @@ export class ReferenceResolver {
     this.supertypeMemo.clear();
     this.supertypeGen++;
     this.nodesByKindCache.clear();
+    this.fileExistsMemo.clear();
+    this.manifestScopes.clear();
     this.knownNames = null;
     this.knownFiles = null;
     this.cachesWarmed = false;
@@ -435,6 +470,8 @@ export class ReferenceResolver {
       clearImportResolverMemos(this.context);
       clearNameMatcherMemos(this.context);
       clearCppMacroVisibility(this.context);
+      clearSwiftTypeVisibility(this.context);
+      clearTypeParameterMemos(this.context);
     }
   }
 
@@ -464,16 +501,52 @@ export class ReferenceResolver {
   }
 
   /**
+   * `readFileCached(filePath)?.includes(needle)` for an ASCII needle, searched
+   * in the raw bytes: an ASCII byte sequence survives UTF-8 decoding
+   * unchanged, and decoding is most of reading a file nobody keeps.
+   */
+  private fileContains(filePath: string, needle: string): boolean {
+    if (this.fileCache.has(filePath)) return this.fileCache.get(filePath)?.includes(needle) ?? false;
+    const fullPath = path.join(this.projectRoot, filePath);
+    try {
+      const stats = fs.statSync(fullPath);
+      if (!stats.isFile() || stats.size > MAX_SOURCE_FILE_SIZE_BYTES) return false;
+      return fs.readFileSync(fullPath).includes(needle);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Create the resolution context
    */
   private createContext(): ResolutionContext {
     return {
       resolveImport: (ref) => resolveViaImport(ref, this.context),
+      isOutOfRepoImport: (source, fromFile, language) =>
+        isExternalImport(source, language, this.context) &&
+        resolveImportPath(source, fromFile, language, this.context) === null &&
+        this.isDeclaredOutsidePackage(source, fromFile),
       getNodesInFile: (filePath: string) => {
         if (!this.nodeCache.has(filePath)) {
           this.nodeCache.set(filePath, this.queries.getNodesByFile(filePath));
         }
         return this.nodeCache.get(filePath)!;
+      },
+
+      fileHasExportedNode: (filePath: string) => {
+        const cached = this.nodeCache.get(filePath);
+        return cached !== undefined ? cached.some((n) => n.isExported) : this.queries.fileHasExportedNode(filePath);
+      },
+
+      getExportedNodesInFile: (filePath: string) => {
+        const cached = this.nodeCache.get(filePath);
+        return cached !== undefined ? cached.filter((n) => n.isExported) : this.queries.getExportedNodesByFile(filePath);
+      },
+
+      getNodesInFileNamed: (filePath: string, name: string) => {
+        const cached = this.nodeCache.get(filePath);
+        return cached !== undefined ? cached.filter((n) => n.name === name) : this.queries.getNodesByFileAndName(filePath, name);
       },
 
       getNodesByName: (name: string) => {
@@ -585,17 +658,29 @@ export class ReferenceResolver {
         // calls per probe (~70x slower here). It would also be wrong to apply
         // — indexing deliberately follows in-root symlinks whose targets live
         // outside the root (#935), so only the `../` escape is refused.
+        // Memoized: import resolution probes the same candidate paths (every
+        // extension of a specifier) from every file that imports it, and the
+        // tree does not change within a resolution pass (same window as the
+        // file-content cache; dropped by clearCaches).
+        const probed = this.fileExistsMemo.get(filePath);
+        if (probed !== undefined) return probed;
         const fullPath = lexicalPathWithinRoot(this.projectRoot, filePath);
-        if (fullPath === null) return false;
-        try {
-          return fs.existsSync(fullPath);
-        } catch (error) {
-          logDebug('Error checking file existence', { filePath, error: String(error) });
-          return false;
+        let exists = false;
+        if (fullPath !== null) {
+          try {
+            exists = fs.existsSync(fullPath);
+          } catch (error) {
+            logDebug('Error checking file existence', { filePath, error: String(error) });
+          }
         }
+        if (this.fileExistsMemo.size >= 200_000) this.fileExistsMemo.clear();
+        this.fileExistsMemo.set(filePath, exists);
+        return exists;
       },
 
       readFile: (filePath: string) => this.readFileCached(filePath),
+
+      fileContains: (filePath: string, needle: string) => this.fileContains(filePath, needle),
 
       getFileLines: (filePath: string) => {
         const cached = this.fileLinesCache.get(filePath);
@@ -639,7 +724,7 @@ export class ReferenceResolver {
       },
 
       getNodeById: (id: string) => {
-        return this.queries.getNodeById(id);
+        return this.nodeById(id);
       },
 
       getSupertypes: (typeName: string, language) => {
@@ -665,9 +750,17 @@ export class ReferenceResolver {
         } else {
           const supertypes = new Set<string>();
           for (const tn of typeNodes) {
-            for (const edge of this.queries.getOutgoingEdges(tn.id, ['implements', 'extends'])) {
-              const target = this.queries.getNodeById(edge.target);
+            for (const edge of this.queries.getOutgoingEdges(tn.id, RESOLUTION_READ_EDGE_KINDS)) {
+              const target = this.nodeById(edge.target);
               if (target?.name && target.name !== typeName) supertypes.add(target.name);
+            }
+            // A Swift conformance to a type the project only extends (SwiftUI's
+            // `View`) resolves to nothing — the extension is not the type — yet
+            // the members its extensions add are still the conformer's.
+            if (language === 'swift') {
+              for (const name of swiftExtendedConformances(tn, this.context)) {
+                if (name !== typeName) supertypes.add(name);
+              }
             }
           }
           supers = [...supertypes];
@@ -1518,13 +1611,23 @@ export class ReferenceResolver {
     // translation unit is a macro expansion, not a call — it must never bind
     // to a same-named function in another file (#1838).
     if (isVisibleCppMacro(ref, this.context)) return null;
-    const candidate = this.gateTargetKind(this.resolveOneInner(ref), ref);
-    const resolved = candidate?.resolvedBy === 'framework'
-      ? this.gateFrameworkLanguage(candidate, ref)
-      : this.gateLanguage(candidate, ref);
+    // A Swift type reference never lands on an `extension X {}` node, nor on a
+    // nested type it cannot name bare (see ./swift-type-visibility).
+    // A name a declaration around the reference declares as a type parameter
+    // (`def f[A]`, `class Foo<T>`) is that parameter (see ./type-parameters).
+    const candidate = gateTypeParameter(
+      gateSwiftTypeTarget(this.gateTargetKind(this.resolveOneInner(ref), ref), ref, this.context),
+      ref,
+      this.context,
+    );
+    const scoped = this.gateRustScope(candidate, ref);
+    const resolved = this.gateSuperSelfCall(
+      scoped?.resolvedBy === 'framework' ? this.gateFrameworkLanguage(scoped, ref) : this.gateLanguage(scoped, ref),
+      ref,
+    );
     if (!resolved || ref.referenceKind !== 'calls') return resolved;
 
-    const target = this.queries.getNodeById(resolved.targetNodeId);
+    const target = this.nodeById(resolved.targetNodeId);
     if (!target) return resolved;
 
     const dot = ref.referenceName.lastIndexOf('.');
@@ -1664,7 +1767,7 @@ export class ReferenceResolver {
       }
       const viaImport = this.gateLanguage(resolveViaImport(ref, this.context), ref);
       if (viaImport) {
-        const target = this.queries.getNodeById(viaImport.targetNodeId);
+        const target = this.nodeById(viaImport.targetNodeId);
         if (
           target &&
           (target.kind === 'function' ||
@@ -1790,7 +1893,7 @@ export class ReferenceResolver {
     // matcher would link each `mkOption` call to whichever file's inherit
     // binding it happened to pick. Same-file matches only.
     if (nameResult) {
-      const target = this.queries.getNodeById(nameResult.targetNodeId);
+      const target = this.nodeById(nameResult.targetNodeId);
       // A definition its language makes file-local — a C `static`, a Kotlin
       // `private fun`, a Go unexported name in another package, a Rust
       // non-`pub` item outside its module subtree — cannot be what a name in
@@ -1869,9 +1972,9 @@ export class ReferenceResolver {
 
       // Promote "extends" to "implements" when a class/struct targets an interface
       if (kind === 'extends') {
-        const targetNode = this.queries.getNodeById(ref.targetNodeId);
+        const targetNode = this.nodeById(ref.targetNodeId);
         if (targetNode && (targetNode.kind === 'interface' || targetNode.kind === 'protocol')) {
-          const sourceNode = this.queries.getNodeById(ref.original.fromNodeId);
+          const sourceNode = this.nodeById(ref.original.fromNodeId);
           if (sourceNode && sourceNode.kind !== 'interface' && sourceNode.kind !== 'protocol') {
             kind = 'implements';
           }
@@ -1884,7 +1987,7 @@ export class ReferenceResolver {
       // apart from a function call without symbol info, but resolution
       // can: if `Foo` resolves to a class, the call IS an instantiation.
       if (kind === 'calls') {
-        const targetNode = this.queries.getNodeById(ref.targetNodeId);
+        const targetNode = this.nodeById(ref.targetNodeId);
         if (
           targetNode &&
           (targetNode.kind === 'class' || targetNode.kind === 'struct' || targetNode.kind === 'union')
@@ -2422,7 +2525,12 @@ export class ReferenceResolver {
     // a 22GB WAL on a 4.6GB DB (migration plan §7a.1).
     parallel?: {
       dbPath: string;
-      bulkEdgeLoad?: { begin: () => void; end: () => void | Promise<void> };
+      bulkEdgeLoad?: {
+        begin: () => void;
+        end: () => void | Promise<void>;
+        /** Indexes `end` leaves for later; built while the pool runs synthesis. */
+        deferred?: () => void;
+      };
       /** unresolved_refs index window for the batched loop — the loop only
        *  reads the status index + PK; dropping the sync-path ref indexes cuts
        *  each per-batch DELETE's B-tree work (DatabaseConnection.beginBulkRefLoad). */
@@ -2710,16 +2818,23 @@ export class ReferenceResolver {
       const PERSIST_CHUNK = 1000;
       const tPersist = Date.now();
 
-      // Persist edges BEFORE fanning out the next batch: later batches read
-      // this batch's edges — resolveMethodOnType walks supertype chains over
-      // `extends`/`implements` edges that earlier batches resolved, so a
-      // receiver typed as a subclass only reaches a method declared on its
-      // base class if those edges are visible. (Validated on dubbo: fanning
-      // out first downgraded exactly those supertype-method resolutions from
-      // the 0.9 typed-receiver path to the 0.65 word-overlap fallback.)
+      // A batch that made `extends`/`implements` edges persists them BEFORE
+      // fanning out the next batch: later batches read them —
+      // resolveMethodOnType walks supertype chains over edges that earlier
+      // batches resolved, so a receiver typed as a subclass only reaches a
+      // method declared on its base class if those edges are visible.
+      // (Validated on dubbo: fanning out first downgraded exactly those
+      // supertype-method resolutions from the 0.9 typed-receiver path to the
+      // 0.65 word-overlap fallback.) They are the only edges resolution reads
+      // (RESOLUTION_READ_EDGE_KINDS), so a batch that made none — every batch
+      // after the prerequisite phase readNextBatch drains first — fans the
+      // next batch out now and inserts while it resolves: the same writes in
+      // the same order, and nothing the workers read differs.
       tLp = Date.now();
       const edges = this.createEdges(result.resolved);
       lp('createEdges', tLp);
+      const readEdge = edges.some((e) => RESOLUTION_READ_EDGE_KINDS.includes(e.kind));
+      let nextInFlight = !readEdge && nextBatch.length > 0 ? beginBatch(nextBatch) : null;
       tLp = Date.now();
       for (let i = 0; i < edges.length; i += PERSIST_CHUNK) {
         this.queries.insertEdges(edges.slice(i, i + PERSIST_CHUNK));
@@ -2727,11 +2842,12 @@ export class ReferenceResolver {
       }
       lp('insertEdges', tLp);
 
-      // NOW fan the next batch out — workers see exactly the edge state the
-      // sequential baseline would (every batch ≤ this one committed), while
-      // the main thread spends the REST of the persist (ref deletes + failed
-      // parking below) overlapped with their resolution — the double-buffer.
-      const nextInFlight = nextBatch.length > 0 ? beginBatch(nextBatch) : null;
+      // NOW fan the next batch out (if not already) — workers see exactly the
+      // edge state the sequential baseline would (every batch ≤ this one
+      // committed), while the main thread spends the REST of the persist (ref
+      // deletes + failed parking below) overlapped with their resolution —
+      // the double-buffer.
+      if (!nextInFlight && nextBatch.length > 0) nextInFlight = beginBatch(nextBatch);
 
       // Clean up resolved refs so they don't appear in the next batch —
       // by row id, so a same-key sibling ref in a LATER batch (same caller
@@ -2842,6 +2958,19 @@ export class ReferenceResolver {
       }
     }
 
+    // Indexes the bulk-edge window's end deferred: built once, while the pool
+    // is busy with synthesis when it is, and in any case before this returns.
+    let deferredBuilt = !bulkEdgesActive || !parallel?.bulkEdgeLoad?.deferred;
+    const buildDeferredIndexes = (): void => {
+      if (deferredBuilt) return;
+      deferredBuilt = true;
+      const tDeferred = Date.now();
+      try {
+        parallel!.bulkEdgeLoad!.deferred!();
+      } catch { /* healed by schema.sql on the next open, like a crash in the window */ }
+      if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] deferred-edge-index: ${Date.now() - tDeferred}ms`);
+    };
+
     // Dynamic-edge synthesis: now that all base `calls` edges are persisted,
     // synthesize observer/callback dispatch edges (dispatcher → registered
     // callbacks) that static parsing leaves out. Best-effort — never fail the
@@ -2856,11 +2985,13 @@ export class ReferenceResolver {
         this.context,
         onSynthesisProgress,
         pool,
-        parallel?.backpressure
+        parallel?.backpressure,
+        buildDeferredIndexes
       );
     } catch {
       // synthesis is additive and optional; ignore failures
     }
+    buildDeferredIndexes();
     if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] callback-synthesis: ${Date.now() - tSynth}ms`);
     } finally {
       if (pool) await pool.destroy().catch(() => undefined);
@@ -2947,10 +3078,13 @@ export class ReferenceResolver {
   private isBuiltInOrExternal(ref: UnresolvedRef): boolean {
     const name = ref.referenceName;
     const isJsTs = ref.language === 'typescript' || ref.language === 'javascript'
-      || ref.language === 'tsx' || ref.language === 'jsx' || ref.language === 'arkts';
+      || ref.language === 'tsx' || ref.language === 'jsx' || ref.language === 'arkts'
+      || ref.language === 'vue' || ref.language === 'svelte' || ref.language === 'astro';
 
-    // JavaScript/TypeScript built-ins
-    if (isJsTs && JS_BUILT_INS.has(name)) {
+    // JavaScript/TypeScript built-ins — unless the file imports its own
+    // binding of that name (`import Map from './Map.svelte'`).
+    if (isJsTs && JS_BUILT_INS.has(name) &&
+        !this.context.getImportMappings(ref.filePath, ref.language).some((m) => m.localName === name)) {
       return true;
     }
 
@@ -3078,7 +3212,7 @@ export class ReferenceResolver {
    * Get file path from node ID
    */
   private getFilePathFromNodeId(nodeId: string): string {
-    const node = this.queries.getNodeById(nodeId);
+    const node = this.nodeById(nodeId);
     return node?.filePath || '';
   }
 
@@ -3086,7 +3220,7 @@ export class ReferenceResolver {
    * Get language from node ID
    */
   private getLanguageFromNodeId(nodeId: string): UnresolvedRef['language'] {
-    const node = this.queries.getNodeById(nodeId);
+    const node = this.nodeById(nodeId);
     return node?.language || 'unknown';
   }
 
@@ -3244,7 +3378,7 @@ export class ReferenceResolver {
   private resolveThisMemberFnRef(ref: UnresolvedRef): ResolvedRef | null {
     const member = ref.referenceName.slice('this.'.length);
     if (!member) return null;
-    const fromNode = this.queries.getNodeById(ref.fromNodeId);
+    const fromNode = this.nodeById(ref.fromNodeId);
     if (!fromNode) return null;
     // A hook declared at class-body level (Ruby `before_action :authenticate`)
     // attributes to the CLASS node itself — its qualified name IS the scope.
@@ -3301,10 +3435,38 @@ export class ReferenceResolver {
     // periodically so the #850 liveness watchdog heartbeat can fire (#1091).
     const maybeYield = createYielder();
     const resolved: ResolvedRef[] = [];
+    // Refs share supertypes (every `this.dispose` walks the same chain), and
+    // nothing is written until the loop ends: read each type's supertype
+    // edges, and each supertype's callable members by name, once.
+    const supertypeEdges = new Map<string, Edge[]>();
+    const callableMembers = new Map<string, Map<string, Node[]>>();
+    const supertypesOf = (id: string): Edge[] => {
+      let edges = supertypeEdges.get(id);
+      if (!edges) {
+        edges = this.queries.getOutgoingEdges(id, ['implements', 'extends']);
+        supertypeEdges.set(id, edges);
+      }
+      return edges;
+    };
+    const callableMembersOf = (id: string): Map<string, Node[]> => {
+      let byName = callableMembers.get(id);
+      if (!byName) {
+        byName = new Map();
+        for (const c of this.queries.getOutgoingEdges(id, ['contains'])) {
+          const m = this.nodeById(c.target);
+          if (!m || (m.kind !== 'function' && m.kind !== 'method')) continue;
+          const list = byName.get(m.name);
+          if (list) list.push(m);
+          else byName.set(m.name, [m]);
+        }
+        callableMembers.set(id, byName);
+      }
+      return byName;
+    };
     for (const ref of deferred) {
       await maybeYield();
       const member = ref.referenceName.slice('this.'.length);
-      const fromNode = this.queries.getNodeById(ref.fromNodeId);
+      const fromNode = this.nodeById(ref.fromNodeId);
       if (!fromNode || !member) continue;
       // Class-body-level hooks (Ruby) attribute to the CLASS node itself.
       let className: string;
@@ -3348,24 +3510,16 @@ export class ReferenceResolver {
       for (let depth = 0; depth < 5 && frontierNodes.length > 0 && !target; depth++) {
         const next: Node[] = [];
         for (const typeNode of frontierNodes) {
-          for (const edge of this.queries.getOutgoingEdges(typeNode.id, ['implements', 'extends'])) {
-            const superNode = this.queries.getNodeById(edge.target);
+          for (const edge of supertypesOf(typeNode.id)) {
+            const superNode = this.nodeById(edge.target);
             if (!superNode || seenNodes.has(superNode.id)) continue;
             seenNodes.add(superNode.id);
             if (!SUPERTYPE_BEARING_KINDS.has(superNode.kind)) continue;
             // Member lookup anchored on the supertype's contains edges.
-            for (const c of this.queries.getOutgoingEdges(superNode.id, ['contains'])) {
-              const m = this.queries.getNodeById(c.target);
-              if (
-                m &&
-                m.name === member &&
-                (m.kind === 'function' || m.kind === 'method') &&
-                sameLanguageFamily(m.language, ref.language)
-              ) {
-                target = m;
-                break;
-              }
-            }
+            target =
+              callableMembersOf(superNode.id)
+                .get(member)
+                ?.find((m) => sameLanguageFamily(m.language, ref.language)) ?? null;
             if (target) break;
             next.push(superNode);
           }
@@ -3423,19 +3577,19 @@ export class ReferenceResolver {
     // A `#define` is a value, never a callee (#1838): a macro defined only in
     // an unrelated file is not what `NAME(x)` here expands to either.
     if (ref.referenceKind === 'calls') {
-      const target = this.queries.getNodeById(result.targetNodeId);
+      const target = this.nodeById(result.targetNodeId);
       if (target?.kind === 'constant' && CPP_DEFINE_SIGNATURE.test(target.signature ?? '')) return null;
     }
 
     // An `imports` reference names something importable — never a member that
     // only exists inside a type.
     if (ref.referenceKind === 'imports') {
-      const target = this.queries.getNodeById(result.targetNodeId);
+      const target = this.nodeById(result.targetNodeId);
       return target && !isImportableKind(target.kind) ? null : result;
     }
 
     if (!isInheritanceRef(ref)) return result;
-    const target = this.queries.getNodeById(result.targetNodeId);
+    const target = this.nodeById(result.targetNodeId);
     if (target && !isSupertypeTarget(target)) {
       const type = this.sameNamedTypeOfValue(target);
       if (!type) return null;
@@ -3443,6 +3597,105 @@ export class ReferenceResolver {
     }
     if (isBoundToOutOfRepoImport(ref, this.context)) return null;
     return result;
+  }
+
+  /**
+   * `super.didMoveToWindow()` inside an override of `didMoveToWindow` calls
+   * the PARENT's implementation, never the method making the call. Extraction
+   * keeps a `super` call under the bare method name, so every strategy found
+   * the enclosing method itself: one expo-camera view had eleven of its
+   * overrides "calling" themselves. The parent's method is usually a
+   * framework's (UIKit, Android, React); a self-edge is never it. Real
+   * recursion keeps its edge — only a call written through `super` / `base`
+   * (C#) / `[super …]` (Objective-C) / `parent::` (PHP) / `super().` (Python)
+   * is declined.
+   */
+  private gateSuperSelfCall(result: ResolvedRef | null, ref: UnresolvedRef): ResolvedRef | null {
+    if (!result || ref.referenceKind !== 'calls' || result.targetNodeId !== ref.fromNodeId) return result;
+    const name = ref.referenceName.slice(Math.max(ref.referenceName.lastIndexOf('.'), ref.referenceName.lastIndexOf(':')) + 1);
+    if (!/^[A-Za-z_$][\w$]*$/.test(name)) return result;
+    const line = (this.context.getFileLines?.(ref.filePath) ?? this.context.readFile(ref.filePath)?.split(/\r?\n/))?.[ref.line - 1];
+    if (!line) return result;
+    const escaped = name.replace(/\$/g, '\\$');
+    const viaSuper = new RegExp(
+      String.raw`(?:\b(?:super|base)\s*(?:\(\s*(?:[\w.]+\s*,\s*\w+)?\s*\))?\s*\??\.\s*|\[\s*super\s+|\bparent\s*::\s*)` + escaped + String.raw`\b`,
+    );
+    return viaSuper.test(line) ? null : result;
+  }
+
+  /**
+   * A bare Rust name reaches only what is in scope — every strategy's result,
+   * a framework resolver's `Ok(x)` → `struct Ok` construction included (see
+   * isRustNameInScope).
+   */
+  private gateRustScope(result: ResolvedRef | null, ref: UnresolvedRef): ResolvedRef | null {
+    if (!result || ref.language !== 'rust' || !/^[A-Za-z_]\w*$/.test(ref.referenceName)) return result;
+    const target = this.nodeById(result.targetNodeId);
+    return target && !isRustNameInScope(target, ref, this.context) ? null : result;
+  }
+
+  /** The repository's own package name, from its root package.json; null without one. */
+  /** Per directory: the package names its package.json and every enclosing one own and depend on. */
+  private manifestScopes = new Map<string, { own: Set<string>; deps: Set<string> }>();
+
+  /**
+   * Is `source` a package from outside the repository? Only when the importing
+   * file's package.json (or an enclosing one) declares it, or it is a Node
+   * built-in or a runtime's virtual module. A specifier nothing declares is
+   * an alias this resolver does not know — SvelteKit's `$lib/…`, Nuxt's
+   * `~/…`, a nested app's own `@/…` — and stays the project's.
+   */
+  private isDeclaredOutsidePackage(source: string, fromFile: string): boolean {
+    // Deno's standard library is `@std/…` from JSR.
+    if (/^(?:node|bun|jsr|npm|https?):/.test(source) || source.startsWith('@std/') || NODE_BUILTINS.has(source)) return true;
+    const name = source.startsWith('@') ? source.split('/').slice(0, 2).join('/') : source.split('/')[0]!;
+    const normalized = fromFile.replace(/\\/g, '/');
+    const scope = this.manifestScope(normalized.includes('/') ? normalized.slice(0, normalized.lastIndexOf('/')) : '');
+    if (scope.own.has(name)) return false;
+    if (scope.deps.has(name)) return true;
+    // SvelteKit's `$app/…` and Astro's `astro:…` belong to the framework —
+    // unless this repository is that framework.
+    const provider = source.startsWith('astro:') ? 'astro' : /^\$(?:app|env|service-worker)(?:\/|$)/.test(source) ? '@sveltejs/kit' : null;
+    return provider !== null && !scope.own.has(provider) && !this.context.getWorkspacePackages?.()?.byName.has(provider);
+  }
+
+  private manifestScope(dir: string): { own: Set<string>; deps: Set<string> } {
+    const memo = this.manifestScopes.get(dir);
+    if (memo) return memo;
+    const parent = dir === '' ? null : this.manifestScope(dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : '');
+    let scope = parent ?? { own: new Set<string>(), deps: new Set<string>() };
+    try {
+      const json = JSON.parse(this.context.readFile(dir ? `${dir}/package.json` : 'package.json') ?? 'null') as Record<string, unknown> | null;
+      if (json && typeof json === 'object') {
+        scope = { own: new Set(scope.own), deps: new Set(scope.deps) };
+        if (typeof json.name === 'string' && json.name.length > 0) scope.own.add(json.name);
+        for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+          const deps = json[field];
+          if (!deps || typeof deps !== 'object') continue;
+          for (const [dep, version] of Object.entries(deps)) {
+            // `workspace:*`, `file:../shared`, `link:…`: a package in this repository.
+            if (typeof version === 'string' && /^(?:workspace|file|link|portal):/.test(version)) scope.own.add(dep);
+            else scope.deps.add(dep);
+          }
+        }
+      }
+    } catch { /* no or unreadable package.json */ }
+    // A Deno import map names packages the same way — an entry that maps to a
+    // registry or a URL, not one that maps to a path in the repository.
+    for (const file of ['deno.json', 'deno.jsonc']) {
+      const raw = this.context.readFile(dir ? `${dir}/${file}` : file);
+      if (!raw) continue;
+      const json = parseJsonc(raw) as { imports?: Record<string, unknown> } | undefined;
+      const imports = json && typeof json === 'object' ? json.imports : undefined;
+      if (!imports || typeof imports !== 'object') continue;
+      for (const [key, target] of Object.entries(imports)) {
+        if (typeof target !== 'string' || !/^(?:jsr|npm|https?):/.test(target)) continue;
+        if (scope === parent) scope = { own: new Set(scope.own), deps: new Set(scope.deps) };
+        scope.deps.add(key.replace(/\/$/, ''));
+      }
+    }
+    this.manifestScopes.set(dir, scope);
+    return scope;
   }
 
   /** The one supertype-kind node a TypeScript value shares its name and file with. */
