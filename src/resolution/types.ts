@@ -184,6 +184,11 @@ export interface ResolutionContext {
    */
   getProjectAliases?(): import('./path-aliases').AliasMap | null;
   /**
+   * The aliases of the tsconfig / jsconfig nearest `fromFile` below the
+   * project root that declares `paths` — a monorepo app's own `@/*` — or null.
+   */
+  getNearestAliases?(fromFile: string): import('./path-aliases').AliasMap | null;
+  /**
    * Go module info from `go.mod` at the project root. Returns `null`
    * when the project has no `go.mod` (non-Go projects, pre-modules
    * Go code, or projects whose modules live in subdirectories). Used
@@ -402,6 +407,12 @@ export type ReExport =
       excludedNames?: string[];
       excludedParentExports?: string[];
       excludedParentChildren?: HaskellParentChildRestriction[];
+    }
+  | {
+      /** `export * as ns from './other'`: only `ns` is exported, the module's members through it. */
+      kind: 'namespace';
+      exportedName: string;
+      source: string;
     };
 
 /**

@@ -21,7 +21,7 @@ import {
   isImportableKind,
   CPP_DEFINE_SIGNATURE,
 } from './types';
-import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope } from './name-matcher';
+import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope, CASE_INSENSITIVE_LANGUAGES } from './name-matcher';
 import { isVisibleCppMacro, clearCppMacroVisibility } from './cpp-macro-visibility';
 import { isCppConstructorRef, matchCppConstructor } from './cpp-constructor';
 import { gateSwiftTypeTarget, clearSwiftTypeVisibility, swiftExtendedConformances } from './swift-type-visibility';
@@ -314,6 +314,8 @@ export class ReferenceResolver {
   // `null` = computed and absent. Treated as immutable for the
   // resolver's lifetime; callers re-create the resolver if config changes.
   private projectAliases: AliasMap | null | undefined = undefined;
+  // Per directory: the aliases of the nearest non-root tsconfig declaring `paths`.
+  private dirAliases = new Map<string, AliasMap | null>();
   // go.mod module path. Same lazy/immutable convention as projectAliases.
   private goModule: GoModule | null | undefined = undefined;
   // Monorepo workspace member packages. Same lazy/immutable convention.
@@ -462,6 +464,7 @@ export class ReferenceResolver {
     this.fileExistsMemo.clear();
     this.manifestScopes.clear();
     this.knownNames = null;
+    this.knownLowerNames = null;
     this.knownFiles = null;
     this.cachesWarmed = false;
     // The import-resolver's and name-matcher's per-context memos assume the
@@ -792,6 +795,31 @@ export class ReferenceResolver {
         return this.projectAliases;
       },
 
+      getNearestAliases: (fromFile: string) => {
+        let dir = path.posix.dirname(fromFile.replace(/\\/g, '/'));
+        const walked: string[] = [];
+        let found: AliasMap | null = null;
+        while (dir && dir !== '.' && dir !== '/') {
+          const hit = this.dirAliases.get(dir);
+          if (hit !== undefined) {
+            found = hit;
+            break;
+          }
+          walked.push(dir);
+          const abs = path.join(this.projectRoot, dir);
+          if (['tsconfig.json', 'jsconfig.json'].some((name) => fs.existsSync(path.join(abs, name)))) {
+            const aliases = loadProjectAliases(abs);
+            if (aliases) {
+              found = aliases;
+              break;
+            }
+          }
+          dir = path.posix.dirname(dir);
+        }
+        for (const d of walked) this.dirAliases.set(d, found);
+        return found;
+      },
+
       getGoModule: () => {
         if (this.goModule === undefined) {
           this.goModule = loadGoModule(this.projectRoot);
@@ -900,6 +928,21 @@ export class ReferenceResolver {
         byMethod,
       },
     };
+  }
+
+  /** Lowercased `knownNames`, built the first time a case-insensitive language asks. */
+  private knownLowerNames: Set<string> | null = null;
+
+  /** `hasAnyPossibleMatch` for a language whose names ignore case: the name, or any `.`/`::`/`->` part of it. */
+  private hasAnyPossibleMatchIgnoringCase(name: string): boolean {
+    if (!this.knownNames) return true;
+    if (!this.knownLowerNames || this.knownLowerNames.size === 0) {
+      this.knownLowerNames = new Set();
+      for (const known of this.knownNames) this.knownLowerNames.add(known.toLowerCase());
+    }
+    const lower = name.toLowerCase();
+    if (this.knownLowerNames.has(lower)) return true;
+    return lower.split(/::|->|\./).some((part) => part.length > 0 && this.knownLowerNames!.has(part));
   }
 
   /**
@@ -1744,6 +1787,9 @@ export class ReferenceResolver {
       (ref.language === 'haskell' && ref.referenceKind !== 'imports'
         ? this.hasAnyPossibleHaskellMatch(existenceName)
         : this.hasAnyPossibleMatch(existenceName)) ||
+      // PHP, Pascal, CFML, COBOL and VB.NET names ignore case: `formatprice()`
+      // calls `FormatPrice`, which the exact-name set never lists.
+      (CASE_INSENSITIVE_LANGUAGES.has(ref.language) && this.hasAnyPossibleMatchIgnoringCase(existenceName)) ||
       this.matchesAnyImport(ref) ||
       this.frameworks.some((f) => f.claimsReference?.(ref.referenceName));
     if (this.profileStages) this.stageAdd('preFilter', ref, preFilterPass, tPre);
@@ -1823,7 +1869,11 @@ export class ReferenceResolver {
     const tFw = this.profileStages ? process.hrtime.bigint() : 0n;
     let fwEarly: ResolvedRef | null = null;
     for (const framework of this.frameworks) {
-      const result = this.gateFrameworkLanguage(framework.resolve(ref, this.context), ref);
+      const resolved = this.gateFrameworkLanguage(framework.resolve(ref, this.context), ref);
+      // Name the resolver on the edge (`metadata.framework`): a Swift→ObjC or
+      // React Native bridge hop says how it got into the graph, as a
+      // synthesized edge's `synthesizedBy` does.
+      const result = resolved ? { ...resolved, metadata: { ...resolved.metadata, framework: framework.name } } : null;
       if (result) {
         if (result.confidence >= 0.9) {
           fwEarly = result; // High confidence, return immediately (below)
@@ -1836,7 +1886,17 @@ export class ReferenceResolver {
     if (fwEarly) return fwEarly;
     // A retained untyped chain supplies effect/call-site evidence only. In
     // particular, importing its root does not make the root its call target.
-    if (isUnresolvedJsMemberCall(ref)) return null;
+    // A path through module namespaces is not untyped: `z.coerce.number()`
+    // after `import * as z`, where the barrel has `export * as coerce`.
+    if (isUnresolvedJsMemberCall(ref)) {
+      const root = ref.referenceName.slice(0, ref.referenceName.indexOf('.'));
+      const namespace = this.context.getImportMappings(ref.filePath, ref.language).some((m) => m.isNamespace && m.localName === root);
+      if (!namespace) return null;
+      const viaNamespace = this.gateLanguage(resolveViaImport(ref, this.context), ref);
+      const target = viaNamespace ? this.nodeById(viaNamespace.targetNodeId) : null;
+      return target && (target.kind === 'function' || target.kind === 'method' || target.kind === 'class' || target.kind === 'constant' || target.kind === 'variable')
+        ? viaNamespace : null;
+    }
 
     // Strategy 2: Try import-based resolution
     // A TS/JS/Python call-receiver chain (`useStore.getState().reset`, #1683)
