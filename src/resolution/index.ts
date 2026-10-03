@@ -21,14 +21,14 @@ import {
   isImportableKind,
   CPP_DEFINE_SIGNATURE,
 } from './types';
-import { matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope, CASE_INSENSITIVE_LANGUAGES } from './name-matcher';
+import { isPythonSelfCall, matchJsStoreBindingCall, isUnresolvedJsMemberCall, isVisibleAcrossFiles, matchReference, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope, CASE_INSENSITIVE_LANGUAGES } from './name-matcher';
 import { isVisibleCppMacro, clearCppMacroVisibility } from './cpp-macro-visibility';
 import { isCppConstructorRef, matchCppConstructor } from './cpp-constructor';
 import { gateSwiftTypeTarget, clearSwiftTypeVisibility, swiftExtendedConformances } from './swift-type-visibility';
 import { gateTypeParameter, clearTypeParameterMemos } from './type-parameters';
-import { resolveViaImport, resolvePhpImportedStaticCall, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, isExternalImport, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
+import { resolveViaImport, resolvePhpImportedStaticCall, resolvePhpQualifiedClassRef, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isJsPathImportRef, isBoundToOutOfRepoImport, clearImportResolverMemos, resolveImportPath, isExternalImport, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
 import { haskellCombinatorHasCanonicalOrigin } from './haskell-combinators';
-import { ResolverPool, minRefsForPool } from './resolver-pool';
+import { ResolverPool, minRefsForPool, shouldEngageAdaptively } from './resolver-pool';
 import { resolveAliasBinding } from './alias-binding';
 import { detectFrameworks } from './frameworks';
 import { synthesizeCallbackEdges } from './callback-synthesizer';
@@ -1761,6 +1761,13 @@ export class ReferenceResolver {
       return this.gateLanguage(this.resolveCfmlComponentPath(ref), ref);
     }
 
+    // A PHP class written with a namespace in it — `new Alias\X()` through a
+    // `use Ns as Alias;` namespace alias, `extends Sub\Base`, `\Ns\X::make()`
+    // (#2256). The pre-filter below would drop most of these before any import
+    // strategy ran, and PHP gives each one exactly one meaning; resolve it first.
+    const phpQualified = resolvePhpQualifiedClassRef(ref, this.context);
+    if (phpQualified !== undefined) return this.gateLanguage(phpQualified, ref);
+
     // Fast pre-filter: skip if no symbol with this name exists anywhere
     // AND the name doesn't match a local import. The import escape is
     // necessary because re-export rename chains (`import { login }
@@ -1770,8 +1777,9 @@ export class ReferenceResolver {
     // ArkTS chained-attribute refs carry a leading dot (`.titleStyle`) that
     // routes them to the decorator-gated matcher; the symbol itself is
     // indexed under the bare name, so the existence check strips the dot.
-    // Nix static path imports (`import ./x.nix`) name a FILE, not a symbol —
-    // they bypass the symbol-existence check and resolve via resolveViaImport.
+    // Nix static path imports (`import ./x.nix`) and JS/TS module paths
+    // (`require('./x')`) name a FILE, not a symbol — they bypass the
+    // symbol-existence check and resolve via resolveViaImport.
     let existenceName =
       ref.language === 'arkts' && ref.referenceName.startsWith('.')
         ? ref.referenceName.slice(1)
@@ -1784,6 +1792,7 @@ export class ReferenceResolver {
     const tPre = this.profileStages ? process.hrtime.bigint() : 0n;
     const preFilterPass =
       isNixPathImportRef(ref) ||
+      isJsPathImportRef(ref) ||
       (ref.language === 'haskell' && ref.referenceKind !== 'imports'
         ? this.hasAnyPossibleHaskellMatch(existenceName)
         : this.hasAnyPossibleMatch(existenceName)) ||
@@ -1913,7 +1922,12 @@ export class ReferenceResolver {
     }
 
     const tImp = this.profileStages ? process.hrtime.bigint() : 0n;
-    const importResult = this.gateLanguage(resolveViaImport(ref, this.context), ref);
+    // `self.get_ip()` is a method call on the instance even when the file
+    // also imports a function named `get_ip`: the import never names it.
+    const selfCall = ref.language === 'python' && ref.referenceKind === 'calls' &&
+      this.context.getImportMappings(ref.filePath, ref.language).some((m) => m.localName === ref.referenceName) &&
+      isPythonSelfCall(ref, this.context);
+    const importResult = selfCall ? null : this.gateLanguage(resolveViaImport(ref, this.context), ref);
     if (this.profileStages) this.stageAdd('viaImport', ref, !!importResult, tImp);
     if (importResult) {
       if (importResult.confidence >= 0.9) return importResult;
@@ -2824,7 +2838,7 @@ export class ReferenceResolver {
         adaptiveSeqRefs += batch.length;
         const remaining = total - processed - batch.length;
         const projectedMs = (adaptiveSeqMs / Math.max(1, adaptiveSeqRefs)) * Math.max(0, remaining);
-        if (projectedMs >= ADAPTIVE_ENGAGE_SETTLE_MS) {
+        if (shouldEngageAdaptively(projectedMs, remaining, ADAPTIVE_ENGAGE_SETTLE_MS)) {
           if (process.env.CODEGRAPH_SYNTH_TIMINGS) {
             console.error(`[pool-timing] adaptive engage: projected ${Math.round(projectedMs)}ms sequential settle over ${remaining} remaining refs`);
           }

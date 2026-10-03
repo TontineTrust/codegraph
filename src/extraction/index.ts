@@ -15,12 +15,11 @@ import {
   FileRecord,
   ExtractionResult,
   ExtractionError,
-  Node,
   Edge,
   UnresolvedReference,
   ReferenceKind,
 } from '../types';
-import { QueryBuilder } from '../db/queries';
+import { QueryBuilder, NodeIdentity } from '../db/queries';
 import { extractFromSource } from './tree-sitter';
 import { ParseWorkerPool, resolveParsePoolSize, resolveParseTimeoutMs } from './parse-pool';
 import { StoreWriter, StoreBundle, finalizeStoreBundle } from './store-writer';
@@ -442,7 +441,7 @@ function readGitExcludeExtraPatterns(rootDir: string): string {
     const configured = execFileSync(
       'git',
       ['-C', rootDir, 'config', '--get', 'core.excludesFile'],
-      { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] },
+      { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
     ).trim();
     if (configured) {
       const abs = expandUserPath(configured);
@@ -473,6 +472,7 @@ function listGitIgnoredDirectories(rootDir: string): string[] {
         timeout: 60_000,
         maxBuffer: 50 * 1024 * 1024,
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       },
     );
     const dirs: string[] = [];
@@ -854,6 +854,15 @@ export function preloadLanguagesForFiles(
     for (const ambiguous of ['cpp', 'objc'] as const) {
       if (!languages.includes(ambiguous)) languages.push(ambiguous);
     }
+  }
+  // An `.inc` path-detects as PHP but may read as Pascal (#2279) — unless
+  // codegraph.json maps `.inc` explicitly, which detectLanguage never overrides.
+  if (
+    !languages.includes('pascal') &&
+    !(overrides && overrides['.inc']) &&
+    files.some((f) => f.toLowerCase().endsWith('.inc'))
+  ) {
+    languages.push('pascal');
   }
   return languages;
 }
@@ -1834,6 +1843,71 @@ function resurrectRefFromDroppedEdge(
 }
 
 /**
+ * What tells a file's nodes apart across a re-index, coarsest first. (kind,
+ * name) is the #899 key and settles every name a file defines once; a name it
+ * defines more than once — the same method on two classes, a method's
+ * overloads — is split further by qualified name, then by signature (#2276).
+ */
+const REINDEX_IDENTITY_TIERS: ReadonlyArray<(n: NodeIdentity) => string> = [
+  (n) => `${n.kind}\0${n.name}`,
+  (n) => n.qualifiedName,
+  (n) => n.signature ?? '',
+];
+
+function groupNodeIdentities(
+  nodes: readonly NodeIdentity[],
+  key: (n: NodeIdentity) => string
+): Map<string, NodeIdentity[]> {
+  const groups = new Map<string, NodeIdentity[]>();
+  for (const n of nodes) {
+    const k = key(n);
+    const group = groups.get(k);
+    if (group) group.push(n);
+    else groups.set(k, [n]);
+  }
+  return groups;
+}
+
+/**
+ * Pair each node a file had before a re-index with the node that replaces it,
+ * old id → new id. Ids embed the start line, so they can't be compared across
+ * an edit. Each tier of {@link REINDEX_IDENTITY_TIERS} splits the groups the
+ * one before left ambiguous, and a group down to one node on each side is a
+ * pair. Nodes still identical after every tier (overloads in a language that
+ * records no signature) pair by position, but only when both sides have the
+ * same number of them. Anything else stays unpaired: the caller re-resolves
+ * its edges from their original reference instead of handing them all to
+ * whichever same-named node happens to come last (#2276).
+ */
+function pairReindexedNodes(
+  prior: readonly NodeIdentity[],
+  next: readonly NodeIdentity[]
+): Map<string, string> {
+  const pairs = new Map<string, string>();
+  const byPosition = (a: NodeIdentity, b: NodeIdentity) =>
+    a.startLine - b.startLine || a.startColumn - b.startColumn;
+  const pairGroups = (before: readonly NodeIdentity[], after: readonly NodeIdentity[], tier: number): void => {
+    const key = REINDEX_IDENTITY_TIERS[tier]!;
+    const afterGroups = groupNodeIdentities(after, key);
+    for (const [k, group] of groupNodeIdentities(before, key)) {
+      const match = afterGroups.get(k);
+      if (!match) continue;
+      if (group.length === 1 && match.length === 1) {
+        pairs.set(group[0]!.id, match[0]!.id);
+      } else if (tier + 1 < REINDEX_IDENTITY_TIERS.length) {
+        pairGroups(group, match, tier + 1);
+      } else if (group.length === match.length) {
+        const a = [...group].sort(byPosition);
+        const b = [...match].sort(byPosition);
+        for (let i = 0; i < a.length; i++) pairs.set(a[i]!.id, b[i]!.id);
+      }
+    }
+  };
+  pairGroups(prior, next, 0);
+  return pairs;
+}
+
+/**
  * Extraction orchestrator
  */
 export class ExtractionOrchestrator {
@@ -2307,6 +2381,7 @@ export class ExtractionOrchestrator {
             language,
             buffers: result.kernelBuffers,
             file: this.buildFileRecord(filePath, content, language, stats, result, nodeCount),
+            ...(result.unresolvedReferences.length > 0 ? { extraRefs: result.unresolvedReferences } : {}),
           });
         } else {
           storeWriter.send(this.buildFreshStoreBundle(filePath, content, language, stats, result));
@@ -3022,9 +3097,9 @@ export class ExtractionOrchestrator {
     // Bulk inserts run in bounded sub-transactions with a yield between, so a
     // giant generated file (tens of thousands of symbols) can't block the
     // event loop — and the #850 watchdog heartbeat — for the whole store.
-    // The file was NEVER one atomic transaction (each insert call has its
-    // own), and the files-table record still lands last, so crash recovery
-    // is unchanged: a partially-stored file has no record and re-indexes.
+    // That chunked path is not one atomic transaction (each insert call has
+    // its own), and the files-table record still lands last, so a
+    // partially-stored file has no record and re-indexes.
     const STORE_CHUNK = 2000;
     const contentHash = hashContent(content);
 
@@ -3063,15 +3138,20 @@ export class ExtractionOrchestrator {
     // `references` edges from callers that import it via module-attribute
     // access (`pkg.mod.fn(...)`).
     //
-    // We snapshot the edge plus the target node's (name, kind) so we can
-    // re-resolve to the re-indexed target's NEW id. Node ids are
-    // `sha256(filePath:kind:name:line)`, so any line shift in the callee file
-    // (e.g. a docstring-only edit above the symbol) changes every target id and
-    // a naive re-insert by old id would silently drop every edge. Matching by
-    // (filePath, kind, name) is stable across line shifts; if the symbol was
-    // renamed/removed, no match is found and the edge stays dropped (correct).
+    // We snapshot the edges plus the identity of every node the file had, so
+    // each edge can follow its old target to the re-indexed node that replaces
+    // it. Node ids are `sha256(filePath:kind:name:line)`, so any line shift in
+    // the callee file (e.g. a docstring-only edit above the symbol) changes
+    // every target id and a naive re-insert by old id would silently drop
+    // every edge. Pairing by (kind, name) — then qualified name, signature and
+    // position when the file defines a name more than once (#2276) — is stable
+    // across line shifts; if the symbol was renamed/removed, no pair is found
+    // and the edge is re-resolved from its original reference (see below).
     const crossFileIncomingEdges = existingFile
       ? this.queries.getCrossFileIncomingEdgesWithTarget(filePath)
+      : [];
+    const priorNodes = crossFileIncomingEdges.length > 0
+      ? this.queries.getNodeIdentitiesByFile(filePath)
       : [];
 
     // Filter out nodes with missing required fields before insertion.
@@ -3091,18 +3171,23 @@ export class ExtractionOrchestrator {
       }));
 
     // Fast path for the common case (everything fits one chunk): the whole
-    // file — nodes, edges, refs, file record — lands in ONE transaction with
-    // no event-loop yields in between. Giant generated files keep the chunked
-    // + yielding path below so the #850 watchdog heartbeat stays serviced.
+    // re-store — deleting the old rows, the new nodes, edges, refs and file
+    // record, and the re-attached incoming edges — lands in ONE transaction
+    // with no event-loop yields in between. Committed separately, a crash
+    // after the delete left the file looking new (no snapshot next time) and
+    // a crash before the re-attach left it looking current: either way other
+    // files' edges into it were lost for good. Giant generated files keep the
+    // chunked + yielding path below so the #850 watchdog heartbeat stays
+    // serviced.
     const fitsOneChunk =
       validNodes.length <= STORE_CHUNK &&
       validEdges.length <= STORE_CHUNK &&
       validRefs.length <= STORE_CHUNK;
     if (fitsOneChunk) {
-      // Snapshot/re-resolution of cross-file incoming edges (below) still runs
-      // for the sync path; on a fresh bulk index crossFileIncomingEdges is [].
       this.queries.transaction(() => {
-        if (existingFile) this.queries.deleteFile(filePath);
+        if (existingFile) {
+          this.queries.deleteFile(filePath);
+        }
         this.queries.storeFileBundle({
           nodes: validNodes,
           edges: validEdges,
@@ -3123,6 +3208,7 @@ export class ExtractionOrchestrator {
         if (crossFileIncomingEdges.length > 0) {
           this.reattachCrossFileEdges(
             crossFileIncomingEdges,
+            priorNodes,
             validNodes,
             language,
             haskellTopologyChanged,
@@ -3132,7 +3218,10 @@ export class ExtractionOrchestrator {
       return;
     }
 
-    if (existingFile) this.queries.deleteFile(filePath);
+    // Delete existing data for this file
+    if (existingFile) {
+      this.queries.deleteFile(filePath);
+    }
 
     // Insert nodes (chunked — see STORE_CHUNK above)
     for (let i = 0; i < validNodes.length; i += STORE_CHUNK) {
@@ -3149,26 +3238,28 @@ export class ExtractionOrchestrator {
     }
 
     // Re-insert cross-file incoming edges snapshotted before the delete,
-    // re-resolving each edge's target to the re-indexed node's new id by
-    // (filePath, kind, name). Node ids include the source line, so any line
+    // moving each edge's target to the re-indexed node that replaces it (see
+    // pairReindexedNodes). Node ids include the source line, so any line
     // shift in the callee file (e.g. a docstring-only edit above the symbol)
     // changes every target id and a naive re-insert by old id would drop them
     // all. `insertEdges` still filters to endpoints that exist. This closes
     // the #899 edge-drop on `sync`.
     //
-    // Edges whose callee (target) was renamed/removed during the re-index (no
-    // matching re-indexed node) are not silently dropped anymore: each is
-    // resurrected as its ORIGINAL unresolved ref (stamped on the edge as
-    // metadata.refName/refKind at creation) so the same sync's resolution
-    // sweep can rebind it to an alternative definition elsewhere, or park it
-    // as status='failed' to be retried when the symbol reappears — the
-    // removal-side counterpart of #1240. Edges without refName (built before
-    // the stamp existed, or synthesized) still drop silently: reconstructing
-    // a ref from the target's plain name would strip receiver/qualifier
-    // context and risk a rebind a full re-index would never make.
+    // Edges whose callee (target) was renamed/removed during the re-index, or
+    // can't be told apart from a same-named sibling (#2276), are not silently
+    // dropped or guessed at: each is resurrected as its ORIGINAL unresolved
+    // ref (stamped on the edge as metadata.refName/refKind at creation) so
+    // the same sync's resolution sweep can rebind it to the right definition
+    // here or an alternative one elsewhere, or park it as status='failed' to
+    // be retried when the symbol reappears — the removal-side counterpart of
+    // #1240. Edges without refName (built before the stamp existed, or
+    // synthesized) still drop silently: reconstructing a ref from the
+    // target's plain name would strip receiver/qualifier context and risk a
+    // rebind a full re-index would never make.
     if (crossFileIncomingEdges.length > 0) {
       this.reattachCrossFileEdges(
         crossFileIncomingEdges,
+        priorNodes,
         validNodes,
         language,
         haskellTopologyChanged,
@@ -3247,26 +3338,26 @@ export class ExtractionOrchestrator {
 
   /**
    * Re-attach cross-file incoming edges snapshotted before a re-index delete
-   * (#899). Non-Haskell targets keep the established stable remap by
-   * (kind, name). Haskell imports are revalidated only when the target's module
+   * (#899). Non-Haskell targets follow the old/new node pairing
+   * ({@link pairReindexedNodes}). Haskell imports are revalidated only when the module
    * topology changed; body/comment edits retain the fast path.
    */
   private reattachCrossFileEdges(
     crossFileIncomingEdges: Array<Edge & { targetKind: string; targetName: string; targetQualifiedName: string; sourceFilePath: string; sourceLanguage: Language }>,
-    validNodes: Node[],
+    priorNodes: readonly NodeIdentity[],
+    validNodes: readonly NodeIdentity[],
     targetLanguage: Language,
     targetHaskellTopologyChanged: boolean,
   ): void {
     const qualified = new Map<string, string | null>();
     const unqualified = new Map<string, string | null>();
-    const legacyUnqualified = new Map<string, string>();
+    const replacementOf = pairReindexedNodes(priorNodes, validNodes);
     const addUnique = (index: Map<string, string | null>, key: string, id: string): void => {
       const current = index.get(key);
       if (current === undefined) index.set(key, id);
       else if (current !== id) index.set(key, null);
     };
     for (const n of validNodes) {
-      legacyUnqualified.set(`${n.kind}\0${n.name}`, n.id);
       addUnique(qualified, `${n.kind}\0${n.qualifiedName}`, n.id);
       addUnique(unqualified, `${n.kind}\0${n.name}`, n.id);
     }
@@ -3285,7 +3376,7 @@ export class ExtractionOrchestrator {
       const newTargetId = targetLanguage === 'haskell'
         ? qualified.get(`${e.targetKind}\0${e.targetQualifiedName}`)
           ?? unqualified.get(`${e.targetKind}\0${e.targetName}`)
-        : legacyUnqualified.get(`${e.targetKind}\0${e.targetName}`);
+        : replacementOf.get(e.target);
       if (newTargetId) {
         reinserted.push({ source: e.source, target: newTargetId, kind: e.kind, metadata: e.metadata, line: e.line, column: e.column, provenance: e.provenance });
       } else if (ref) {
