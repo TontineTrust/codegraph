@@ -110,7 +110,7 @@ describe('synthesis metadata JSON boundaries and migration', () => {
     insertRaw('still malformed', 2);
   });
 
-  it.each([10, 11])('adds Haskell fingerprints to an upstream v%s index without losing rows', version => {
+  it.each([10, 11, 12, 13])('adds Haskell fingerprints to an upstream v%s index without losing rows', version => {
     const raw = connection.getDb();
     raw.exec(`ALTER TABLE files DROP COLUMN haskell_topology_hash;
       DELETE FROM schema_versions WHERE version >= 10;`);
@@ -127,6 +127,49 @@ describe('synthesis metadata JSON boundaries and migration', () => {
     expect(queries.getOutgoingEdges('a')).toHaveLength(1);
     expect(connection.getDb().prepare('SELECT COUNT(*) AS count FROM synthesis_inputs').get())
       .toEqual({ count: 0 });
+  });
+
+  it('upgrades a Haskell v12 index with upstream import and path retries without losing fingerprints', () => {
+    const raw = connection.getDb();
+    raw.exec(`DROP INDEX idx_unresolved_failed_import_tail;
+      DROP INDEX idx_unresolved_failed_import_name;
+      DELETE FROM schema_versions WHERE version >= 12;
+      INSERT INTO schema_versions(version, applied_at, description) VALUES (12, 0, 'Haskell topology fixture');
+      INSERT INTO files(path, content_hash, language, size, modified_at, indexed_at, haskell_topology_hash)
+        VALUES ('Main.hs', 'content', 'haskell', 1, 0, 0, 'preserved-topology');`);
+    for (const [referenceName, referenceKind, tail] of [
+      ['package:app/b.dart', 'imports', 'dart'],
+      ['snippets/price.liquid', 'references', 'liquid'],
+    ] as const) {
+      queries.insertUnresolvedRef({ fromNodeId: 'a', referenceName, referenceKind,
+        line: 1, column: 0, filePath: 'a.ts', language: 'typescript' });
+      raw.prepare("UPDATE unresolved_refs SET status = 'failed', name_tail = ? WHERE reference_name = ?")
+        .run(tail, referenceName);
+    }
+    insertRaw('broken json {{{');
+    connection.close();
+
+    connection = DatabaseConnection.open(path.join(dir, 'test.db'));
+    queries = new QueryBuilder(connection.getDb());
+    expect(getCurrentVersion(connection.getDb())).toBe(CURRENT_SCHEMA_VERSION);
+    expect(connection.getDb().prepare('SELECT haskell_topology_hash FROM files WHERE path = ?').get('Main.hs'))
+      .toEqual({ haskell_topology_hash: 'preserved-topology' });
+    expect(connection.getDb().prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_unresolved_failed_import_%' ORDER BY name").all())
+      .toEqual([{ name: 'idx_unresolved_failed_import_name' }, { name: 'idx_unresolved_failed_import_tail' }]);
+    const tails = () => connection.getDb().prepare('SELECT reference_name AS name, name_tail AS tail FROM unresolved_refs ORDER BY id').all();
+    expect(tails()).toEqual([
+      { name: 'package:app/b.dart', tail: 'b' },
+      { name: 'snippets/price.liquid', tail: 'price.liquid' },
+    ]);
+    expect(queries.getOutgoingEdges('a')).toHaveLength(1);
+    // Replay the reconciliation with its indexes already present.
+    connection.getDb().exec('DELETE FROM schema_versions WHERE version >= 14');
+    runMigrations(connection.getDb(), 13);
+    expect(tails()).toEqual([
+      { name: 'package:app/b.dart', tail: 'b' },
+      { name: 'snippets/price.liquid', tail: 'price.liquid' },
+    ]);
+    expect(queries.getOutgoingEdges('a')).toHaveLength(1);
   });
 
   it('upgrades the Haskell v10 layout with upstream synthesis and preserves fingerprints', () => {

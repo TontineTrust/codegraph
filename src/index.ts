@@ -25,10 +25,12 @@ import {
   BuildContextOptions,
   FindRelevantContextOptions,
   UnresolvedReference,
+  IndexHealth,
 } from './types';
 import { DatabaseConnection, getDatabasePath, removeDatabaseFiles } from './db';
 import { WalCheckpointValve, resolveWalValveMb } from './db/wal-valve';
 import { QueryBuilder } from './db/queries';
+import { importPathKeys } from './db/reference-tail';
 import {
   isInitialized,
   createDirectory,
@@ -44,6 +46,7 @@ import {
   initGrammars,
   HASKELL_IMPORT_INVALIDATION_PENDING,
 } from './extraction';
+import { detectLanguage, hasGrammarLoadFailure, isFileLevelOnlyLanguage } from './extraction/grammars';
 import {
   ReferenceResolver,
   createResolver,
@@ -51,6 +54,7 @@ import {
 } from './resolution';
 import { hasSynthesisPattern } from './resolution/callback-synthesizer';
 import { GraphTraverser, GraphQueryManager } from './graph';
+import { findNamedCopybooks, type NamedCopybook } from './graph/cobol-copybooks';
 import { ContextBuilder, createContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
 import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './sync';
@@ -512,6 +516,7 @@ export class CodeGraph {
    */
   async indexAll(options: IndexOptions = {}): Promise<IndexResult> {
     return this.indexMutex.withLock(async () => {
+      const startedAt = Date.now();
       try {
         this.fileLock.acquire();
       } catch {
@@ -773,6 +778,10 @@ export class CodeGraph {
           }
         } catch { /* metadata is advisory — never fail an index over it */ }
 
+        // The time covers the whole run, like the totals above. The
+        // orchestrator's covers extraction alone, and the summary printed it
+        // as the run's, leaving out resolution and linking (#2334).
+        result.durationMs = Date.now() - startedAt;
         return result;
       } finally {
         // Restore the auto-checkpoint interval AFTER the fold-up above so the
@@ -865,6 +874,7 @@ export class CodeGraph {
    */
   async sync(options: IndexOptions = {}): Promise<SyncResult> {
     return this.indexMutex.withLock(async () => {
+      const startedAt = Date.now();
       try {
         this.fileLock.acquire();
       } catch (err) {
@@ -971,18 +981,16 @@ export class CodeGraph {
         // Cross-file finalization (e.g. NestJS RouterModule prefixes). Run on
         // every sync that touched files so edits to `app.module.ts` propagate
         // to controllers in unchanged files. The pass is idempotent and cheap
-        // (regex over *.module.ts only).
-        if (result.filesAdded > 0 || result.filesModified > 0) {
+        // (regex over *.module.ts only). A removal counts too: deleting the
+        // file that hands a React Router table to the router leaves the
+        // table's routes behind unless this pass runs to take them away.
+        // (A pure-removal sync still resolves refs below — the deletion path
+        // resurrects the removed file's incoming edges as pending refs, #1240
+        // removal case — and runPostExtract starts by dropping the resolver's
+        // name caches, which a long-lived daemon warmed against the
+        // pre-removal graph.)
+        if (result.filesAdded > 0 || result.filesModified > 0 || result.filesRemoved > 0) {
           this.resolver.runPostExtract();
-        } else if (result.filesRemoved > 0) {
-          // A pure-removal sync still resolves refs below — the deletion path
-          // resurrects the removed file's incoming edges as pending refs
-          // (#1240 removal case) and the orphan sweep consumes them. In a
-          // long-lived process (daemon) the resolver's name caches were
-          // warmed against the pre-removal graph; drop them so resolution
-          // sees the post-removal state. (runPostExtract above clears caches
-          // itself, so the changed-files branch is already covered.)
-          this.resolver.clearCaches();
         }
         if (result.haskellImportInvalidationRecovered) {
           // The recovered sync may have no filesystem delta, so neither branch
@@ -1021,12 +1029,28 @@ export class CodeGraph {
             // now resolve, and nothing else ever revisits them (their rows
             // were parked as status='failed' by an earlier completed pass).
             // Look them up by the symbol names the changed files now carry
-            // and re-resolve just that set. On a sync where no failed ref
-            // matches, this is one indexed lookup.
+            // and re-resolve just that set. The names include each file's
+            // own, which a reference written as a path
+            // (`snippets/price.liquid`) waits under. On a sync where no failed
+            // ref matches, this is one indexed lookup.
             const tRetry = Date.now();
             const retryable = this.queries.getRetryableFailedReferences(
               this.queries.getNodeNamesByFiles(result.changedFilePaths)
             );
+            // A failed import waits for a file, a folder or a namespace, not a
+            // symbol: `package:app/b.dart` for a file named `b.dart`, `./ui`
+            // for `ui/index.ts`, `using Foo.Bar` for that namespace's node.
+            // Look those up by what the ADDED files can be imported as (a
+            // modified file was already there for any import of it), and by
+            // the namespaces and modules the changed files declare.
+            const retryRows = new Set(retryable.map((ref) => ref.rowId));
+            const importRetry = this.queries.getRetryableFailedImports(
+              (result.addedFilePaths ?? []).flatMap(importPathKeys),
+              this.queries.getNodeNamesByFiles(result.changedFilePaths, ['namespace', 'module'])
+            );
+            for (const ref of importRetry) {
+              if (!retryRows.has(ref.rowId)) retryable.push(ref);
+            }
             if (retryable.length > 0) {
               options.onProgress?.({
                 phase: 'resolving',
@@ -1190,6 +1214,8 @@ export class CodeGraph {
         this.orchestrator.finishGitIndexState(gitState, fullReconcile, result.failedFilePaths);
 
         if (fullReconcile && result.filesChecked > 0) this.pendingFullReconcile = false;
+        // The whole sync, as for indexAll: resolution and linking included (#2334).
+        result.durationMs = Date.now() - startedAt;
         return result;
       } finally {
         // Mirror indexAll's teardown: stop the valve, then restore the
@@ -1436,7 +1462,9 @@ export class CodeGraph {
    * Extract nodes and edges from source code (without storing)
    */
   extractFromSource(filePath: string, source: string): ExtractionResult {
-    return extractFromSource(filePath, source);
+    // The project root is what tells a Shopify theme's JSON templates (Liquid)
+    // apart from other JSON.
+    return extractFromSource(filePath, source, detectLanguage(filePath, source, undefined, this.projectRoot));
   }
 
   // ===========================================================================
@@ -1671,6 +1699,24 @@ export class CodeGraph {
   }
 
   /**
+   * The names each of the given symbols refers to, by reference kind, where
+   * the resolver could not follow the reference — a decorator or an interface
+   * from outside the index, which leaves no edge. Ids with none are absent.
+   */
+  getUnresolvedReferenceNamesFrom(nodeIds: Iterable<string>, kinds: readonly Edge['kind'][]): Map<string, string[]> {
+    return this.queries.getUnresolvedReferenceNamesFrom(nodeIds, kinds);
+  }
+
+  /**
+   * Every symbol that refers to each of the given names, by reference kind,
+   * where the resolver could not follow it: for `implements`, every class that
+   * names a given interface from outside the index.
+   */
+  getUnresolvedReferenceSourcesNamed(names: Iterable<string>, kinds: readonly Edge['kind'][]): Map<string, Set<string>> {
+    return this.queries.getUnresolvedReferenceSourcesNamed(names, kinds);
+  }
+
+  /**
    * The symbols with the most distinct dependents, most first — the index's
    * hubs. Distinct dependents, not edges: a helper called forty times from one
    * function has one dependent, and it is dependents a blast radius grows from.
@@ -1828,6 +1874,15 @@ export class CodeGraph {
   /** Lexical evidence for an empty explore result; does not alter retrieval. */
   getExploreMissDiagnostics(query: string) {
     return this.queries.getExploreMissDiagnostics(query);
+  }
+
+  /**
+   * The COBOL copybooks a query names (`CVACT01Y`, `MYCOPYBOOK`): each
+   * member's indexed copybook file(s) and every `COPY` / `EXEC SQL INCLUDE`
+   * statement that includes it. Empty for a query that names none.
+   */
+  findNamedCopybooks(query: string): NamedCopybook[] {
+    return findNamedCopybooks(this.queries, query);
   }
 
   /**
@@ -2110,6 +2165,34 @@ export class CodeGraph {
   /** How many indexed files are flagged tool-generated. Reported by `status`. */
   getGeneratedFileCount(): number {
     return this.queries.countGeneratedFiles();
+  }
+
+  /**
+   * Indexed files whose symbols are missing although their content is current
+   * — rows a content-hash comparison calls up to date (#2336). Reported by
+   * `status`; `sync` repairs the `needsReindex` group.
+   */
+  getIndexHealth(): IndexHealth {
+    const needsReindex: string[] = [];
+    const parseErrors: string[] = [];
+    for (const file of this.queries.getFilesWithoutNodesOrWithErrors()) {
+      const errors = file.errors ?? [];
+      if (hasGrammarLoadFailure(errors)) {
+        // Stored without being parsed — its grammar could not load (#2335).
+        needsReindex.push(file.path);
+      } else if (file.nodeCount === 0) {
+        // Every parse stores at least the file node, so zero nodes means a
+        // wiped row (#1541) or a recorded failure — except file-level-only
+        // languages and files over the size limit, which are empty on purpose.
+        if (isFileLevelOnlyLanguage(file.language)) continue;
+        if (errors.length === 0) needsReindex.push(file.path);
+        else if (errors.some((e) => e.severity === 'error' || e.code === 'parse_error')) parseErrors.push(file.path);
+      } else if (errors.some((e) => e.code === 'parse_error')) {
+        // Parsed, but the tree had errors and no symbols survived.
+        parseErrors.push(file.path);
+      }
+    }
+    return { needsReindex, parseErrors };
   }
 
   // ===========================================================================
