@@ -10,7 +10,7 @@ import { referenceNameTail } from './reference-tail';
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 /**
  * Migration definition
@@ -258,9 +258,56 @@ const migrations: Migration[] = [
   },
   {
     version: 14,
+    description: 'Retry a failed route module reference when sync adds or changes its file: module tails',
+    up: (db) => {
+      // A route's reference to the module it lazily loads, parked before this
+      // version — React Router's `lazy-import:./pages/Team`, Vue Router's and
+      // Angular's `import:./home/home.component#HomeComponent`, each also
+      // behind `layout:` — carries a fragment of its path as its tail
+      // ('/pages/Team', 'component#HomeComponent'), which no file's keys
+      // match. Rewrite it to the module tail it is parked under now.
+      // Idempotent: a rewritten tail rewrites to itself.
+      //
+      // Each prefix is a range of idx_unresolved_name. The `+` keeps the
+      // planner off idx_unresolved_status, which it otherwise picks although
+      // 'failed' is nearly every row: on vscode's index that read 830K rows,
+      // about a second, to select none.
+      const update = db.prepare('UPDATE unresolved_refs SET name_tail = ? WHERE id = ?');
+      const rows = db
+        .prepare(`SELECT id, reference_name, reference_kind, name_tail FROM unresolved_refs
+          WHERE (reference_name GLOB 'lazy-import:*' OR reference_name GLOB 'import:*' OR reference_name GLOB 'layout:*')
+            AND +status = 'failed' AND +reference_kind IN ('references', 'calls')`)
+        .all() as Array<{ id: number; reference_name: string; reference_kind: string; name_tail: string }>;
+      for (const row of rows) {
+        const tail = referenceNameTail(row.reference_name, row.reference_kind);
+        if (tail !== row.name_tail) update.run(tail, row.id);
+      }
+    },
+  },
+  {
+    version: 15,
+    description: 'Retry a failed reference through an import binding by its whole name: module-tail name index',
+    up: (db) => {
+      // A failed reference through an import binding the module declares
+      // under another name is parked under the module's key from this
+      // version on, and still looked up by its whole name. Rows parked before
+      // keep the tail their name gives, which the name lookup already finds;
+      // a re-index parks them under their modules. Keep the definition in
+      // lockstep with schema.sql.
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_unresolved_failed_module_name ON unresolved_refs(status, reference_name) WHERE status = 'failed' AND name_tail GLOB 'module:*';
+      `);
+    },
+  },
+  {
+    version: 16,
     description:
       'Reconcile Haskell fingerprints and upstream synthesis and import-retry migrations',
     up: (db) => {
+      // Haskell v14 used the version for fingerprint reconciliation, skipping
+      // upstream's route-module tail rewrite. Replay that idempotent rewrite
+      // so indexes from either history can retry their parked route references.
+      migrations.find((migration) => migration.version === 14)!.up(db);
       // Haskell indexes at v12 used that version for topology fingerprints,
       // so they have not run upstream's v12 import-tail migration. Replay it
       // only when its indexes are missing; its DDL and tail rewrite are idempotent.

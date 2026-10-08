@@ -318,6 +318,7 @@ export class QueryBuilder {
     deleteRefsByRowIdsFull?: SqliteStatement;
     getAllFilePaths?: SqliteStatement;
     getAllNodeNames?: SqliteStatement;
+    getCppIncludeNodes?: SqliteStatement;
     getDominantFile?: SqliteStatement;
     getChangeStamp?: SqliteStatement;
     getTopRouteFile?: SqliteStatement;
@@ -1364,14 +1365,18 @@ export class QueryBuilder {
    * order — the ORDER BY is total (`id` is unique), so this yields exactly the
    * nodes a caller filtering iterateNodesByKind by language would keep, in the
    * same sequence. A Go pass on a TypeScript monorepo otherwise materialized
-   * every method in the project to find a couple of Go ones.
+   * every method in the project to find a couple of Go ones. Several kinds
+   * come interleaved in that one order (the sort then holds only the rows
+   * the language filter keeps).
    */
-  *iterateNodesByKindIn(kind: NodeKind, languages: readonly string[]): IterableIterator<Node> {
-    if (languages.length === 0) return;
+  *iterateNodesByKindIn(kind: NodeKind | readonly NodeKind[], languages: readonly string[]): IterableIterator<Node> {
+    const kinds: readonly NodeKind[] = typeof kind === 'string' ? [kind] : kind;
+    if (kinds.length === 0 || languages.length === 0) return;
+    const kindTest = kinds.length === 1 ? 'kind = ?' : `kind IN (${kinds.map(() => '?').join(', ')})`;
     const stmt = this.db.prepare(
-      `SELECT * FROM nodes WHERE kind = ? AND language IN (${languages.map(() => '?').join(', ')}) ORDER BY file_path, start_line, id`
+      `SELECT * FROM nodes WHERE ${kindTest} AND language IN (${languages.map(() => '?').join(', ')}) ORDER BY file_path, start_line, id`
     );
-    for (const row of stmt.iterate(kind, ...languages)) {
+    for (const row of stmt.iterate(...kinds, ...languages)) {
       yield rowToNode(row as NodeRow);
     }
   }
@@ -3631,6 +3636,21 @@ export class QueryBuilder {
   }
 
   /**
+   * The import node of every C / C++ `#include`, narrowed to the path it
+   * spells and where it is written: the include graph reads nothing else, and
+   * decoding every import node of a large C++ project costs several times more.
+   */
+  getCppIncludeNodes(): Array<Pick<Node, 'id' | 'name' | 'filePath' | 'language' | 'startLine' | 'startColumn'>> {
+    if (!this.stmts.getCppIncludeNodes) {
+      this.stmts.getCppIncludeNodes = this.db.prepare(
+        `SELECT id, name, file_path AS filePath, language, start_line AS startLine, start_column AS startColumn
+           FROM nodes WHERE kind = 'import' AND language IN ('c', 'cpp')`
+      );
+    }
+    return this.stmts.getCppIncludeNodes.all() as Array<Pick<Node, 'id' | 'name' | 'filePath' | 'language' | 'startLine' | 'startColumn'>>;
+  }
+
+  /**
    * Stream the distinct node names one row at a time — the incremental
    * counterpart to {@link getAllNodeNames} for callers that need to yield
    * to the event loop mid-scan (resolver cache warm-up on multi-million-node
@@ -3762,9 +3782,10 @@ export class QueryBuilder {
    * terminate) but stay queryable by name_tail so a later sync can retry them
    * when a changed file introduces a symbol that could satisfy them. name_tail
    * is (re)written here so rows inserted before the v8 migration get their
-   * tail the first time they're attempted.
+   * tail the first time they're attempted. A ref's own `nameTail`, when the
+   * resolver gave it one, replaces the tail its name gives.
    */
-  markReferencesFailed(refs: Array<{ fromNodeId: string; referenceName: string; referenceKind: string }>): number {
+  markReferencesFailed(refs: Array<{ fromNodeId: string; referenceName: string; referenceKind: string; nameTail?: string }>): number {
     if (refs.length === 0) return 0;
     const stmt = this.db.prepare(
       "UPDATE unresolved_refs SET status = 'failed', name_tail = ? WHERE from_node_id = ? AND reference_name = ? AND reference_kind = ?"
@@ -3772,7 +3793,7 @@ export class QueryBuilder {
     let changed = 0;
     const markMany = this.db.transaction((items: typeof refs) => {
       for (const ref of items) {
-        changed += stmt.run(referenceNameTail(ref.referenceName, ref.referenceKind), ref.fromNodeId, ref.referenceName, ref.referenceKind).changes;
+        changed += stmt.run(ref.nameTail ?? referenceNameTail(ref.referenceName, ref.referenceKind), ref.fromNodeId, ref.referenceName, ref.referenceKind).changes;
       }
     });
     markMany(refs);
@@ -3787,7 +3808,7 @@ export class QueryBuilder {
    * can differ per call site (receiver-type inference reads the ref's line),
    * so a sibling must not inherit this row's failure.
    */
-  markReferencesFailedByRowIds(refs: Array<{ rowId: number; referenceName: string; referenceKind: string }>): number {
+  markReferencesFailedByRowIds(refs: Array<{ rowId: number; referenceName: string; referenceKind: string; nameTail?: string }>): number {
     if (refs.length === 0) return 0;
     const stmt = this.db.prepare(
       "UPDATE unresolved_refs SET status = 'failed', name_tail = ? WHERE id = ?"
@@ -3795,7 +3816,7 @@ export class QueryBuilder {
     let changed = 0;
     const markMany = this.db.transaction((items: typeof refs) => {
       for (const ref of items) {
-        changed += stmt.run(referenceNameTail(ref.referenceName, ref.referenceKind), ref.rowId).changes;
+        changed += stmt.run(ref.nameTail ?? referenceNameTail(ref.referenceName, ref.referenceKind), ref.rowId).changes;
       }
     });
     markMany(refs);
@@ -3810,41 +3831,54 @@ export class QueryBuilder {
    * (`get`, `map`, …) that one new definition won't resolve — the same
    * rationale as resolution's AMBIGUOUS_NAME_CEILING (#999) — and retrying an
    * arbitrary subset would be both wasted work and incoherent coverage.
+   *
+   * A name can also be one of a changed file's `moduleReferenceKeys`, which a
+   * route's reference to the module it lazily loads is parked under, and so
+   * is a reference through an import binding of the module. Such a binding's
+   * reference still waits for its own name too, looked up by its whole name:
+   * a fresh index links a binding whose module never resolves it by that
+   * name alone, to whichever declaration carries it.
    */
   getRetryableFailedReferences(names: string[], perNameCeiling: number = 500): UnresolvedReference[] {
     if (names.length === 0) return [];
 
-    // Pass 1: per-tail counts, chunked under the SQLite parameter limit.
-    const retryNames: string[] = [];
-    for (let i = 0; i < names.length; i += SQLITE_PARAM_CHUNK_SIZE) {
-      const chunk = names.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
-      const placeholders = chunk.map(() => '?').join(',');
-      const counts = this.db
-        .prepare(
-          `SELECT name_tail, COUNT(*) as count FROM unresolved_refs WHERE status = 'failed' AND name_tail IN (${placeholders}) GROUP BY name_tail`
-        )
-        .all(...chunk) as Array<{ name_tail: string; count: number }>;
-      for (const row of counts) {
-        if (row.count <= perNameCeiling) retryNames.push(row.name_tail);
+    const lookups = [
+      { column: 'name_tail', where: "status = 'failed'" },
+      // idx_unresolved_failed_module_name; its leading `status` is the
+      // equality term that keeps the planner off idx_unresolved_status and
+      // idx_unresolved_name, which read hundreds of thousands of rows here.
+      { column: 'reference_name', where: "status = 'failed' AND name_tail GLOB 'module:*'" },
+    ];
+    const rows = new Map<number, UnresolvedRefRow>();
+    for (const { column, where } of lookups) {
+      // Pass 1: per-key counts, chunked under the SQLite parameter limit.
+      const retryKeys: string[] = [];
+      for (let i = 0; i < names.length; i += SQLITE_PARAM_CHUNK_SIZE) {
+        const chunk = names.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(',');
+        const counts = this.db
+          .prepare(`SELECT ${column} AS key, COUNT(*) AS count FROM unresolved_refs WHERE ${where} AND ${column} IN (${placeholders}) GROUP BY ${column}`)
+          .all(...chunk) as Array<{ key: string; count: number }>;
+        for (const row of counts) {
+          if (row.count <= perNameCeiling) retryKeys.push(row.key);
+        }
+      }
+
+      // Pass 2: load the surviving rows; a row both lookups find is kept once.
+      for (let i = 0; i < retryKeys.length; i += SQLITE_PARAM_CHUNK_SIZE) {
+        const chunk = retryKeys.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(',');
+        const chunkRows = this.db
+          .prepare(`SELECT * FROM unresolved_refs WHERE ${where} AND ${column} IN (${placeholders})`)
+          .all(...chunk) as UnresolvedRefRow[];
+        // Loop, not spread — same V8 argument-limit hazard as
+        // getUnresolvedReferencesByFiles (#1558): a large definition delta can
+        // select an unbounded number of failed rows per chunk.
+        for (const row of chunkRows) rows.set(row.id, row);
       }
     }
-    if (retryNames.length === 0) return [];
 
-    // Pass 2: load the surviving rows.
-    const rows: UnresolvedRefRow[] = [];
-    for (let i = 0; i < retryNames.length; i += SQLITE_PARAM_CHUNK_SIZE) {
-      const chunk = retryNames.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
-      const placeholders = chunk.map(() => '?').join(',');
-      const chunkRows = this.db
-        .prepare(`SELECT * FROM unresolved_refs WHERE status = 'failed' AND name_tail IN (${placeholders})`)
-        .all(...chunk) as UnresolvedRefRow[];
-      // Loop, not spread — same V8 argument-limit hazard as
-      // getUnresolvedReferencesByFiles (#1558): a large definition delta can
-      // select an unbounded number of failed rows per chunk.
-      for (const row of chunkRows) rows.push(row);
-    }
-
-    return rows.map(rowToUnresolvedReference);
+    return [...rows.values()].map(rowToUnresolvedReference);
   }
 
   /**
@@ -3905,6 +3939,70 @@ export class QueryBuilder {
       language: row.language as Language,
       rowId: row.id,
     }));
+  }
+
+  /**
+   * Failed `calls` refs whose name tail is one of `tails` — the navigation
+   * calls (`history.push`, `navigate`) a sync looks through after a route
+   * appeared or went away. Read through the failed-tail index; the caller
+   * decides on each whole name.
+   */
+  getFailedCallsByTail(tails: string[]): Array<{ rowId: number; referenceName: string; filePath: string }> {
+    const out: Array<{ rowId: number; referenceName: string; filePath: string }> = [];
+    const unique = [...new Set(tails)];
+    for (let i = 0; i < unique.length; i += SQLITE_PARAM_CHUNK_SIZE) {
+      const chunk = unique.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = this.db
+        .prepare(
+          `SELECT id, reference_name, file_path FROM unresolved_refs
+            WHERE status = 'failed' AND reference_kind = 'calls' AND name_tail IN (${placeholders})`
+        )
+        .all(...chunk) as Array<{ id: number; reference_name: string; file_path: string }>;
+      for (const row of rows) out.push({ rowId: row.id, referenceName: row.reference_name, filePath: row.file_path });
+    }
+    return out;
+  }
+
+  /**
+   * The `navigates` edges a router's resolver made (not a synthesizer's), with
+   * the source file and language a resurrection needs — the navigation calls
+   * a sync re-resolves after a route appeared or went away.
+   */
+  getResolvedNavigations(): Array<Edge & { edgeId: number; sourceFilePath: string; sourceLanguage: Language }> {
+    const rows = this.db
+      .prepare(
+        `SELECT e.*, src.file_path AS source_file_path, src.language AS source_language
+           FROM edges e
+           JOIN nodes src ON src.id = e.source
+          WHERE e.kind = 'navigates' AND (e.provenance IS NULL OR e.provenance != 'heuristic')`
+      )
+      .all() as Array<EdgeRow & { source_file_path: string; source_language: Language }>;
+    return rows.map((row) => ({
+      ...rowToEdge(row),
+      edgeId: row.id,
+      sourceFilePath: row.source_file_path,
+      sourceLanguage: row.source_language,
+    }));
+  }
+
+  /**
+   * Put failed refs back in the pending set, for the next resolution pass —
+   * the sync's orphan sweep — to try again. Returns the number re-opened.
+   */
+  reopenFailedReferences(rowIds: number[]): number {
+    if (rowIds.length === 0) return 0;
+    let changed = 0;
+    this.db.transaction(() => {
+      for (let i = 0; i < rowIds.length; i += SQLITE_PARAM_CHUNK_SIZE) {
+        const chunk = rowIds.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(',');
+        changed += this.db
+          .prepare(`UPDATE unresolved_refs SET status = 'pending' WHERE status = 'failed' AND id IN (${placeholders})`)
+          .run(...chunk).changes;
+      }
+    })();
+    return changed;
   }
 
   /**
