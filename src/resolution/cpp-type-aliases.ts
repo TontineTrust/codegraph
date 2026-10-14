@@ -81,12 +81,16 @@ function cppTypeName(raw: string): TypeName | null {
   const parts: string[] = [];
   const templated: boolean[] = [];
   let depth = 0;
+  let parens = 0;
   let part = '';
   let args = false;
   const text = raw.replace(/\b(?:const|volatile|mutable|typename|template|class|struct|union|enum)\b/g, ' ').replace(/[&*]+/g, ' ');
   for (let i = 0; i < text.length; i++) {
     const c = text[i]!;
-    if (c === '<') {
+    // (In template arguments, a `<` or `>` in parentheses compares: `Bits<(N > 8)>`.)
+    if (depth > 0 && (c === '(' || c === ')')) parens = Math.max(0, parens + (c === '(' ? 1 : -1));
+    else if (parens > 0) continue;
+    else if (c === '<') {
       depth++;
       args = true;
     } else if (c === '>') depth = Math.max(0, depth - 1);
@@ -252,6 +256,17 @@ function localAliasLines(caller: Node, lines: readonly string[], context: Resolu
     memo.set(caller.id, found);
   }
   return found;
+}
+
+/**
+ * Does the function making `ref` declare, before it, an alias of the name a
+ * written type starts with — `using Map = std::map<…>;` for `Map`? Such an
+ * alias isn't indexed, so a lookup goes past it; resolveCppAliasedType reads it.
+ */
+export function cppDeclaresLocalAlias(written: string, ref: UnresolvedRef, context: ResolutionContext): boolean {
+  const name = cppTypeName(written);
+  return !!name && !written.trimStart().startsWith('::') &&
+    localAliasedType(name.names[0]!, context.getNodeById?.(ref.fromNodeId), ref, context) !== undefined;
 }
 
 /**
@@ -423,6 +438,22 @@ function baseClassesOf(cls: string, context: ResolutionContext): string[] {
   return bases;
 }
 
+/**
+ * The qualified name of the class `names` spells, looked up from `scope`:
+ * spelled out in a scope around it (classNamed), else a segment at a time as
+ * a declared type is, so a class one of the named class's bases declares is
+ * found. protobuf's conformance suites alias `using ConformanceRequestSetting =
+ * BinaryAndJsonConformanceSuite::ConformanceRequestSetting;`, a class their
+ * base `ConformanceTestSuite` declares.
+ */
+function classReached(names: readonly string[], scope: string, ref: UnresolvedRef, context: ResolutionContext): string | undefined {
+  const spelled = classNamed(names, scopesWithin(scope), context);
+  if (spelled) return spelled;
+  // (The walk stops on a class only once every segment is taken.)
+  const { found } = lookupSegments({ names: [...names], templated: names.map(() => false) }, scopesWithin(scope), ref, context);
+  return found && typeof found === 'object' && 'cls' in found ? found.cls : undefined;
+}
+
 /** The qualified name of the class `names` spells, looked up from `scopes`. */
 function classNamed(names: readonly string[], scopes: readonly string[], context: ResolutionContext): string | undefined {
   const spelled = names.join('::');
@@ -506,9 +537,14 @@ export function cppAliasedTypeName(resolved: CppAliasedType): string {
   return [resolved.target[resolved.target.length - 1]!, ...resolved.rest].join('::');
 }
 
-/** The qualified name of the project class a type resolved through aliases is, if it is one: `leveldb::SkipList::Iterator`. */
-export function cppAliasedClass(resolved: CppAliasedType, context: ResolutionContext): string | undefined {
-  return classNamed([...resolved.target, ...resolved.rest], scopesWithin(resolved.scope), context);
+/**
+ * The qualified name of the project class a type resolved through aliases is,
+ * if it is one: `leveldb::SkipList::Iterator`. With the ref it is resolved
+ * for, a class a base of the named class declares counts (classReached).
+ */
+export function cppAliasedClass(resolved: CppAliasedType, context: ResolutionContext, ref?: UnresolvedRef): string | undefined {
+  const names = [...resolved.target, ...resolved.rest];
+  return ref ? classReached(names, resolved.scope, ref, context) : classNamed(names, scopesWithin(resolved.scope), context);
 }
 
 /** What a C++ type name names when it is looked up for a class (see cppClassNamed). */
@@ -558,7 +594,7 @@ export function cppClassNamed(
   // The aliased type is written in the alias's own scope.
   const aliased = expand(text ? aliasedTypeIn(text, alias.name) : null, name.names.slice(next), name.templated.slice(next),
     parentScope(alias.qualifiedName), ref, context, 1, templateParametersAround(alias, context));
-  const cls = aliased && !aliased.pointer && classNamed([...aliased.target, ...aliased.rest], scopesWithin(aliased.scope), context);
+  const cls = aliased && !aliased.pointer && classReached([...aliased.target, ...aliased.rest], aliased.scope, ref, context);
   if (cls) return { cls };
   // A member of a type outside the project (`Alias::Inner`) is not the alias.
   return next === name.names.length ? { alias } : null;
