@@ -25,6 +25,7 @@ import type { LanguageExtractor, ExtractorContext } from './tree-sitter-types';
 import { EXTRACTORS } from './languages';
 import { stripCppTemplateArgs, isCppConstructorDeclaration, cDeclaratorIdentifier, isClassLikeDefinition } from './languages/c-cpp';
 import { NestedIntervals, scanCppBraceScopes, type CppBraceScopes } from './languages/cpp-brace-scopes';
+import { appendCppMacroMethods } from './languages/cpp-macro-methods';
 import { rustImplTypeName } from './languages/rust';
 import { HASKELL_CONID_START_RE, haskellReferenceParts, normalizeReferenceText } from './languages/haskell';
 import { goAliasTypeNames, goEmbeddedTypeName } from './languages/go';
@@ -8677,6 +8678,12 @@ export function extractFromSource(
         { sourceIsPreParsed: deferredPre != null }
       );
       result = extractor.extract();
+    }
+    // C++ methods the file's own macros define, read from the original source
+    // after either extractor so both mint them (cpp-macro-methods.ts).
+    if (detectedLanguage === 'cpp') {
+      const preParse = EXTRACTORS.cpp?.preParse;
+      appendCppMacroMethods(result, filePath, source, (text) => (preParse ? preParse(text, filePath) : text));
     }
   }
 
