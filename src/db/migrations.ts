@@ -5,12 +5,12 @@
  */
 
 import { SqliteDatabase } from './sqlite-adapter';
-import { referenceNameTail } from './reference-tail';
+import { referenceNameTail, MEMBER_TAIL_SQL, MODULE_PARKED_SQL } from './reference-tail';
 
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 /**
  * Migration definition
@@ -301,9 +301,27 @@ const migrations: Migration[] = [
   },
   {
     version: 16,
+    description: 'Retry a failed member reference through an import binding by its member: module-tail member index',
+    up: (db) => {
+      // A failed member reference through an import binding (`store.get`) is
+      // parked under the module's key from this version on, and still looked
+      // up by its member, the tail its name gives. Rows parked before keep
+      // that tail, which the tail lookup already finds; a re-index parks
+      // them under their modules. Keep the definition in lockstep with
+      // schema.sql: the expression is MEMBER_TAIL_SQL.
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_unresolved_failed_module_member ON unresolved_refs(status, ${MEMBER_TAIL_SQL}) WHERE ${MODULE_PARKED_SQL};
+      `);
+    },
+  },
+  {
+    version: 17,
     description:
       'Reconcile Haskell fingerprints and upstream synthesis and import-retry migrations',
     up: (db) => {
+      // Haskell v16 used the version for reconciliation, skipping upstream's
+      // member-reference index. Replay the idempotent DDL for either history.
+      migrations.find((migration) => migration.version === 16)!.up(db);
       // Haskell v14 used the version for fingerprint reconciliation, skipping
       // upstream's route-module tail rewrite. Replay that idempotent rewrite
       // so indexes from either history can retry their parked route references.

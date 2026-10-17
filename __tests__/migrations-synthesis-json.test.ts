@@ -110,7 +110,7 @@ describe('synthesis metadata JSON boundaries and migration', () => {
     insertRaw('still malformed', 2);
   });
 
-  it.each([10, 11, 12, 13, 14, 15])('adds Haskell fingerprints to an upstream v%s index without losing rows', version => {
+  it.each([10, 11, 12, 13, 14, 15, 16])('adds Haskell fingerprints to an upstream v%s index without losing rows', version => {
     const raw = connection.getDb();
     raw.exec(`ALTER TABLE files DROP COLUMN haskell_topology_hash;
       DELETE FROM schema_versions WHERE version >= 10;`);
@@ -206,6 +206,35 @@ describe('synthesis metadata JSON boundaries and migration', () => {
     const before = connection.getDb().prepare('SELECT * FROM unresolved_refs ORDER BY id').all();
     connection.getDb().exec('DELETE FROM schema_versions WHERE version >= 16');
     runMigrations(connection.getDb(), 15);
+    expect(connection.getDb().prepare('SELECT * FROM unresolved_refs ORDER BY id').all()).toEqual(before);
+  });
+
+  it('upgrades Haskell v16 with the upstream member index without losing fingerprints or references', () => {
+    const raw = connection.getDb();
+    raw.exec(`DROP INDEX idx_unresolved_failed_module_member;
+      DELETE FROM schema_versions WHERE version >= 16;
+      INSERT INTO schema_versions(version, applied_at, description) VALUES (16, 0, 'Haskell reconciliation fixture');
+      INSERT INTO files(path, content_hash, language, size, modified_at, indexed_at, haskell_topology_hash)
+        VALUES ('Main.hs', 'content', 'haskell', 1, 0, 0, 'preserved-topology');`);
+    queries.insertUnresolvedRef({ fromNodeId: 'a', referenceName: 'store.get', referenceKind: 'calls',
+      line: 1, column: 0, filePath: 'a.ts', language: 'typescript' });
+    raw.exec("UPDATE unresolved_refs SET status = 'failed', name_tail = 'module:store'");
+    const before = raw.prepare('SELECT * FROM unresolved_refs ORDER BY id').all();
+    connection.close();
+
+    connection = DatabaseConnection.open(path.join(dir, 'test.db'));
+    queries = new QueryBuilder(connection.getDb());
+    expect(getCurrentVersion(connection.getDb())).toBe(CURRENT_SCHEMA_VERSION);
+    expect(connection.getDb().prepare('SELECT haskell_topology_hash FROM files WHERE path = ?').get('Main.hs'))
+      .toEqual({ haskell_topology_hash: 'preserved-topology' });
+    expect(connection.getDb().prepare("SELECT name FROM sqlite_master WHERE name = 'idx_unresolved_failed_module_member'").get())
+      .toEqual({ name: 'idx_unresolved_failed_module_member' });
+    expect(connection.getDb().prepare('SELECT * FROM unresolved_refs ORDER BY id').all()).toEqual(before);
+    for (const name of ['get', 'store']) {
+      expect(queries.getRetryableFailedReferences([name]).map(ref => ref.referenceName)).toEqual(['store.get']);
+    }
+    connection.getDb().exec('DELETE FROM schema_versions WHERE version >= 17');
+    runMigrations(connection.getDb(), 16);
     expect(connection.getDb().prepare('SELECT * FROM unresolved_refs ORDER BY id').all()).toEqual(before);
   });
 
