@@ -25,6 +25,7 @@ import {
   inferLocalReceiverType,
   arrayElementType,
   tsImportedTypeFile,
+  reExportSource,
 } from './name-matcher';
 import { JS_ARRAY_METHODS } from './js-builtins';
 
@@ -42,9 +43,14 @@ const EXTENSION_RESOLUTION: Record<string, string[]> = {
   // module-entry convention, hit when a bare workspace import ("data") is
   // rewritten to the member's directory; lowercase variants for safety.
   arkts: ['.ets', '.ts', '.d.ts', '.js', '/Index.ets', '/index.ets', '/index.ts', '/index.js'],
-  javascript: ['.js', '.jsx', '.mjs', '.cjs', '.xsjs', '.xsjslib', '/index.js', '/index.jsx'],
+  // A JavaScript file imports TypeScript modules too, as the bundler and
+  // tsc's `allowJs` read it: mastodon's `modal_root.jsx` imports
+  // `./audio_modal`, which is `audio_modal.tsx`. JavaScript comes first, so a
+  // `helpers.ts` beside `helpers.js` doesn't take its importers. Never `.d.ts`:
+  // a declaration file is not the module a JavaScript file runs.
+  javascript: ['.js', '.jsx', '.mjs', '.cjs', '.xsjs', '.xsjslib', '.ts', '.tsx', '/index.js', '/index.jsx', '/index.ts', '/index.tsx'],
   tsx: ['.tsx', '.ts', '.d.ts', '.js', '.jsx', '/index.tsx', '/index.ts', '/index.js', '/index.jsx'],
-  jsx: ['.jsx', '.js', '/index.jsx', '/index.js'],
+  jsx: ['.jsx', '.js', '.tsx', '.ts', '/index.jsx', '/index.js', '/index.tsx', '/index.ts'],
   // SFC consumers import plain TS/JS, sibling components, and barrels
   // (`./lib` → `./lib/index.ts`). Without a list, relative imports from a
   // `.svelte`/`.vue` file resolve to nothing, so barrel callers vanish (#629).
@@ -520,7 +526,7 @@ const C_CPP_STDLIB_HEADERS = new Set([
  * same syntax, and leaving them out made `isExternalImport` answer "not
  * external" for every npm specifier in an SFC.
  */
-const ESM_IMPORT_LANGUAGES = new Set<Language>([
+export const ESM_IMPORT_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
   'typescript', 'tsx', 'javascript', 'jsx', 'arkts', 'svelte', 'vue', 'astro',
 ]);
 
@@ -1382,10 +1388,17 @@ function extractGoImports(content: string): ImportMapping[] {
 
   const mapping = (localName: string, source: string): ImportMapping =>
     ({ localName, exportedName: '*', source, isDefault: false, isNamespace: true });
+  // Go binds a name to one import of a file, so a name another import is
+  // given explicitly is not an unaliased import's: etcd's benchmark tool has
+  // `"github.com/cheggaaa/pb/v3"` (package pb) beside
+  // `v3 "go.etcd.io/etcd/client/v3"`, and listed first, pb took every `v3.`.
+  const explicit = new Set(specs.flatMap(({ name }) => (name !== undefined && name !== '.' && name !== '_' ? [name] : [])));
   // A dot import (`. "pkg"`) binds no name of its own; it stays listed under
   // its last path element.
-  const mappings = specs.map(({ name, source }) =>
-    mapping(name === undefined || name === '.' ? source.split('/').pop()! : name, source));
+  const mappings = specs
+    .map(({ name, source }) => ({ explicitly: name !== undefined && name !== '.', localName: name === undefined || name === '.' ? source.split('/').pop()! : name, source }))
+    .filter(({ explicitly, localName }) => explicitly || !explicit.has(localName))
+    .map(({ localName, source }) => mapping(localName, source));
   const bound = new Set(mappings.map((m) => m.localName));
   const assumed = new Map<string, string[]>();
   for (const { name, source } of specs) {
@@ -1834,6 +1847,19 @@ function isJsBareModuleRef(ref: UnresolvedRef, context: ResolutionContext): bool
   return imports.some((m) => m.source === ref.referenceName) && !imports.some((m) => m.localName === ref.referenceName);
 }
 
+/**
+ * The file a JS/TS module reference names, the way resolveViaImport reads it:
+ * a path (`../lib/a`, `@/lib/x`), a scoped package a `tsconfig` path or a
+ * workspace member maps to the project, or a bare module under a `baseUrl`.
+ * Null for any other reference, and for one that names no file of the project
+ * but its own.
+ */
+export function jsModuleFile(ref: UnresolvedRef, context: ResolutionContext): string | null {
+  if (!isJsPathImportRef(ref) && !isJsBareModuleRef(ref, context)) return null;
+  const file = resolveImportPath(ref.referenceName, ref.filePath, ref.language, context);
+  return file && file !== ref.filePath ? file : null;
+}
+
 /** PHP reference kinds whose name is a class name, written as in the source. */
 const PHP_CLASS_NAME_REFS: ReadonlySet<string> = new Set(['instantiates', 'extends', 'implements', 'references']);
 
@@ -1910,9 +1936,9 @@ export function resolveViaImport(
   // found the way the runtime finds it: extensions, `index` files, path
   // aliases. Matching the basename instead missed every extensionless one
   // (the common spelling) and could land on a same-named file elsewhere.
-  if (isJsPathImportRef(ref) || isJsBareModuleRef(ref, context)) {
-    const file = resolveImportPath(ref.referenceName, ref.filePath, ref.language, context);
-    const fileNode = file && file !== ref.filePath ? context.getNodesInFile(file).find((n) => n.kind === 'file') : undefined;
+  const moduleFile = jsModuleFile(ref, context);
+  if (moduleFile) {
+    const fileNode = context.getNodesInFile(moduleFile).find((n) => n.kind === 'file');
     if (fileNode) return { original: ref, targetNodeId: fileNode.id, confidence: 0.9, resolvedBy: 'import' };
   }
   // A Dart `import` / `export` URI names a library file, and a `part` URI one
@@ -2221,6 +2247,24 @@ export function resolveViaImport(
         }
       }
     }
+  }
+
+  // A barrel's own `export { A, B as C } from './x'` names `A` and `B` the way
+  // the module calls them, and binds neither, so no import above holds them.
+  // Each resolves through the module the statement names, as an import does:
+  // looked up by its name alone, it reached a namesake elsewhere in the
+  // project (luci-go milo's commit table barrel, a build table's context).
+  if (ref.referenceKind === 'imports' && ESM_IMPORT_LANGUAGES.has(ref.language)) {
+    const source = reExportSource(ref.referenceName, ref, context);
+    const resolvedPath = source === undefined ? null : resolveImportPath(source, ref.filePath, ref.language, context);
+    const targetNode = resolvedPath === null ? undefined : findExportedSymbol(
+      resolvedPath,
+      { isDefault: false, isNamespace: false, exportedName: ref.referenceName, memberName: null },
+      ref.language,
+      context,
+      new Set()
+    );
+    if (targetNode) return { original: ref, targetNodeId: targetNode.id, confidence: 0.9, resolvedBy: 'import' };
   }
 
   return null;
