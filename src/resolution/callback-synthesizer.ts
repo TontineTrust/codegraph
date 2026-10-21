@@ -40,7 +40,7 @@ import { crossTierEdges, hasCrossTierPattern, hasTestRequestPattern, testRequest
 import { enclosingFn, makeLineAt } from './synth-utils';
 import { resolveImportPath } from './import-resolver';
 import { cppSpecializationArguments, crossesCodeBoundary, jsCodeBindsName } from './name-matcher';
-import { declaredComponent, exportedComponent, lazyValueModules } from './frameworks/react';
+import { declaredComponent, exportedComponent, lazyValueModules, wrappedComponentName } from './frameworks/react';
 import { jsxCode } from './jsx-code';
 
 const REGISTRAR_NAME = /^(on[A-Z]\w*|subscribe|addListener|addEventListener|register|watch|listen|addCallback)$/;
@@ -61,6 +61,9 @@ const JSX_FAMILY = ['tsx', 'jsx', 'javascript'];
 // the next match, which `opensTag` reads as a type argument, not a tag.
 const JSX_TAG_RE = /<([A-Z][A-Za-z0-9_]*)(?=[\s/><])/g;
 const MAX_JSX_CHILDREN = 30;
+// A wrapper around a component — `styled(ActionButton)`, `memo(Button)`,
+// `forwardRef(Render)` — renders it without a tag (`wrappedComponentName`).
+const WRAPPER_CALL_RE = /\b(?:styled|memo|forwardRef)\s*\(\s*[A-Z]/;
 // Vue SFC templates: kebab-case child components (<el-button> → ElButton) and
 // event bindings (@click="fn" / v-on:click="fn"). PascalCase children (<VPNav/>)
 // are already caught by JSX_TAG_RE via the SFC component node.
@@ -1890,6 +1893,32 @@ function jsxChild(
 }
 
 /**
+ * The component a wrapper component wraps, by the name its declaration hands
+ * the wrapper (`wrappedComponentName`), bound the way a tag of that name in the
+ * file is (`jsxChild`), but only where the file binds the name itself: a value
+ * or a component it declares, or an import of a project module the index
+ * holds. Anything else names no component of the project, and a namesake
+ * elsewhere is no guess worth an edge: bigbluebutton's `styled(Icon)`, imported through a
+ * Meteor `/imports/…` path no resolver follows, would render whichever of its
+ * dozens of `Icon`s came first, and SigNoz's `styled(Text)` of `const { Text }
+ * = Typography` a `Text` from another page's styles.
+ */
+function wrappedChild(
+  ctx: ResolutionContext,
+  name: string,
+  file: string,
+  importsOf: () => Map<string, string>,
+  ownValueOf: (name: string) => ReturnType<typeof declaredComponent>,
+  exportOf: (module: string, exported: string) => Node | null
+): Node | undefined {
+  const declared = ownValueOf(name) !== undefined ||
+    (ctx.getNodesInFileNamed?.(file, name) ?? ctx.getNodesInFile(file).filter((n) => n.name === name))
+      .some((n) => JSX_CHILD_KINDS.has(n.kind));
+  if (!declared && !projectImport(ctx, name, file)) return undefined;
+  return jsxChild(ctx, name, file, importsOf, ownValueOf, exportOf);
+}
+
+/**
  * Whether the `<Name` at `at` opens a JSX tag. A type argument list follows
  * its type's name directly — `useState<User>()`, `Array<Item>`, the
  * `<Document>` of `<PaginatedList<Document>` — and a tag never does, short of
@@ -1915,6 +1944,16 @@ function writtenBare(src: string, name: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Whether the lines a file or top-level value owns (#2587) declare `name`
+ * (`const Card = vi.fn()` in a test callback). Only those lines are read, so
+ * a parameter or local of a function elsewhere in the file binds nothing here.
+ */
+function ownLinesBind(name: string, src: string): boolean {
+  const n = name.replace(/\$/g, '\\$');
+  return new RegExp(`\\b(?:const|let|var)\\s+${n}\\b(?!\\s*[,\\]}])`).test(src);
 }
 
 /**
@@ -2190,7 +2229,10 @@ function skipSpace(code: string, at: number, step: 1 | -1): number {
  * Phase 5: React JSX child rendering. A component that returns `<Child .../>`
  * mounts Child — React calls it — but JSX instantiation isn't a static call edge,
  * so a render tree (App.render → StaticCanvas → renderStaticScene) breaks at the
- * JSX hop. Link parent → each capitalized JSX child it renders. File-oriented
+ * JSX hop. Link parent → each capitalized JSX child it renders. A parent is a
+ * method, function or component — or, for a tag outside all of those, the
+ * top-level value or the file that holds it (#2587), as for a plain call
+ * there. File-oriented
  * (read each JSX file once). Precision gates: the parent must write the name as
  * a tag in its code, not in a comment, a string or a template (react-router's
  * "You cannot render a <Router> inside another <Router>"; `jsxCode`), and
@@ -2217,6 +2259,7 @@ async function reactJsxChildEdges(ctx: ResolutionContext, onYield: MaybeYield): 
   const edges: Edge[] = [];
   const seen = new Set<string>();
   const PARENT_KINDS = new Set(['method', 'function', 'component']);
+  const VALUE_PARENT_KINDS = new Set(['constant', 'variable']);
   // Once per module and export for the whole pass: what a tag imported from
   // the project renders. The lookup reads and comment-strips the module.
   const exports = new Map<string, Node | null>();
@@ -2235,43 +2278,118 @@ async function reactJsxChildEdges(ctx: ResolutionContext, onYield: MaybeYield): 
     if ((++scannedFiles & 15) === 0) await onYield();
     if ((++scanned & 255) === 0) await onYield(); // #1091: yield mid-scan on huge graphs
     const content = ctx.readFile(file);
-    if (!content || (!content.includes('</') && !content.includes('/>'))) continue; // JSX-file gate
+    if (!content) continue;
+    const hasTags = content.includes('</') || content.includes('/>');
+    const wraps = WRAPPER_CALL_RE.test(content);
+    if (!hasTags && !wraps) continue; // JSX-file gate
     // File-level language gate, not merely a project-level one: mixed C/JS
     // monorepos must not interpret `"<Foo/>"` inside C as JSX (#1560). A
     // TypeScript `.ts` file holds no JSX either: a `<Name>` there is a type
     // assertion or text, like outline's OpenSearch XML template.
-    const parents = ctx.getNodesInFile(file).filter(
-      (n) => PARENT_KINDS.has(n.kind) && JSX_FAMILY.includes(n.language)
-    );
-    if (parents.length === 0) continue;
-    // Read once per file, and only when a name actually turns out ambiguous.
-    let imports: Map<string, string> | null = null;
-    const importsOf = () =>
-      (imports ??= importedFrom(ctx, file, parents[0]!.language));
+    const inFile = ctx.getNodesInFile(file);
     // Once per file and name: the value the file declares under it, if any.
     const ownValues = new Map<string, ReturnType<typeof declaredComponent>>();
     const ownValueOf = (name: string) => {
       if (!ownValues.has(name)) ownValues.set(name, declaredComponent(name, file, ctx));
       return ownValues.get(name);
     };
+    // A wrapper component renders the component it wraps, with no tag to read:
+    // outline's `const NudeButton = styled(ActionButton)…`, a `memo(Button)`.
+    // Without the link a render flow through it ends at the wrapper. The name
+    // binds as a tag of that name in this file would, where the file binds it
+    // (`wrappedChild`), so a package's `styled(Link)` renders nothing here. Any
+    // JS-family file: a styles `.ts` file declares wrappers too.
+    if (wraps) {
+      let wrapperImports: Map<string, string> | null = null;
+      for (const wrapper of inFile) {
+        if (wrapper.kind !== 'component' || !JS_FAMILY.includes(wrapper.language)) continue;
+        const name = wrappedComponentName(wrapper, ctx);
+        if (!name) continue;
+        const importsOf = () => (wrapperImports ??= importedFrom(ctx, file, wrapper.language));
+        const child = wrappedChild(ctx, name, file, importsOf, ownValueOf, exportOf);
+        if (!child || child.id === wrapper.id || crossesCodeBoundary(wrapper.language, child.language)) continue;
+        const key = `${wrapper.id}>${child.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        edges.push({
+          source: wrapper.id, target: child.id, kind: 'calls', line: wrapper.startLine,
+          provenance: 'heuristic',
+          metadata: { synthesizedBy: 'jsx-render', via: name, wrapped: true },
+        });
+      }
+    }
+    if (!hasTags) continue;
+    const fns = inFile.filter((n) => PARENT_KINDS.has(n.kind) && JSX_FAMILY.includes(n.language));
+    // JSX outside every function renders from where a plain call there is
+    // attributed (#2587): a top-level `const ICONS = { a: <Icon /> }` from the
+    // const, `createRoot(el).render(<App />)` or a test's
+    // `it('…', () => render(<Card />))` from the file. Ownership is by line:
+    // a value owns the lines of its span no function or class holds and no
+    // other value shares; the file, the lines no node but itself, an import,
+    // an export or a framework's route holds. So no tag counts twice.
+    // The file's lines read as code, split once: a tag in a comment or a
+    // string is text (`jsxCode`).
+    let code: string | null | undefined;
+    const codeOf = () => (code === undefined ? (code = jsxCode(content)) : code);
+    let lines: string[] | null = null;
+    const holds = (n: Node) => PARENT_KINDS.has(n.kind) || n.kind === 'class';
+    let fileNode = inFile.find((n) => n.kind === 'file' && JSX_FAMILY.includes(n.language));
+    const owns = new Map<string, (line: number) => boolean>();
+    let values: Node[] = [];
+    if (fileNode) {
+      // Per line: 1 when a function or class holds it, 2 when any other node does.
+      const held = new Uint8Array((fileNode.endLine || 0) + 2);
+      const valuesOn = new Uint8Array(held.length);
+      for (const n of inFile) {
+        if (n.kind === 'file' || n.kind === 'import' || n.kind === 'export' || n.kind === 'route' ||
+            !n.startLine || !n.endLine) continue;
+        const mark = holds(n) ? 1 : 2;
+        for (let l = n.startLine; l <= n.endLine && l < held.length; l++) if (held[l] !== 1) held[l] = mark;
+      }
+      // A top-level value: its first line is in no function or class.
+      values = inFile.filter((n) => VALUE_PARENT_KINDS.has(n.kind) && JSX_FAMILY.includes(n.language) &&
+        held[n.startLine] !== 1);
+      // A line a value shares with another statement (`const root =
+      // createRoot(el); root.render(<App />)`) is no one's — not the value's,
+      // and not the file's, which owns only lines no node holds: ownership is
+      // by line, so its tags get no edge rather than a wrong one. Read as
+      // code, so a comment there is no statement.
+      const raw = (lines ??= (codeOf() ?? content).split('\n'));
+      for (const v of values) {
+        for (let l = v.startLine; l <= v.endLine && l < valuesOn.length; l++) if (valuesOn[l]! < 2) valuesOn[l]!++;
+        const before = (raw[v.startLine - 1] ?? '').slice(0, v.startColumn ?? 0);
+        const after = (raw[v.endLine - 1] ?? '').slice(v.endColumn ?? Infinity);
+        if (!/^\s*(?:(?:export|declare|default|const|let|var)\s+)*$/.test(before)) valuesOn[v.startLine] = 2;
+        if (!/^[\s;]*$/.test(after)) valuesOn[v.endLine] = 2;
+      }
+      for (const v of values) owns.set(v.id, (line) => held[line] !== 1 && valuesOn[line] === 1);
+      if (held.subarray(1, fileNode.endLine + 1).includes(0)) owns.set(fileNode.id, (line) => !held[line]);
+      else fileNode = undefined;
+    }
+    const parents = [...fns, ...values, ...(fileNode ? [fileNode] : [])];
+    if (parents.length === 0) continue;
+    // Read once per file, and only when a name actually turns out ambiguous.
+    let imports: Map<string, string> | null = null;
+    const importsOf = () =>
+      (imports ??= importedFrom(ctx, file, parents[0]!.language));
     // A function renders the tags its own lines hold, so functions that span
     // the same lines share them: every function of a minified bundle spans
     // its one line, and reading that line again per function took 9 to 25 s
     // over go-ethereum's graphiql.min.js (2,234 functions on 980 KB). The
     // file is split once, not once per function, and read as code once: a
     // tag in a comment or a string is text (`jsxCode`).
-    let code: string | null | undefined;
-    const codeOf = () => (code === undefined ? (code = jsxCode(content)) : code);
-    let lines: string[] | null = null;
     // Each name a span holds (`spanTags`), read when a function among the
-    // parents is, or a function around one.
+    // parents is, or a function around one. A parent that owns its lines
+    // (#2587) reads only those, the rest left blank, under its own key.
     const tagsBySpan = new Map<string, SpanTags>();
     const spanOf = (fn: Node): SpanTags => {
-      const span = `${fn.startLine}:${fn.endLine}`;
+      const own = owns.get(fn.id);
+      const span = own ? fn.id : `${fn.startLine}:${fn.endLine}`;
       let names = tagsBySpan.get(span);
       if (!names) {
         lines ??= (codeOf() ?? content).split('\n');
-        names = spanTags(lines.slice(fn.startLine - 1, fn.endLine).join('\n'), fn.startLine);
+        const spanLines = lines.slice(fn.startLine - 1, fn.endLine);
+        names = spanTags((own ? spanLines.map((text, i) => (own(fn.startLine + i) ? text : '')) : spanLines).join('\n'), fn.startLine);
         tagsBySpan.set(span, names);
       }
       return names;
@@ -2302,27 +2420,37 @@ async function reactJsxChildEdges(ctx: ResolutionContext, onYield: MaybeYield): 
         if (!line) continue;
         let child = jsxChild(ctx, name, file, importsOf, ownValueOf, exportOf);
         if (child) {
-          // A name the parent, or a function around it, binds by the parent's
-          // first tag is that local: excalidraw's example app destructures
-          // `Sidebar` and `Footer` once and renders them in nested `render…`
-          // functions too. It renders a component that function declares, if
-          // any (`declaredInside`).
-          let binder = scopeBinds(names, parent, name, line, file, ctx) ? parent : undefined;
-          if (!binder) {
-            around ??= functionsAround(parents, parent);
-            for (const fn of around) {
-              if (scopeBinds(spanOf(fn), fn, name, line, file, ctx)) {
-                binder = fn;
-                break;
+          const own = owns.get(parent.id);
+          if (own) {
+            // A tag the file or a top-level value holds (#2587): a name its own
+            // lines declare (`const Card = vi.fn()` in a test's callback), or one
+            // the file destructures at its top, is that local.
+            if ((names.bare.has(name) && ownLinesBind(name, names.src)) || destructuredAtTop(name)) {
+              child = declaredInside(ctx, name, parent, child);
+            }
+          } else {
+            // A name the parent, or a function around it, binds by the parent's
+            // first tag is that local: excalidraw's example app destructures
+            // `Sidebar` and `Footer` once and renders them in nested `render…`
+            // functions too. It renders a component that function declares, if
+            // any (`declaredInside`).
+            let binder = scopeBinds(names, parent, name, line, file, ctx) ? parent : undefined;
+            if (!binder) {
+              around ??= functionsAround(fns, parent);
+              for (const fn of around) {
+                if (scopeBinds(spanOf(fn), fn, name, line, file, ctx)) {
+                  binder = fn;
+                  break;
+                }
               }
             }
+            if (binder) child = declaredInside(ctx, name, binder, child);
+            // A name the file destructures at its top is every function's local:
+            // refine's pages take `const { Title, Text } = Typography` from antd
+            // and rendered two other examples' `Title` and `Text`. A function
+            // that declares the name inside itself still renders its own.
+            else if (destructuredAtTop(name)) child = declaredInside(ctx, name, around?.[around.length - 1] ?? parent, child);
           }
-          if (binder) child = declaredInside(ctx, name, binder, child);
-          // A name the file destructures at its top is every function's local:
-          // refine's pages take `const { Title, Text } = Typography` from antd
-          // and rendered two other examples' `Title` and `Text`. A function
-          // that declares the name inside itself still renders its own.
-          else if (destructuredAtTop(name)) child = declaredInside(ctx, name, around?.[around.length - 1] ?? parent, child);
         }
         if (!child || child.id === parent.id || crossesCodeBoundary(parent.language, child.language)) continue;
         const key = `${parent.id}>${child.id}`;
@@ -4785,6 +4913,8 @@ export function hasSynthesisPattern(filePath: string, content: string): boolean 
   if (/\.go$/.test(filePath) && /\b(?:struct|interface)\b|\bfunc\s*\(/.test(content)) return true;
   if (hasCrossTierPattern(content) || hasTestRequestPattern(filePath, content)) return true;
   if (/\b(?:render|build|setState|defineStore|createStore|createApi|Store|href|sendEvent|sendEventWithName)\b|<\/|\/>/.test(content)) return true;
+  // A wrapper renders the component it wraps (jsxEdges), in a file with no markup of its own too.
+  if (WRAPPER_CALL_RE.test(content)) return true;
   if (/\.(?:forEach|append|add|push|insert|fire|dispatchEvent|addListener|Use|GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Any|Handle)\s*\(/.test(content)) return true;
   if (/[\w$]\s*\[\s*[A-Za-z_$]/.test(content) || /\b(?:dispatch|commit)\s*\(/.test(content)) return true;
   const patterns = [THUNK_DECL_RE, CELERY_TASK_DECORATOR_RE, CELERY_DISPATCH_RE,
