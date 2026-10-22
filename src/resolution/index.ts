@@ -21,7 +21,7 @@ import {
   isImportableKind,
   CPP_DEFINE_SIGNATURE,
 } from './types';
-import { isPythonSelfCall, matchJsStoreBindingCall, isUnresolvedJsMemberCall, matchObjectPathCall, thisScopeCaller, isVisibleAcrossFiles, matchReference, matchByFilePath, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope, isRustForeignImplCallable, CASE_INSENSITIVE_LANGUAGES, isDartMemberRead, matchDartMemberRead, isDartChainLink, matchDartChainLink, isDartAnnotation, matchDartAnnotation, isStdMethodName, isGoUnknownQualified, isGoProjectLocalCall, GO_STDLIB_PACKAGES, isGoBareName, goTypePositionTarget, GO_TYPE_KINDS, matchGoAssertedCall, isGoAssertedLocal, isGoLocallyBound, isPythonFromImportModule, pythonAttrRefResolves, isImportShadowedByJsBinding } from './name-matcher';
+import { isPythonSelfCall, matchJsStoreBindingCall, isUnresolvedJsMemberCall, matchObjectPathCall, thisScopeCaller, isVisibleAcrossFiles, matchReference, matchByFilePath, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope, isRustForeignImplCallable, CASE_INSENSITIVE_LANGUAGES, isDartMemberRead, matchDartMemberRead, isDartChainLink, matchDartChainLink, isDartAnnotation, matchDartAnnotation, isStdMethodName, isGoUnknownQualified, isGoProjectLocalCall, GO_STDLIB_PACKAGES, isGoBareName, goTypePositionTarget, goDotImportedSupertype, GO_TYPE_KINDS, matchGoAssertedCall, matchGoIndexedCall, matchGoChainedCall, preferGoBuildTwin, isGoAssertedLocal, isGoLocallyBound, isPythonFromImportModule, pythonAttrRefResolves, isImportShadowedByJsBinding, isManualMockPath } from './name-matcher';
 import { isVisibleCppMacro, clearCppMacroVisibility } from './cpp-macro-visibility';
 import { isCppConstructorRef, matchCppConstructor } from './cpp-constructor';
 import { isCppSupertypeRef, matchCppSupertype, clearCppSupertypeMemos } from './cpp-supertypes';
@@ -35,7 +35,7 @@ import { clearCppIncluderMemos } from './cpp-includers';
 import { clearCFeatureVariantMemos } from './c-feature-variants';
 import { clearAmbientModuleMemos, ambientModuleDeclarations } from './ambient-modules';
 import { matchShopifyThemeFile } from './shopify-themes';
-import { resolveViaImport, resolvePhpImportedStaticCall, resolvePhpQualifiedClassRef, resolveTsQualifiedTypeRef, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isDartImportRef, isLuaRequireRef, isJsPathImportRef, isBoundToOutOfRepoImport, reachesAmbientModule, importBindingTail, clearImportResolverMemos, resolveImportPath, isExternalImport, ESM_IMPORT_LANGUAGES, jsModuleFile, pythonRootFingerprint, pythonReopenScope, pythonPackageImporters } from './import-resolver';
+import { resolveViaImport, resolvePhpImportedStaticCall, resolvePhpQualifiedClassRef, resolveTsQualifiedTypeRef, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isDartImportRef, isLuaRequireRef, isJsPathImportRef, isBoundToOutOfRepoImport, reachesAmbientModule, importBindingTail, clearImportResolverMemos, resolveImportPath, isExternalImport, ESM_IMPORT_LANGUAGES, jsModuleFile, pythonRootFingerprint, pythonReopenScope, pythonPackageImporters, moduleDefaultExport, isJsFamilyFile, isModuleBindingName } from './import-resolver';
 import { ResolverPool, minRefsForPool, shouldEngageAdaptively } from './resolver-pool';
 import { resolveAliasBinding } from './alias-binding';
 import { detectFrameworks, getResolvingFrameworks } from './frameworks';
@@ -51,6 +51,7 @@ import { lexicalPathWithinRoot } from '../utils';
 import type { CrossFileNodes, ReExport } from './types';
 import { resurrectRefFromDroppedEdge } from './resurrect-ref';
 import { LRUCache } from './lru-cache';
+import { isTestPath } from '../search/query-utils';
 import { JS_BUILT_INS } from './js-builtins';
 import { builtinModules } from 'module';
 import { parse as parseJsonc } from 'jsonc-parser';
@@ -88,6 +89,13 @@ const CHAIN_SHAPE = /^(.+)\(\)\.(\w+)$/;
 
 /** PHP `$this->prop->method()` encoded as `this->prop.method` — no `()`, so CHAIN_SHAPE misses it. */
 const PHP_PROP_SHAPE = /^this->\w+\.\w+$/;
+
+/**
+ * How many files that import a changed module by default a sync reads the
+ * edges of, when the module forwards its default from another file, to see
+ * whether they still land on it (changedDefaultExports).
+ */
+const DEFAULT_READER_SAMPLE_FILES = 8;
 
 /**
  * Cache size limits. Each per-resolver cache is bounded so memory
@@ -145,6 +153,9 @@ const GO_BUILT_INS = new Set([
   'float32', 'float64', 'complex64', 'complex128',
   'string', 'bool', 'byte', 'rune', 'any',
 ]);
+
+/** What a Pascal typecast's name resolves to: `TFoo(x)` casts, it doesn't call (see createEdges). */
+const PASCAL_CAST_TARGET_KINDS: ReadonlySet<string> = new Set(['class', 'struct', 'interface', 'enum', 'type_alias']);
 
 const PASCAL_UNIT_PREFIXES = [
   'System.', 'Winapi.', 'Vcl.', 'Fmx.', 'Data.', 'Datasnap.',
@@ -541,6 +552,9 @@ export class ReferenceResolver {
    * Clear internal caches
    */
   clearCaches(): void {
+    this.mocklessContext = null;
+    this.mocklessBase = null;
+    this.manualMocks = undefined;
     this.nodeCache.clear();
     this.fileCache.clear();
     this.importMappingCache.clear();
@@ -1325,6 +1339,22 @@ export class ReferenceResolver {
   }
 
   resolveOne(ref: UnresolvedRef): ResolvedRef | null {
+    // Production code is resolved as if the project's manual mocks were not
+    // indexed (see mocklessContextFor); every strategy below reads the graph
+    // through this.context, so it answers for that view.
+    const outer = this.context;
+    const base = outer === this.mocklessContext && this.mocklessBase ? this.mocklessBase : outer;
+    const context = this.mocklessContextFor(ref, base) ?? base;
+    if (context === outer) return this.resolveOneIn(ref);
+    this.context = context;
+    try {
+      return this.resolveOneIn(ref);
+    } finally {
+      this.context = outer;
+    }
+  }
+
+  private resolveOneIn(ref: UnresolvedRef): ResolvedRef | null {
     // A C/C++ "call" whose name is a function-like macro visible in this
     // translation unit is a macro expansion, not a call — it must never bind
     // to a same-named function in another file (#1838).
@@ -1344,10 +1374,12 @@ export class ReferenceResolver {
       this.context,
     );
     const scoped = this.gateRustScope(candidate, ref);
-    const resolved = this.gateSuperSelfCall(
+    // A Go name its package defines once per build target is the definition
+    // the reference's file builds with (see preferGoBuildTwin).
+    const resolved = preferGoBuildTwin(this.gateSuperSelfCall(
       scoped?.resolvedBy === 'framework' ? this.gateFrameworkLanguage(scoped, ref) : this.gateLanguage(scoped, ref),
       ref,
-    );
+    ), ref, this.context);
     // A Dart class whose field holds its own type (`class Node { Node? next; }`)
     // names itself: a self-edge that says nothing (#2327).
     if (resolved && ref.language === 'dart' && ref.referenceKind === 'references' &&
@@ -1411,6 +1443,15 @@ export class ReferenceResolver {
     // to nothing the project declares.
     const asserted = matchGoAssertedCall(ref, this.context);
     if (asserted !== undefined) return asserted;
+    // So is one on an indexed element (`schemas[ix].ValidateBytes(data)`,
+    // deepcopy's `(*in)[i].DeepCopyInto(…)`): to a method of the element type.
+    const indexed = matchGoIndexedCall(ref, this.context);
+    if (indexed !== undefined) return indexed;
+    // And one on any other receiver the extractor keeps no name for: a
+    // fluent chain's later link, a call's result, a composite literal
+    // (`model.WithContext(0).Where(1)`, `GitOracle{}.Worktree()`, #2543).
+    const chained = matchGoChainedCall(ref, this.context);
+    if (chained !== undefined) return chained;
 
     // A section or snippet a Shopify theme's file names is that theme's own,
     // or nothing: Shopify never looks in another theme (see ./shopify-themes).
@@ -1734,6 +1775,27 @@ export class ReferenceResolver {
             kind = 'implements';
           }
         }
+      }
+
+      // A Go call whose callee is a type is a conversion — `Category(s)`,
+      // `(*Pair)(p)`, `model.Kind(3)` — which uses the type, and calls or
+      // instantiates nothing (#2581).
+      if (kind === 'calls' && ref.original.language === 'go') {
+        const targetNode = this.nodeById(ref.targetNodeId);
+        if (targetNode && GO_TYPE_KINDS.has(targetNode.kind)) kind = 'references';
+      }
+
+      // A Pascal call written with a bare name that resolves to a type is a
+      // typecast: `TButton(Sender).Caption`, `PInt64Rec(P)^.Lo`, `F :=
+      // TFoo(Obj)`. Delphi builds an object only through a constructor
+      // (`TFoo.Create`), so the code refers to the type and creates nothing.
+      if (
+        kind === 'calls' &&
+        ref.original.language === 'pascal' &&
+        !ref.original.referenceName.includes('.') &&
+        PASCAL_CAST_TARGET_KINDS.has(this.nodeById(ref.targetNodeId)?.kind ?? '')
+      ) {
+        kind = 'references';
       }
 
       // Promote "calls" to "instantiates" when the resolved target is a
@@ -2812,6 +2874,17 @@ export class ReferenceResolver {
     return resolveImportPath(specifier, fromFile, language, this.context);
   }
 
+  /**
+   * What `ref` resolves to against the graph as it is now, writing nothing:
+   * its target and how it was found, or null. A sync compares it with the
+   * edge the reference made before, to re-open only an edge an edit moved.
+   */
+  resolveNow(ref: UnresolvedReference): { targetNodeId: string; resolvedBy: string } | null {
+    if (!ref.filePath || !ref.language) return null;
+    const resolved = this.resolveOne({ ...ref, filePath: ref.filePath, language: ref.language });
+    return resolved ? { targetNodeId: resolved.targetNodeId, resolvedBy: resolved.resolvedBy } : null;
+  }
+
   /** True when a detected router binds navigation calls to its routes (see {@link reopenNavigationsFor}). */
   hasNavigationRouters(): boolean {
     return this.frameworks.some((f) => f.navigation !== undefined);
@@ -2895,6 +2968,72 @@ export class ReferenceResolver {
     }
     if (edgeIds.length > 0) this.queries.replaceResolutionEdgesWithUnresolvedRefs(edgeIds, refs);
     return this.queries.reopenFailedReferences(rowIds) + refs.length;
+  }
+
+  /**
+   * The edited modules among `modifiedFilePaths` whose default export moved:
+   * an edit made `export default A` into `export default B`, or took the
+   * default away, while `A` stayed declared. A sync moves the edges other
+   * files made into a changed file onto the node that replaces each target, so
+   * `new Y()` after `import Y from './x'` kept `A` where a full index links
+   * `B`. An `export default` statement is no node, so neither the definition
+   * delta nor a failed-reference retry sees it change.
+   *
+   * The default a module had is read off the edges into it, with no file read:
+   * a default or namespace import of it is an `imports` edge into its file
+   * node named for the binding, and a whole-name reference through that
+   * binding (`Y`, not `Y.run`) that resolved through the import names exactly
+   * its default (a namespace binding's `NS` names the file). Only edges bound
+   * before this sync resolved anything count (up to `resolvedUpToEdgeId`), and
+   * only from files it left alone. A module that forwards its default from
+   * another file (`export { default } from './impl'`) has those edges there,
+   * so a few of its importers' are read instead. An edit that leaves the
+   * default alone, nearly every one, finds them all still on it. Each module
+   * comes with the declarations its default was (`was`), as those edges say.
+   */
+  changedDefaultExports(
+    modifiedFilePaths: readonly string[],
+    changedFilePaths: readonly string[],
+    resolvedUpToEdgeId: number,
+  ): Array<{ path: string; language: Language; was: string[] }> {
+    const fresh = new Set(changedFilePaths);
+    const moved: Array<{ path: string; language: Language; was: string[] }> = [];
+    for (const filePath of modifiedFilePaths) {
+      if (!isJsFamilyFile(filePath)) continue;
+      const bindings = new Map<string, Set<string>>();
+      for (const i of this.queries.getImportsInto(`file:${filePath}`, filePath)) {
+        if (i.refName === null || fresh.has(i.filePath) || !isModuleBindingName(i.refName)) continue;
+        const names = bindings.get(i.filePath) ?? new Set<string>();
+        names.add(i.refName);
+        bindings.set(i.filePath, names);
+      }
+      if (bindings.size === 0) continue;
+      const language = this.queries.getFileByPath(filePath)?.language;
+      if (!language) continue;
+      const readsDefault = (e: Edge & { edgeId: number; sourceFilePath: string }): boolean => {
+        const name = e.metadata?.refName;
+        return typeof name === 'string' && e.metadata?.resolvedBy === 'import' && e.edgeId <= resolvedUpToEdgeId &&
+          !e.target.startsWith('file:') && bindings.get(e.sourceFilePath)?.has(name) === true;
+      };
+      let readers: Array<Edge & { edgeId: number; sourceFilePath: string; sourceLanguage: Language }> =
+        this.queries.getCrossFileIncomingEdgesWithTarget(filePath).filter(readsDefault);
+      if (readers.length === 0) {
+        const now = moduleDefaultExport(filePath, language, this.context);
+        if (!now || now.filePath === filePath) continue;
+        readers = [...bindings].slice(0, DEFAULT_READER_SAMPLE_FILES)
+          .flatMap(([file, names]) => this.queries.getResolutionEdgesThrough(file, [...names]))
+          .filter(readsDefault);
+      }
+      const was = new Set<string>();
+      for (const e of readers) {
+        const now = moduleDefaultExport(filePath, e.sourceLanguage, this.context);
+        // A call that lands on an alias binding goes on to the callable it names (resolveOne).
+        if (now && (e.target === now.id || (e.kind === 'calls' && resolveAliasBinding(now, null, this.context)?.id === e.target))) continue;
+        was.add(e.target);
+      }
+      if (was.size > 0) moved.push({ path: filePath, language, was: [...was] });
+    }
+    return moved;
   }
 
   /**
@@ -3565,6 +3704,9 @@ export class ReferenceResolver {
     // imported unaliased as `go.etcd.io/etcd/client/v3`), a type found by its
     // bare name is some other package's namesake.
     if (ref.language === 'go' && isGoUnknownQualified(ref, this.context)) return null;
+    // One embedded bare that only a package the file dot-imports declares is
+    // that package's, not a namesake as near the file.
+    if (ref.language === 'go') return goDotImportedSupertype(result, ref, this.context);
     return result;
   }
 
@@ -3606,6 +3748,89 @@ export class ReferenceResolver {
     if (!target) return result;
     if (bare && !isRustNameInScope(target, ref, this.context)) return null;
     return ref.referenceKind === 'calls' && !isRustForeignImplCallable(target, ref, this.context) ? null : result;
+  }
+
+  /**
+   * The context production code is resolved in when the project has Jest or
+   * Vitest manual mocks (`__mocks__/`): the graph without them. A mock
+   * re-declares its module's names by design and stands in for the module
+   * only while a test runs, so production code means what it would mean were
+   * the mocks not there (#2455): `formatLabel(name)`, whose import of a
+   * workspace package was not followed, is the package's `formatLabel`, never
+   * the nearer mock's. Adding or deleting a mock then changes nothing for
+   * production code, as a fresh index would have it. Test code, a mock
+   * included, keeps the whole graph: a mock is what Jest hands it. Null when
+   * the whole graph applies.
+   */
+  private mocklessContextFor(ref: UnresolvedRef, base: ResolutionContext): ResolutionContext | null {
+    if (isTestPath(ref.filePath)) return null;
+    const mocks = this.manualMockNames();
+    if (!mocks) return null;
+    if (this.mocklessContext && this.mocklessBase === base) return this.mocklessContext;
+    const isMock = (n: Node): boolean => isManualMockPath(n.filePath);
+    const real = (nodes: Node[]): Node[] => (nodes.some(isMock) ? nodes.filter((n) => !isMock(n)) : nodes);
+    // Only a name some mock declares can lose a node: other lookups pass
+    // straight through, and the filtered answers are kept.
+    const byName = new Map<string, Node[]>();
+    const byLowerName = new Map<string, Node[]>();
+    const byKind = new Map<Node['kind'], Node[]>();
+    const getMethodMatches = base.getMethodMatches;
+    const iterateNodesByKind = base.iterateNodesByKind;
+    this.mocklessBase = base;
+    this.mocklessContext = {
+      ...base,
+      getNodesByName: (name) => {
+        if (!mocks.names.has(name)) return base.getNodesByName(name);
+        let nodes = byName.get(name);
+        if (!nodes) byName.set(name, (nodes = real(base.getNodesByName(name))));
+        return nodes;
+      },
+      getNodesByLowerName: (lowerName) => {
+        if (!mocks.lowerNames.has(lowerName)) return base.getNodesByLowerName(lowerName);
+        let nodes = byLowerName.get(lowerName);
+        if (!nodes) byLowerName.set(lowerName, (nodes = real(base.getNodesByLowerName(lowerName))));
+        return nodes;
+      },
+      getNodesByQualifiedName: (qualifiedName) => real(base.getNodesByQualifiedName(qualifiedName)),
+      getNodesByKind: (kind) => {
+        let nodes = byKind.get(kind);
+        if (!nodes) byKind.set(kind, (nodes = real(base.getNodesByKind(kind))));
+        return nodes;
+      },
+      getMethodMatches: getMethodMatches
+        ? (typeName, methodName, language) => {
+          const nodes = getMethodMatches(typeName, methodName, language);
+          return mocks.names.has(methodName) ? real(nodes) : nodes;
+        }
+        : undefined,
+      iterateNodesByKind: iterateNodesByKind
+        ? function* (kind) {
+          for (const n of iterateNodesByKind(kind)) if (!isMock(n)) yield n;
+        }
+        : undefined,
+    };
+    return this.mocklessContext;
+  }
+
+  /** Built on first use from `mocklessBase`; clearCaches drops it, and the memos keyed by it go with it. */
+  private mocklessContext: ResolutionContext | null = null;
+  private mocklessBase: ResolutionContext | null = null;
+  /** The names the project's manual mocks declare, null when it has none; read once per cache window. */
+  private manualMocks: { names: Set<string>; lowerNames: Set<string> } | null | undefined;
+
+  private manualMockNames(): { names: Set<string>; lowerNames: Set<string> } | null {
+    if (this.manualMocks !== undefined) return this.manualMocks;
+    const files = [...(this.knownFiles ?? this.queries.getAllFilePaths())].filter(isManualMockPath);
+    const names = new Set<string>();
+    const lowerNames = new Set<string>();
+    if (files.length > 0) {
+      for (const n of this.queries.getNodesByFiles(files)) {
+        names.add(n.name);
+        lowerNames.add(n.name.toLowerCase());
+      }
+    }
+    this.manualMocks = names.size > 0 ? { names, lowerNames } : null;
+    return this.manualMocks;
   }
 
   /** Is `filePath` (project-relative) one of the files the index holds? */

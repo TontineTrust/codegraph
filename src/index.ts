@@ -54,7 +54,7 @@ import {
   ResolutionResult,
 } from './resolution';
 import { hasSynthesisPattern, isJsxChildCandidate } from './resolution/callback-synthesizer';
-import { createImportReader, reopenReferencesThroughAddedFiles, reopenReferencesThroughBarrels, reopenReferencesThroughDeclaredPackages } from './resolution/module-importers';
+import { createImportReader, reopenNameMatchedImports, reopenReferencesThroughAddedFiles, reopenReferencesThroughBarrels, reopenReferencesThroughChangedDefaults, reopenReferencesThroughDeclaredPackages } from './resolution/module-importers';
 import { GraphTraverser, GraphQueryManager } from './graph';
 import { findNamedCopybooks, type NamedCopybook } from './graph/cobol-copybooks';
 import { ContextBuilder, createContextBuilder } from './context';
@@ -393,9 +393,19 @@ export class CodeGraph {
       throw new Error(`Invalid CodeGraph directory: ${validation.errors.join(', ')}`);
     }
 
-    // Open database
+    // Open database. The secondary indexes an interrupted bulk load dropped are
+    // rebuilt off this thread, and finished before the instance is returned
+    // (#1887): rebuilt in line on a large index, they blocked the thread longer
+    // than the liveness watchdog allows, and every restart was killed the same
+    // way.
     const dbPath = getDatabasePath(resolvedRoot);
-    const db = DatabaseConnection.open(dbPath, { readOnly: options.readOnly });
+    const db = DatabaseConnection.open(dbPath, { readOnly: options.readOnly, deferIndexRecovery: true });
+    try {
+      await db.recoverIndexesOffThread();
+    } catch (err) {
+      db.close();
+      throw err;
+    }
     const queries = new QueryBuilder(db.getDb());
 
     const instance = new CodeGraph(db, queries, resolvedRoot);
@@ -462,9 +472,14 @@ export class CodeGraph {
   }
 
   /**
-   * Open synchronously (without sync)
+   * Open synchronously (without sync).
+   *
+   * `deferIndexRecovery` leaves the secondary indexes an interrupted bulk load
+   * dropped for {@link recoverIndexes} to rebuild off this thread, instead of
+   * rebuilding them here (#1887): for a caller on a watched event loop, which
+   * then awaits {@link recoverIndexes} before it relies on the project.
    */
-  static openSync(projectRoot: string, options: Pick<OpenOptions, 'readOnly'> = {}): CodeGraph {
+  static openSync(projectRoot: string, options: Pick<OpenOptions, 'readOnly'> & { deferIndexRecovery?: boolean } = {}): CodeGraph {
     const resolvedRoot = path.resolve(projectRoot);
 
     // Check if initialized
@@ -480,10 +495,26 @@ export class CodeGraph {
 
     // Open database
     const dbPath = getDatabasePath(resolvedRoot);
-    const db = DatabaseConnection.open(dbPath, { readOnly: options.readOnly });
+    const db = DatabaseConnection.open(dbPath, { readOnly: options.readOnly, deferIndexRecovery: options.deferIndexRecovery });
     const queries = new QueryBuilder(db.getDb());
 
     return new CodeGraph(db, queries, resolvedRoot);
+  }
+
+  /**
+   * Rebuild, on a worker thread, the secondary indexes an interrupted bulk
+   * load dropped and `openSync({ deferIndexRecovery: true })` left (#1887).
+   * Resolves at once when nothing is left, which is every open but the first
+   * after such an interruption; rejects when the rebuild fails, and the next
+   * call tries again. Reads stay correct meanwhile, only slower.
+   */
+  recoverIndexes(): Promise<void> {
+    return this.db.recoverIndexesOffThread();
+  }
+
+  /** Whether {@link recoverIndexes} still has indexes to rebuild. */
+  hasPendingIndexRecovery(): boolean {
+    return this.db.hasDeferredIndexRecovery();
   }
 
   /**
@@ -1058,14 +1089,15 @@ export class CodeGraph {
             // (`snippets/price.liquid`) waits under, and the keys a route's
             // lazily loaded module waits under (`module:Team` for
             // `lazy-import:./pages/Team`), as does a reference through an
-            // import binding the module declares under another name
-            // (`module:tag` for `import tagsController from
-            // './tag/tag.controller'`) and a direct member reference through
-            // any binding (`module:constants` for `LIST.includes(x)` after
-            // `import { LIST } from './constants'`): each resolves through the
-            // module, so an edit can satisfy it as well as an added file. On
-            // a sync where no failed ref matches, this is a few indexed
-            // lookups.
+            // import binding of the module (`module:tag` for `import
+            // tagsController from './tag/tag.controller'`, `module:context`
+            // for `import { useInvocation } from './context'`, which the
+            // barrel `context/index.ts` forwards) and a direct member
+            // reference through any binding (`module:constants` for
+            // `LIST.includes(x)` after `import { LIST } from './constants'`):
+            // each resolves through the module, so an edit can satisfy it as
+            // well as an added file. On a sync where no failed ref matches,
+            // this is a few indexed lookups.
             const tRetry = Date.now();
             edgesBeforeRetry = this.queries.getMaxEdgeId();
             const retryable = this.queries.getRetryableFailedReferences([...new Set([
@@ -1185,6 +1217,36 @@ export class CodeGraph {
               this.queries, importReader, this.projectRoot, result.changedFilePaths, edgesBeforeResolution
             );
             if (process.env.CODEGRAPH_SYNTH_TIMINGS && declared > 0) console.error(`[phase-timing] sync-declared-packages: ${declared} refs re-opened`);
+
+            // An edited module whose default export moved to another
+            // declaration, or went away, while the old one stayed declared:
+            // `new Y()` after `import Y from './x'` kept the old one, the node
+            // that replaced its target, and no name this sync's files carry
+            // changed. Read off the edges into the edited modules; an edit
+            // that leaves the default alone re-opens nothing.
+            const tDefaults = Date.now();
+            const movedDefaults = this.resolver.changedDefaultExports(modified, result.changedFilePaths, edgesBeforeResolution);
+            const throughDefaults = movedDefaults.length === 0 ? 0
+              : reopenReferencesThroughChangedDefaults(this.queries, importReader, movedDefaults, edgesBeforeResolution);
+            if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] sync-default-exports: ${Date.now() - tDefaults}ms (${movedDefaults.length} defaults moved, ${throughDefaults} refs re-opened)`);
+
+            // An import a name match took while its module did not export the
+            // name, once the binding resolves another way: `import {
+            // EmptyState } from './layouts/shared'` kept a namesake after the
+            // barrel's edit gave it the re-export, which declares nothing. And
+            // a name match into the edited module itself, which the edit can
+            // undo.
+            const tNamed = Date.now();
+            const editedModules = modified.flatMap((filePath) => {
+              const file = this.queries.getFileByPath(filePath);
+              return file ? [{ path: filePath, language: file.language }] : [];
+            });
+            const nameMatched = reopenNameMatchedImports(
+              this.queries, importReader, editedModules, edgesBeforeResolution,
+              (specifier, fromFile, language) => this.resolver.resolveModuleFile(specifier, fromFile, language),
+              (ref) => this.resolver.resolveNow(ref)
+            );
+            if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] sync-name-matched-imports: ${Date.now() - tNamed}ms (${nameMatched} refs re-opened)`);
           } else {
             // No git info — use batched resolution to avoid OOM
             const unresolvedCount = this.queries.getUnresolvedReferencesCount();
@@ -2086,6 +2148,14 @@ export class CodeGraph {
   /** Lexical evidence for an empty explore result; does not alter retrieval. */
   getExploreMissDiagnostics(query: string) {
     return this.queries.getExploreMissDiagnostics(query);
+  }
+
+  /**
+   * Which of `names` the index has never seen, by name, path, signature or
+   * docstring — the names explore reports as not in the index (#2462).
+   */
+  getUnseenNames(names: readonly string[]): string[] {
+    return this.queries.getUnseenNames(names);
   }
 
   /**

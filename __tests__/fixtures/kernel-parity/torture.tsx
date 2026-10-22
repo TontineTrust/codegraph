@@ -23,6 +23,7 @@ var oldVar = 'x';
 @scoped.Registry<Config>('name')
 export abstract class BaseService extends EventTarget implements Disposable, Serializable {
   static instances = 0;
+  static handlers = { refresh: helperFn, table: CONFIG_TABLE };
   private readonly cache: Map<string, Config> = new Map();
   public fonts: FontConfig;
   count = 0;
@@ -153,6 +154,21 @@ export const MemoCompared = memo(ImportedComponent, helperFn);
 export const MemoForward = memo(forwardRef(RenderInput));
 export const RefForwarded = React.forwardRef(RenderInput);
 
+// Callees that name nothing, and the wrappers that keep one.
+export async function calleeShapes(handlers: Record<string, () => void>, fn: () => void, load: () => Promise<() => void>) {
+  (() => { helperFn(); })();
+  create<ButtonProps>()(helperFn);
+  handlers['open']();
+  (0, fn)();
+  fn!();
+  (fn as () => void)();
+  (await load())();
+  await helperFn<ButtonProps>();
+  void helperFn<ButtonProps>();
+  if (!NS.helper.deep<boolean>(1)) return;
+  return typeof create<ButtonProps>() === 'function' && !!create<RowProps>();
+}
+
 export function App() {
   const nodes: GraphNode[] = [];
   return (
@@ -174,6 +190,7 @@ export const actionsMap = {
   update(input: UpdateInput) {
     return persistExisting(input);
   },
+  fallback: helperFn,
 };
 
 // Zustand-style store through middleware wrappers.
