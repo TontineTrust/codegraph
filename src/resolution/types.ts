@@ -147,6 +147,17 @@ export interface ResolutionContext {
   /** Get nodes by lowercase name (O(1) lookup for fuzzy matching) */
   getNodesByLowerName(lowerName: string): Node[];
   /**
+   * The names of a language's nodes of the given kinds, nothing else decoded:
+   * a cheap pre-filter before lookups by name. Optional for external/test
+   * contexts.
+   */
+  getNodeNamesOfKinds?(language: Language, kinds: readonly Node['kind'][]): string[];
+  /**
+   * Hands the resolver a node a resolution found by other means, so the gates
+   * after it don't fetch it again by id. Optional for external/test contexts.
+   */
+  rememberNode?(node: Node): void;
+  /**
    * Direct supertypes of the type named `typeName` (same language): the classes
    * it extends and the interfaces / protocols / traits it implements/conforms to,
    * by simple name. Backed by the resolved `implements`/`extends` edges, so it is
@@ -164,6 +175,13 @@ export interface ResolutionContext {
    * Optional so external/test contexts compile without it.
    */
   getSupertypeNodes?(id: string): Node[];
+  /**
+   * The classes one class declaration extends, through its own resolved
+   * `extends` edges alone: the parent a `super.m()` call reaches, never an
+   * interface or a class it only implements (#2497). Optional so
+   * external/test contexts compile without it.
+   */
+  getSuperclassNodes?(id: string): Node[];
   /**
    * Look up a node by its id. Lets matchers derive the FROM-symbol's
    * enclosing-class scope (Swift implicit-self method scoping, `this.X`
@@ -355,6 +373,17 @@ export interface FrameworkResolver {
    * Asked only about references written in the languages `resolve()` sees.
    */
   claimsReference?(name: string): boolean;
+  /**
+   * A reference this framework answers alone. When no framework's `resolve()`
+   * links it, it stays unresolved: no import or name strategy guesses past it,
+   * as they would for a project function that only shares its name. Nuxt's
+   * auto-imported `navigateTo('/x')` names a page, which Vue Router reads;
+   * one whose destination is computed, or a path no page serves, calls no
+   * function of the project — elk declares a `navigateTo` of its own inside a
+   * plugin. Unresolved, a sync can still revisit it when a route appears.
+   * Asked only about references written in the languages `resolve()` sees.
+   */
+  ownsReference?(ref: UnresolvedRef, context: ResolutionContext): boolean;
   /**
    * Extract framework-specific nodes and references from a file.
    *
