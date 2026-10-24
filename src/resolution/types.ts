@@ -55,6 +55,8 @@ export interface ResolvedRef {
   edgeKind?: EdgeKind;
   /** Extra metadata the strategy wants persisted on the edge (`href`, …). */
   metadata?: Record<string, unknown>;
+  /** Picked by a name-only strategy (the receiver's word, not its type). Not persisted. */
+  byName?: boolean;
   /**
    * The OTHER targets, when one reference names several.
    *
@@ -101,6 +103,15 @@ export interface ResolutionContext {
   getNodesInFileNamed?(filePath: string, name: string): Node[];
   /** Get all nodes by name */
   getNodesByName(name: string): Node[];
+  /**
+   * Whether no node in the index has exactly this name, answered from the
+   * resolver's set of every node name rather than a query (#2829). False
+   * whenever that set isn't loaded (before `warmCaches`, after
+   * `clearCaches`), so a caller only ever acts on a certain absence. A view
+   * that hides nodes keeps its base's answer, which stays certain: hiding
+   * nodes adds no name. Optional: a context without it never answers.
+   */
+  isAbsentName?(name: string): boolean;
   /** Get all nodes by qualified name */
   getNodesByQualifiedName(qualifiedName: string): Node[];
   /** Get all nodes of a kind */

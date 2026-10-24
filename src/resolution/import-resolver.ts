@@ -2722,8 +2722,9 @@ export function resolvePhpQualifiedClassRef(
   if (separator === 0) {
     fqn = name.slice(1);
   } else {
-    const head = name.slice(0, separator);
-    const imp = context.getImportMappings(ref.filePath, ref.language).find((i) => i.localName === head);
+    // PHP matches a namespace alias without regard to case.
+    const head = name.slice(0, separator).toLowerCase();
+    const imp = context.getImportMappings(ref.filePath, ref.language).find((i) => i.localName.toLowerCase() === head);
     if (imp) {
       fqn = imp.source.replace(/^\\/, '') + name.slice(separator);
     } else {
@@ -3934,7 +3935,9 @@ function findGoPackageMember(
   if (pkgDir == null) return null;
   for (const node of context.getNodesByName(memberName)) {
     if (node.language !== 'go') continue;
-    if (!node.isExported) continue;
+    // A method is no member of its package: `pkg.Infof` is the package's
+    // function, never a method `(*Logger).Infof` declared beside it.
+    if (!node.isExported || node.kind === 'method') continue;
     if (path.posix.dirname(node.filePath.replace(/\\/g, '/')) === pkgDir) {
       return {
         original: ref,
