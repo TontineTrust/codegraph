@@ -53,7 +53,7 @@ try {
 import { Command } from 'commander';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCodeGraphDir, isInitialized, hasSchemalessDb, hasForeignDbFile, unsafeIndexRootReason, findNearestCodeGraphRoot, planFrontload, isTaskNotification, isAgentMessage, hasStructuralKeyword, extractCodeTokens, capPromptHookInjection, codeGraphDirName, DEFAULT_CODEGRAPH_DIR } from '../directory';
+import { getCodeGraphDir, isInitialized, hasSchemalessDb, hasForeignDbFile, unsafeIndexRootReason, findNearestCodeGraphRoot, planFrontload, isTaskNotification, isAgentMessage, isCrossSessionMessage, stripSystemReminders, hasStructuralKeyword, extractCodeTokens, capPromptHookInjection, codeGraphDirName, DEFAULT_CODEGRAPH_DIR } from '../directory';
 import { extractProseCandidates } from '../search/identifier-segments';
 import { detectWorktreeIndexMismatch, worktreeMismatchWarning } from '../sync/worktree';
 import { createShimmerProgress } from '../ui/shimmer-progress';
@@ -72,6 +72,7 @@ import { getTelemetry, TELEMETRY_DOCS, recordIndexEvent } from '../telemetry';
 import { BROWSER_ENV, DEFAULT_UI_PORT } from '../ui-server/constants';
 import type { UiServerHandle } from '../ui-server';
 import { lookupSymbolNodes, describeSymbolNode, groupDefinitions } from '../graph/symbol-lookup';
+import { goPackageReaderFor } from '../graph/go-package';
 import type { Node, Edge } from '../types';
 import { isTestPath } from '../search/query-utils';
 
@@ -549,9 +550,11 @@ async function offerIndexIgnoredRepos(
   opts: { interactive: boolean },
 ): Promise<IndexResult | undefined> {
   let repos: string[];
+  let patterns: string[];
   try {
-    const { findUnindexedIgnoredRepos } = await import('../extraction');
+    const { findUnindexedIgnoredRepos, includeIgnoredPatternFor } = await import('../extraction');
     repos = findUnindexedIgnoredRepos(projectPath);
+    patterns = repos.map(includeIgnoredPatternFor);
   } catch {
     return; // detection is advisory — never let it break the command
   }
@@ -562,7 +565,7 @@ async function offerIndexIgnoredRepos(
   const SHOWN = 6;
   const names = repos.slice(0, SHOWN).map((r) => r.replace(/\/$/, ''));
   const extra = repos.length > SHOWN ? ` (+${formatNumber(repos.length - SHOWN)} more)` : '';
-  const snippet = `{ "includeIgnored": [${repos.map((p) => JSON.stringify(p)).join(', ')}] }`;
+  const snippet = `{ "includeIgnored": [${patterns.map((p) => JSON.stringify(p)).join(', ')}] }`;
 
   clack.log.warn(
     `Your .gitignore excludes ${isOne ? 'a nested git repository' : `${formatNumber(repos.length)} nested git repositories`} here, ` +
@@ -593,7 +596,7 @@ async function offerIndexIgnoredRepos(
   let added: number;
   try {
     const { addIncludeIgnoredPatterns } = await import('../project-config');
-    added = addIncludeIgnoredPatterns(projectPath, repos);
+    added = addIncludeIgnoredPatterns(projectPath, patterns);
   } catch (err) {
     clack.log.error(`Could not update ${PROJECT_CONFIG_FILENAME}: ${err instanceof Error ? err.message : String(err)}`);
     manualHint();
@@ -902,10 +905,12 @@ program
       try {
         // A live MCP daemon keeps SQLite handles open. Verify it by its socket
         // before stopping it so a stale pidfile can never signal another process.
-        const { stopDaemonAt } = await import('../mcp/daemon-registry');
-        const daemonStop = await stopDaemonAt(fs.realpathSync(projectPath), { preserveUnverified: true });
+        // A lock left naming a process that isn't CodeGraph is cleared (#2770).
+        const { stopDaemonAt, daemonStopFailureMessage } = await import('../mcp/daemon-registry');
+        const realRoot = fs.realpathSync(projectPath);
+        const daemonStop = await stopDaemonAt(realRoot, { preserveUnverified: true });
         if (daemonStop.outcome === 'unverified' || daemonStop.outcome === 'still-running') {
-          throw new Error('Could not verify that the active CodeGraph daemon has stopped. Run `codegraph daemon stop` to stop it, then retry `codegraph index`.');
+          throw new Error(await daemonStopFailureMessage(realRoot, daemonStop));
         }
 
         // Keep the writer slot through recreation AND indexing. A reconnecting
@@ -1511,11 +1516,14 @@ program
 
       let input: { prompt?: string; cwd?: string } = {};
       try { input = JSON.parse(raw); } catch { return; }
-      const prompt = String(input.prompt || '');
-      // System-injected task notifications and subagent hand-backs are not
-      // user prompts: exit before any project lookup or explore work (#1832,
-      // #2184).
-      if (isTaskNotification(prompt) || isAgentMessage(prompt)) return;
+      // The desktop app's <system-reminder> blocks are host status, not what
+      // the user typed: gate, pick the project and explore on the rest
+      // (#2635).
+      const prompt = stripSystemReminders(String(input.prompt || ''));
+      // System-injected task notifications, subagent hand-backs and messages
+      // from other sessions are not user prompts, and neither is nothing:
+      // exit before any project lookup or explore work (#1832, #2184, #2635).
+      if (!prompt || isTaskNotification(prompt) || isAgentMessage(prompt) || isCrossSessionMessage(prompt)) return;
 
       // Gate telemetry: how often each tier fires vs. no-ops — counter names
       // only, NEVER prompt content (see TELEMETRY.md). This is the data that
@@ -2332,7 +2340,7 @@ for (const direction of ['callers', 'callees'] as const) {
         const cg = await CodeGraph.open(projectPath);
         try {
           const limit = parseInt(options.limit || '20', 10);
-          const { nodes: targets } = lookupSymbolNodes(cg, symbol);
+          const { nodes: targets } = lookupSymbolNodes(cg, symbol, goPackageReaderFor(cg));
           if (targets.length === 0) {
             info(formatSymbolNotFound(symbol, cg.searchNodes(symbol, { limit: 5 }).map((m) => m.node.name)));
             return;
@@ -2456,7 +2464,7 @@ program
       const cg = await CodeGraph.open(projectPath);
       try {
         const depth = Math.min(Math.max(parseInt(options.depth || '2', 10), 1), 10);
-        const { nodes: targets } = lookupSymbolNodes(cg, symbol);
+        const { nodes: targets } = lookupSymbolNodes(cg, symbol, goPackageReaderFor(cg));
         if (targets.length === 0) {
           info(formatSymbolNotFound(symbol, cg.searchNodes(symbol, { limit: 5 }).map((m) => m.node.name)));
           return;
@@ -2736,17 +2744,25 @@ program
         ? [opts.location as 'global' | 'local']
         : ['global', 'local'];
       let changed = 0;
+      let failed = 0;
       for (const loc of locs) {
         for (const report of refreshTargets(ALL_TARGETS, loc)) {
+          if (report.status === 'failed') {
+            failed += 1;
+            error(`${report.displayName}: could not refresh — ${report.error}`);
+          }
           for (const p of report.changedPaths) {
             changed += 1;
             console.log(`  ${report.displayName}: refreshed ${p}`);
           }
         }
       }
-      if (changed === 0) {
+      if (changed === 0 && failed === 0) {
         console.log('All configured agent surfaces are already current.');
       }
+      // Non-zero so `codegraph upgrade` tells the user to look; every other
+      // agent was still refreshed.
+      if (failed > 0) process.exitCode = 1;
       return;
     }
 
