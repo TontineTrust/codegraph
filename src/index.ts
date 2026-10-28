@@ -154,6 +154,24 @@ export interface IndexOptions {
 const PYTHON_ROOTS_METADATA_KEY = 'python_root_fingerprint';
 /** Metadata key: the digest of the workspace packages and path dependencies the index was resolved by. */
 const WORKSPACE_METADATA_KEY = 'js_workspace_fingerprint';
+/** Metadata key: the frameworks (sorted JSON names) the last full index extracted every file with. */
+const FRAMEWORKS_AT_INDEX_KEY = 'frameworks_at_index';
+/**
+ * Metadata key: `{ added, removed }` — the frameworks a sync detected since the
+ * last full index, against {@link FRAMEWORKS_AT_INDEX_KEY}; '' when none.
+ */
+const FRAMEWORKS_SINCE_INDEX_KEY = 'frameworks_since_index';
+
+/** A JSON list of names from metadata, or null when absent or unreadable. */
+function parseNameList(value: string | null): string[] | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((n) => typeof n === 'string') ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 export class CodeGraph {
   private db: DatabaseConnection;
@@ -800,6 +818,7 @@ export class CodeGraph {
         // extraction stamp (the bulk would still be stale). See extraction-version.ts.
         if (result.success) this.stampPythonRootFingerprint();
         if (result.success) this.stampWorkspaceFingerprint();
+        if (result.success) this.stampIndexedFrameworks();
 
         if (result.success && result.filesIndexed > 0) {
           try {
@@ -957,6 +976,64 @@ export class CodeGraph {
     } catch { /* metadata is advisory */ }
   }
 
+  /** Record the frameworks a full index extracted every file with; none has come or gone since. */
+  private stampIndexedFrameworks(): void {
+    const names = this.orchestrator.getDetectedFrameworkNames();
+    if (names === null) return;
+    try {
+      this.queries.setMetadata(FRAMEWORKS_AT_INDEX_KEY, JSON.stringify([...names].sort()));
+      this.queries.setMetadata(FRAMEWORKS_SINCE_INDEX_KEY, '');
+    } catch { /* metadata is advisory */ }
+  }
+
+  /**
+   * A sync detected frameworks again because what detection read had changed
+   * (#2516): a framework arrived mid-session, like Express in a new
+   * `package.json`, or one left. Files the sync extracted were read with the
+   * new set already. The resolver detects again when its set differs, so
+   * resolution and the passes after it use the new one too. Files indexed
+   * before the change were extracted without it, so the change against the
+   * last full index is recorded for `codegraph status`, which recommends a
+   * re-index: re-extracting every file a framework can touch would mean
+   * re-parsing most of the project inside a watcher's sync.
+   */
+  private followDetectedFrameworks(detected: string[]): void {
+    const now = [...detected].sort();
+    const resolverNow = [...this.resolver.getDetectedFrameworks()].sort();
+    if (now.join('\0') !== resolverNow.join('\0')) this.resolver.initialize();
+    try {
+      const atIndex = parseNameList(this.queries.getMetadata(FRAMEWORKS_AT_INDEX_KEY));
+      if (!atIndex) return; // indexed before this was recorded: nothing to compare with
+      const added = now.filter((name) => !atIndex.includes(name));
+      const removed = atIndex.filter((name) => !now.includes(name));
+      const value = added.length > 0 || removed.length > 0 ? JSON.stringify({ added, removed }) : '';
+      if ((this.queries.getMetadata(FRAMEWORKS_SINCE_INDEX_KEY) ?? '') !== value) {
+        this.queries.setMetadata(FRAMEWORKS_SINCE_INDEX_KEY, value);
+      }
+    } catch { /* metadata is advisory */ }
+  }
+
+  /**
+   * The frameworks a sync detected since the last full index, against the ones
+   * that index extracted every file with (#2516): files indexed before the
+   * change were read without the frameworks added, and with the ones removed,
+   * so a full re-index brings them in line. Null when nothing changed, or for
+   * an index built before this was recorded.
+   */
+  getFrameworkChangesSinceIndex(): { added: string[]; removed: string[] } | null {
+    try {
+      const value = this.queries.getMetadata(FRAMEWORKS_SINCE_INDEX_KEY);
+      if (!value) return null;
+      const parsed = JSON.parse(value) as { added?: unknown; removed?: unknown };
+      const names = (list: unknown): string[] => (Array.isArray(list) ? list.filter((n): n is string => typeof n === 'string') : []);
+      const added = names(parsed.added);
+      const removed = names(parsed.removed);
+      return added.length > 0 || removed.length > 0 ? { added, removed } : null;
+    } catch {
+      return null;
+    }
+  }
+
   async sync(options: IndexOptions = {}): Promise<SyncResult> {
     return this.indexMutex.withLock(async () => {
       const startedAt = Date.now();
@@ -1065,6 +1142,10 @@ export class CodeGraph {
               this.queries.setMetadata('synthesis_pending', '1');
             }
           });
+
+        // Frameworks detected again because what detection read changed: the
+        // passes below use the new set (#2516).
+        if (result.detectedFrameworks) this.followDetectedFrameworks(result.detectedFrameworks);
 
         // A component a tag in an unchanged file may render: `<Team />` links
         // to the `Team` this sync adds. The gate above reads each changed file
@@ -2400,6 +2481,12 @@ export class CodeGraph {
    * usable (already populated — the overwhelmingly common one-SELECT case —
    * or healed here); false when it isn't (empty graph, or another process
    * holds the index lock — that process's own sync heals it).
+   *
+   * A read-only instance, as the hook opens since #2913, writes through a
+   * connection of its own, opened only once it holds the index lock. Every
+   * index and sync holds that lock while it writes, so the repairs a writer's
+   * open runs, and the migration an index from before the table needs, cannot
+   * disturb a bulk load in progress.
    */
   async healSegmentVocabIfEmpty(): Promise<boolean> {
     const empty = (() => {
@@ -2415,7 +2502,16 @@ export class CodeGraph {
       }
       try {
         if (!this.queries.isNameSegmentVocabEmpty()) return true; // raced: healed meanwhile
-        await this.rebuildNameSegmentVocab();
+        if (!this.db.readOnly) {
+          await this.rebuildNameSegmentVocab();
+          return true;
+        }
+        const writer = DatabaseConnection.open(this.db.getPath());
+        try {
+          await this.rebuildNameSegmentVocab(new QueryBuilder(writer.getDb()));
+        } finally {
+          writer.close();
+        }
         return true;
       } finally {
         this.fileLock.release();
@@ -2427,15 +2523,15 @@ export class CodeGraph {
    * Rebuild the segment vocabulary from the current graph, batched and
    * yielding — the upgrade-heal path for indexes built before the vocab table
    * existed. Runs inside the index mutex/lock (sync and
-   * healSegmentVocabIfEmpty hold them).
+   * healSegmentVocabIfEmpty hold them), through `queries`.
    */
-  private async rebuildNameSegmentVocab(): Promise<void> {
+  private async rebuildNameSegmentVocab(queries: QueryBuilder = this.queries): Promise<void> {
     const maybeYield = createYielder();
     const BATCH = 2000;
     for (let offset = 0; ; offset += BATCH) {
-      const names = this.queries.getDistinctNodeNames(BATCH, offset);
+      const names = queries.getDistinctNodeNames(BATCH, offset);
       if (names.length === 0) break;
-      this.queries.insertNameSegmentsBatch(names);
+      queries.insertNameSegmentsBatch(names);
       await maybeYield();
     }
   }

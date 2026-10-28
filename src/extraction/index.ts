@@ -28,7 +28,7 @@ import { detectLanguage, isSourceFile, isLanguageSupported, isFileLevelOnlyLangu
 import { loadExtensionOverrides, loadIncludeIgnoredPatterns, loadExcludePatterns, loadIncludePatterns, PROJECT_CONFIG_FILENAME } from '../project-config';
 import { isCodeGraphDataDir } from '../directory';
 import { logDebug, logWarn } from '../errors';
-import { validatePathWithinRoot, normalizePath } from '../utils';
+import { validatePathWithinRoot, normalizePath, isMissingPathError } from '../utils';
 import ignore, { Ignore } from 'ignore';
 import { detectFrameworks, getFrameworkResolver } from '../resolution/frameworks';
 import { declaredDependencies } from '../resolution/frameworks/package-deps';
@@ -169,6 +169,12 @@ export interface SyncResult {
   definitionDelta?: string[];
   /** Tracked files this sync found gone and deleted from the index. */
   removedFilePaths?: string[];
+  /**
+   * The frameworks extraction detected, when this sync had to detect them
+   * again because what detection read had changed (#2516). Absent when the
+   * cached detection still held.
+   */
+  detectedFrameworks?: string[];
 }
 
 /** Durable marker that a Haskell import-topology invalidation is in flight.
@@ -195,6 +201,27 @@ function readSourceOrStamp(fullPath: string): string | null {
   const { stats, bytes } = readBoundedSourceSync(fullPath);
   if (bytes === null) return oversizeStamp(stats.size);
   return isMpegTsBytes(fullPath, bytes) ? null : bytes.toString('utf8');
+}
+
+/**
+ * What framework detection found at a path, to tell later whether it changed:
+ * a file's size and modification time, a folder's sub-folders, or '-' when
+ * nothing is there.
+ */
+function diskSignature(fullPath: string, isFolder = false): string {
+  try {
+    if (isFolder) {
+      return fs.readdirSync(fullPath, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+        .join('/');
+    }
+    const stats = fs.statSync(fullPath, { throwIfNoEntry: false });
+    return stats ? `${stats.size}:${stats.mtimeMs}` : '-';
+  } catch {
+    return '-';
+  }
 }
 
 /** Whether these bytes, read from `filePath`, are a `.ts` MPEG transport stream (#1910). */
@@ -1431,6 +1458,53 @@ function collectGitFiles(repoDir: string, prefix: string, files: Set<string>, em
 }
 
 /**
+ * Whether the repository `rootDir` sits in gitignores `rootDir` itself. Git
+ * then lists nothing inside it, so the git-backed scan and change detection
+ * both step aside for the directory walk. Asked only of a folder below its
+ * repository's root.
+ */
+function isIgnoredByEnclosingRepo(rootDir: string): boolean {
+  try {
+    // git check-ignore exits 0 if the path IS ignored, 1 if not
+    execFileSync(
+      'git',
+      ['check-ignore', '-q', path.resolve(rootDir)],
+      { cwd: rootDir, encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** {@link gitRepoPrefix} answers, by folder. */
+const gitRepoPrefixes = new Map<string, string>();
+
+/**
+ * Where `dir` sits in its git repository: '' at the repository's root, else the
+ * path from the root with a trailing slash (`app/`). Throws when `dir` is in no
+ * repository. `git status --porcelain` prints every path from the repository's
+ * root, whichever folder it runs in, so a project below the root takes this
+ * off (#1636). A folder with its own `.git` is a repository or worktree root and
+ * costs no git call; any other answer is kept, since a folder's place in its
+ * repository does not move under a running process.
+ */
+function gitRepoPrefix(dir: string): string {
+  if (fs.existsSync(path.join(dir, '.git'))) return '';
+  const key = path.resolve(dir);
+  let prefix = gitRepoPrefixes.get(key);
+  if (prefix === undefined) {
+    prefix = normalizePath(execFileSync(
+      'git',
+      ['rev-parse', '--show-prefix'],
+      { cwd: dir, encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
+    ).trim());
+    gitRepoPrefixes.set(key, prefix);
+  }
+  return prefix;
+}
+
+/**
  * Get all files visible to git (tracked + untracked but not ignored).
  * Respects .gitignore at all levels (root, subdirectories) and descends into
  * embedded (nested, non-submodule) git repos. Returns null on failure
@@ -1447,23 +1521,13 @@ function getGitVisibleFiles(rootDir: string): Set<string> | null {
       { cwd: rootDir, encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
     ).trim();
 
-    if (path.resolve(gitRoot) !== path.resolve(rootDir)) {
-      try {
-        // git check-ignore exits 0 if the path IS ignored, 1 if not
-        execFileSync(
-          'git',
-          ['check-ignore', '-q', path.resolve(rootDir)],
-          { cwd: rootDir, encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
-        );
-        // Directory is gitignored by parent repo — fall back to filesystem walk
-        logDebug('project root is gitignored by a parent repo — falling back to filesystem walk', {
-          rootDir,
-          gitRoot,
-        });
-        return null;
-      } catch {
-        // Not ignored — safe to use git ls-files
-      }
+    if (path.resolve(gitRoot) !== path.resolve(rootDir) && isIgnoredByEnclosingRepo(rootDir)) {
+      // Directory is gitignored by parent repo — fall back to filesystem walk
+      logDebug('project root is gitignored by a parent repo — falling back to filesystem walk', {
+        rootDir,
+        gitRoot,
+      });
+      return null;
     }
 
     const files = new Set<string>();
@@ -1542,7 +1606,12 @@ export function getGitChangedFiles(rootDir: string, sinceCommit?: string | null)
     // so change detection sees the same custom-extension files the full index does.
     const overrides = loadExtensionOverrides(rootDir);
     const isSource = (filePath: string): boolean => isSourceFile(filePath, overrides, rootDir);
-    collectGitStatus(rootDir, '', changes, isSource, loadIncludeIgnoredMatcher(rootDir), loadExcludeMatcher(rootDir), sinceCommit ?? undefined);
+    // A project in a folder below its repository's root (#1636). Git can say
+    // nothing about a folder its repository ignores: decline, as the scan
+    // does, so callers take the full scan that indexed the project.
+    const repoPrefix = gitRepoPrefix(rootDir);
+    if (repoPrefix && isIgnoredByEnclosingRepo(rootDir)) return null;
+    collectGitStatus(rootDir, '', changes, isSource, loadIncludeIgnoredMatcher(rootDir), loadExcludeMatcher(rootDir), sinceCommit ?? undefined, repoPrefix);
     return changes;
   } catch {
     return null;
@@ -1614,7 +1683,12 @@ export function canTrustGitFastPath(rootDir: string, sinceCommit?: string | null
   }
 }
 
-function collectGitStatus(repoDir: string, prefix: string, out: GitChanges, isSource: (filePath: string) => boolean, includeIgnored: Ignore | null = null, exclude: Ignore | null = null, sinceCommit?: string): void {
+/**
+ * `repoPrefix` is where `repoDir` sits in its repository ({@link gitRepoPrefix}):
+ * '' for a repository root, which every embedded repo below is, and the
+ * folder's path from the root (`app/`) for a project below it (#1636).
+ */
+function collectGitStatus(repoDir: string, prefix: string, out: GitChanges, isSource: (filePath: string) => boolean, includeIgnored: Ignore | null = null, exclude: Ignore | null = null, sinceCommit?: string, repoPrefix = ''): void {
   const output = execFileSync(
     'git',
     // `-uall` lists individual untracked files instead of collapsing an
@@ -1623,7 +1697,12 @@ function collectGitStatus(repoDir: string, prefix: string, out: GitChanges, isSo
     // below). Nested untracked git repos still collapse to `?? repo/` even
     // with `-uall` — git never crosses a repo boundary — so the recursion
     // still handles them. (#1213)
-    ['status', '--porcelain', '--no-renames', '-z', '-uall'],
+    // Below the repository's root, `-- .` keeps the report to this folder:
+    // git reports the whole repository otherwise. A root runs the command
+    // it always did.
+    repoPrefix
+      ? ['status', '--porcelain', '--no-renames', '-z', '-uall', '--', '.']
+      : ['status', '--porcelain', '--no-renames', '-z', '-uall'],
     { cwd: repoDir, encoding: 'utf-8', timeout: 10000, maxBuffer: 50 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
   );
 
@@ -1634,9 +1713,9 @@ function collectGitStatus(repoDir: string, prefix: string, out: GitChanges, isSo
   // vendor/ dir, or a tracked file under a .gitignored dir, surfaces here as a
   // change — so `codegraph status` (which reads getChangedFiles) reports a
   // pending edit the full index never tracks and `sync` never clears. Matching
-  // repo-relative `rel` at each recursion level mirrors getGitVisibleFiles'
+  // `repoDir`-relative `rel` at each recursion level mirrors getGitVisibleFiles'
   // ScopeIgnore: every embedded repo is judged by ITS OWN rules, never the
-  // parent's. (#766)
+  // parent's, and a project below its repository's root by its own. (#766)
   const ig = buildDefaultIgnore(repoDir);
 
   // One classifier for both candidate sources below, so a committed change is
@@ -1654,7 +1733,7 @@ function collectGitStatus(repoDir: string, prefix: string, out: GitChanges, isSo
     }
 
     // Added (`??`) / modified files inside an excluded dir must not enter the
-    // index — match against the repo-relative path, same as the full scan. (#766)
+    // index — match against the `repoDir`-relative path, same as the full scan. (#766)
     if (ig.ignores(rel)) return;
     // User `codegraph.json` `exclude` (#999) is project-root-relative, so it's
     // matched against the full path — sync must not re-add a tracked file the
@@ -1677,7 +1756,13 @@ function collectGitStatus(repoDir: string, prefix: string, out: GitChanges, isSo
     if (line.length < 4) continue; // Minimum: "XY file"
 
     const statusCode = line.substring(0, 2);
-    const rel = normalizePath(line.substring(3));
+    let rel = normalizePath(line.substring(3));
+    // Porcelain paths run from the repository's root, whatever the cwd: take
+    // them back to this folder, and leave out anything outside it.
+    if (repoPrefix) {
+      if (!rel.startsWith(repoPrefix) || rel.length === repoPrefix.length) continue;
+      rel = rel.slice(repoPrefix.length);
+    }
 
     // Untracked directory entries (trailing slash) may hide an embedded repo —
     // collect for the recursion below instead of treating as a file.
@@ -2032,6 +2117,23 @@ export class ExtractionOrchestrator {
    */
   private detectedFrameworkNames: string[] | null = null;
   /**
+   * What the last detection read, so a sync can tell when it went stale
+   * (#2516): the indexed source files it read or probed, which a sync's own
+   * change lists cover, and every other path with what was there then
+   * ({@link diskSignature}): the manifests, like `package.json`, that no sync
+   * reports. Null until detection runs.
+   */
+  private detectionInputs: { sourceFiles: Set<string>; diskPaths: Map<string, string> } | null = null;
+  /** Files were added or removed since the last detection: the file list it read is out of date. */
+  private detectionFileListChanged = false;
+  /**
+   * What detection read, by project-relative path, kept between detections: a
+   * source file until a sync changes it, any other path while its signature
+   * holds. Detecting again then reads only what changed, not the couple of
+   * hundred files some detectors sample (react-native-bridge reads up to 200).
+   */
+  private detectionReads = new Map<string, { full: string; signature: string; content?: string | null }>();
+  /**
    * Scope matcher for SCOPED syncs, memoized on the mtimes of the two root
    * files it is derived from (`codegraph.json`, `.gitignore`). See
    * {@link scopedSyncMatcher}.
@@ -2087,9 +2189,30 @@ export class ExtractionOrchestrator {
    * detection. Graph-query methods (getNodesByName etc.) return empty because
    * the DB hasn't been populated yet, but detect() only uses readFile,
    * fileExists, and getAllFiles, so that's fine.
+   *
+   * With `inputs`, every path a detector reads or probes is recorded there,
+   * and answered from {@link detectionReads} when it was read before.
    */
-  private buildDetectionContext(files: string[]): ResolutionContext {
+  private buildDetectionContext(files: string[], inputs?: NonNullable<ExtractionOrchestrator['detectionInputs']>): ResolutionContext {
     const rootDir = this.rootDir;
+    const listed = inputs ? new Set(files) : null;
+    const reads = inputs ? this.detectionReads : null;
+    // What is at a path, once per path until a sync says it changed.
+    const probe = (relativePath: string): { full: string; signature: string; content?: string | null } | null => {
+      const rel = normalizePath(relativePath);
+      let known = reads?.get(rel);
+      if (!known) {
+        const full = validatePathWithinRoot(rootDir, relativePath);
+        if (!full) return null;
+        known = { full, signature: diskSignature(full) };
+        reads?.set(rel, known);
+      }
+      if (inputs) {
+        if (listed!.has(rel)) inputs.sourceFiles.add(rel);
+        else if (!inputs.diskPaths.has(rel)) inputs.diskPaths.set(rel, known.signature);
+      }
+      return known;
+    };
     return {
       getNodesInFile: () => [],
       getNodesByName: () => [],
@@ -2100,24 +2223,22 @@ export class ExtractionOrchestrator {
       getAllFiles: () => files,
       getProjectRoot: () => rootDir,
       fileExists: (relativePath: string) => {
-        const full = validatePathWithinRoot(rootDir, relativePath);
-        if (!full) return false;
-        try {
-          return fs.existsSync(full);
-        } catch {
-          return false;
-        }
+        const known = probe(relativePath);
+        return known !== null && known.signature !== '-';
       },
       readFile: (relativePath: string) => {
-        const full = validatePathWithinRoot(rootDir, relativePath);
-        if (!full) return null;
-        try {
-          // Framework detectors scan source by name; a file over the size
-          // limit was never indexed and must not be decoded here either (#1910).
-          return readBoundedSourceSync(full).bytes?.toString('utf8') ?? null;
-        } catch {
-          return null;
+        const known = probe(relativePath);
+        if (!known) return null;
+        if (known.content === undefined) {
+          try {
+            // Framework detectors scan source by name; a file over the size
+            // limit was never indexed and must not be decoded here either (#1910).
+            known.content = readBoundedSourceSync(known.full).bytes?.toString('utf8') ?? null;
+          } catch {
+            known.content = null;
+          }
         }
+        return known.content;
       },
       // Monorepo support — needed by framework detect()s that probe
       // subpackage manifests (e.g. fabric-view looking at
@@ -2128,6 +2249,11 @@ export class ExtractionOrchestrator {
           relativePath === '.' || relativePath === ''
             ? rootDir
             : path.join(rootDir, relativePath);
+        // A folder appearing or going changes what a monorepo probe sees.
+        if (inputs) {
+          const key = normalizePath(path.relative(rootDir, target)) + '/';
+          if (!inputs.diskPaths.has(key)) inputs.diskPaths.set(key, diskSignature(target, true));
+        }
         try {
           return fs
             .readdirSync(target, { withFileTypes: true })
@@ -2143,14 +2269,22 @@ export class ExtractionOrchestrator {
   /**
    * Detect frameworks on demand using the current scanned files (or a fresh
    * scan if none are provided). Cached on the orchestrator so repeat calls
-   * inside a single run don't re-scan.
+   * inside a single run don't re-scan; a sync drops the cache when what it
+   * read has changed ({@link refreshFrameworkDetection}).
    */
   private ensureDetectedFrameworks(files?: string[]): string[] {
     if (this.detectedFrameworkNames !== null) return this.detectedFrameworkNames;
     const fileList = files ?? scanDirectory(this.rootDir);
-    const context = this.buildDetectionContext(fileList);
+    const inputs = { sourceFiles: new Set<string>(), diskPaths: new Map<string, string>() };
+    const context = this.buildDetectionContext(fileList, inputs);
+    this.detectionInputs = inputs;
+    this.detectionFileListChanged = false;
     this.detectedFrameworkNames = detectFrameworks(context).map((r) => r.name);
     const declared = declaredDependencies(context);
+    // Keep only what this detection read.
+    for (const rel of this.detectionReads.keys()) {
+      if (!inputs.sourceFiles.has(rel) && !inputs.diskPaths.has(rel)) this.detectionReads.delete(rel);
+    }
     this.gatedFrameworks = new Map();
     for (const name of this.detectedFrameworkNames) {
       const deps = getFrameworkResolver(name)?.appDependencies;
@@ -2210,8 +2344,12 @@ export class ExtractionOrchestrator {
   private dependenciesDeclaredIn(dir: string): Set<string> | null {
     if (this.manifestDependencies.has(dir)) return this.manifestDependencies.get(dir)!;
     let declared: Set<string> | null = null;
+    const manifest = path.join(this.rootDir, dir, 'package.json');
+    // Kept until the next detection, so an edit of this manifest must bring one about.
+    const rel = dir ? `${dir}/package.json` : 'package.json';
+    if (this.detectionInputs && !this.detectionInputs.diskPaths.has(rel)) this.detectionInputs.diskPaths.set(rel, diskSignature(manifest));
     try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(this.rootDir, dir, 'package.json'), 'utf8')) as Record<string, unknown>;
+      const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8')) as Record<string, unknown>;
       declared = new Set();
       for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
         const group = pkg[field];
@@ -2220,6 +2358,43 @@ export class ExtractionOrchestrator {
     } catch { /* no or unreadable manifest */ }
     this.manifestDependencies.set(dir, declared);
     return declared;
+  }
+
+  /** The frameworks extraction last detected, or null before any detection. */
+  getDetectedFrameworkNames(): string[] | null {
+    return this.detectedFrameworkNames;
+  }
+
+  /**
+   * Bring framework detection up to date before a sync extracts `filesToIndex`
+   * (#2516). Detection is cached for the life of this orchestrator, so in a
+   * long-lived process (the MCP server's watcher) a framework that arrives
+   * mid-session, like Express in a new `package.json`, would otherwise be
+   * missing from every file synced after it. It runs again only when what it
+   * read changed: files were added or removed since, a source file it read is
+   * among those changed, or a manifest it read or probed changed on disk.
+   * Otherwise this costs a set lookup per changed file and a stat per manifest,
+   * and when it runs, it reads again only what changed ({@link detectionReads}).
+   *
+   * `scannedFiles` is a full reconcile's scan. A scoped sync never walks the
+   * project: the file list is the index's, which already holds this sync's
+   * removals, plus the files it adds. Returns the frameworks detected when
+   * detection ran.
+   */
+  private refreshFrameworkDetection(scannedFiles: string[] | null, filesToIndex: string[], addedFiles: string[], removedFiles: string[]): string[] | undefined {
+    for (const file of filesToIndex) this.detectionReads.delete(file);
+    for (const file of removedFiles) this.detectionReads.delete(file);
+    const inputs = this.detectionInputs;
+    let stale = this.detectedFrameworkNames === null || inputs === null || this.detectionFileListChanged ||
+      filesToIndex.some((f) => inputs.sourceFiles.has(f));
+    for (const [rel, signature] of inputs?.diskPaths ?? []) {
+      if (diskSignature(path.join(this.rootDir, rel), rel.endsWith('/')) === signature) continue;
+      stale = true;
+      this.detectionReads.delete(rel);
+    }
+    if (!stale) return undefined;
+    this.detectedFrameworkNames = null;
+    return this.ensureDetectedFrameworks(scannedFiles ?? [...this.queries.getAllFilePaths(), ...addedFiles]);
   }
 
   /**
@@ -2328,8 +2503,10 @@ export class ExtractionOrchestrator {
     // Names are passed to each parse call so framework-specific extractors
     // (route nodes, middleware, etc.) run after the tree-sitter pass.
     // Framework detection is reset each run so adding e.g. requirements.txt
-    // between runs is picked up without restarting the process.
+    // between runs is picked up without restarting the process. It reads
+    // everything afresh: no sync has told this process what changed on disk.
     this.detectedFrameworkNames = null;
+    this.detectionReads.clear();
     const tFw = Date.now();
     const frameworkNames = this.ensureDetectedFrameworks(files);
     if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] framework-detect: ${Date.now() - tFw}ms`);
@@ -2650,6 +2827,14 @@ export class ExtractionOrchestrator {
             const content = bytes.toString('utf-8');
             return { filePath: fp, content, stats, error: null as Error | null };
           } catch (err) {
+            // Nothing at the path is not a file that could not be read (#2904):
+            // git keeps listing a tracked file deleted from the working tree
+            // until the deletion is staged, a symlink can point at nothing (the
+            // directory walk skips one quietly), and a file can go between the
+            // scan and this read. Skip it. EACCES, EIO and the like still report.
+            if (isMissingPathError(err)) {
+              return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: null as Error | null, gone: true };
+            }
             return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: err as Error };
           }
         })
@@ -2657,12 +2842,24 @@ export class ExtractionOrchestrator {
 
       // Dispatch each readable file into the bounded parse window; the window
       // stores results on the main thread as they arrive.
-      for (const { filePath, content, stats, error, skipped } of fileContents) {
+      for (const { filePath, content, stats, error, skipped, gone } of fileContents) {
         if (signal?.aborted) { aborted = true; break; }
 
         if (skipped) {
           // Not a source file after all — counted as done, stored as nothing.
+          // Counted as skipped too: the scan found it, and a file no tally
+          // holds reads as one the run lost, so the index was called PARTIAL.
           processed++;
+          filesSkipped++;
+          onProgress?.({ phase: 'parsing', current: processed, total });
+          continue;
+        }
+
+        if (gone) {
+          // Listed by the scan but not on disk: skipped, stored as nothing. It
+          // still counts toward the tallies, or the run would read as PARTIAL.
+          processed++;
+          filesSkipped++;
           onProgress?.({ phase: 'parsing', current: processed, total });
           continue;
         }
@@ -3084,6 +3281,10 @@ export class ExtractionOrchestrator {
       }
       content = read.bytes === null ? oversizeStamp(stats.size) : read.bytes.toString('utf8');
     } catch (error) {
+      // Nothing at the path: nothing to index, and not a read failure (#2904).
+      if (isMissingPathError(error)) {
+        return { nodes: [], edges: [], unresolvedReferences: [], errors: [], durationMs: 0 };
+      }
       return {
         nodes: [],
         edges: [],
@@ -4086,6 +4287,15 @@ export class ExtractionOrchestrator {
       for (const pair of this.queries.getNodeNamePairsByFiles(filesToIndex)) pairsBefore.add(pair);
     }
 
+    // The frameworks every file below is extracted with, current (#2516).
+    if (addedFilePaths.length > 0 || removedFilePaths.length > 0) this.detectionFileListChanged = true;
+    const tDetect = Date.now();
+    const detectedFrameworks = filesToIndex.length === 0 ? undefined : this.refreshFrameworkDetection(
+      scopedPaths && scopedPaths.length > 0 ? null : currentFiles, filesToIndex, addedFilePaths, removedFilePaths);
+    if (process.env.CODEGRAPH_SYNTH_TIMINGS && filesToIndex.length > 0) {
+      console.error(`[phase-timing] sync-framework-detect: ${Date.now() - tDetect}ms (${detectedFrameworks ? 'detected again' : 'unchanged'})`);
+    }
+
     // Load only grammars needed for changed files
     if (filesToIndex.length > 0) {
       await loadGrammarsForLanguages(preloadLanguagesForFiles(filesToIndex, extensionOverrides, this.rootDir));
@@ -4184,6 +4394,7 @@ export class ExtractionOrchestrator {
       ...(failedFilePaths.length > 0 ? { failedFilePaths } : {}),
       definitionDelta: definitionDelta.length > 0 ? definitionDelta : undefined,
       ...(removedFilePaths.length > 0 ? { removedFilePaths } : {}),
+      ...(detectedFrameworks ? { detectedFrameworks } : {}),
     };
   }
 
