@@ -3073,8 +3073,56 @@ function extractHaskellImports(content: string): ImportMapping[] {
   return extractHaskellImportsFromStripped(stripHaskellComments(content));
 }
 
-function extractHaskellImportsFromStripped(stripped: string): ImportMapping[] {
-  const mappings: ImportMapping[] = [];
+/** Explicit layout separates the module's initial imports with semicolons,
+ * not newlines. Anchor at the module header and stop at the first declaration
+ * so source-looking strings or nested blocks can never introduce imports. */
+function explicitHaskellImportDeclarations(stripped: string): string[] | null {
+  const header = stripped.match(new RegExp(`^\\s*module\\s+${HASKELL_MODULE_NAME_SOURCE}\\s*`, 'u'));
+  let cursor = header?.[0].length ?? stripped.match(/^\s*/)![0].length;
+  if (header) {
+    if (stripped[cursor] === '(') {
+      let depth = 0;
+      do {
+        if (stripped[cursor] === '(') depth++;
+        else if (stripped[cursor] === ')') depth--;
+        cursor++;
+      } while (cursor < stripped.length && depth > 0);
+      if (depth !== 0) return null;
+    }
+    const where = stripped.slice(cursor).match(/^\s*where\b\s*/);
+    if (!where) return null;
+    cursor += where[0].length;
+  }
+  // Without a header, an opening brace starts the implicit Main module.
+  if (stripped[cursor] !== '{') return null;
+  cursor++;
+  const declarations: string[] = [];
+  while (cursor < stripped.length) {
+    while (cursor < stripped.length && /[\s;]/.test(stripped[cursor]!)) cursor++;
+    if (!/^import\s/.test(stripped.slice(cursor, cursor + 7))) break;
+    const start = cursor;
+    let depth = 0;
+    let inString = false;
+    for (; cursor < stripped.length; cursor++) {
+      const char = stripped[cursor]!;
+      if (inString) {
+        if (char === '\\') cursor++;
+        else if (char === '"') inString = false;
+      } else if (char === '"') inString = true;
+      else if (char === '(') depth++;
+      else if (char === ')') depth--;
+      else if (depth === 0 && (char === ';' || char === '}')) break;
+    }
+    declarations.push(stripped.slice(start, cursor).replace(/\s+/g, ' ').trim());
+    if (stripped[cursor] !== ';') break;
+    cursor++;
+  }
+  return declarations;
+}
+
+function haskellImportDeclarations(stripped: string): string[] {
+  const explicit = explicitHaskellImportDeclarations(stripped);
+  if (explicit !== null) return explicit;
   const lines = stripped.split(/\r?\n/);
 
   const declarations: string[] = [];
@@ -3107,8 +3155,12 @@ function extractHaskellImportsFromStripped(stripped: string): ImportMapping[] {
     }
     declarations.push(declaration.replace(/\s+/g, ' ').trim());
   }
+  return declarations;
+}
 
-  for (const declaration of declarations) {
+function extractHaskellImportsFromStripped(stripped: string): ImportMapping[] {
+  const mappings: ImportMapping[] = [];
+  for (const declaration of haskellImportDeclarations(stripped)) {
     const body = declaration.replace(/^import\s+/, '');
     const match = body.match(HASKELL_IMPORT_DECLARATION_RE);
     if (!match) continue;
@@ -3481,12 +3533,23 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
     qualifier?: string,
   ): ImportMapping[] => {
     const seen = new Set<string>();
-    return imports.filter((imp) => {
-      if (!mappingExposes(imp, name, parent, namespace, qualifier)) return false;
-      const key = `${imp.source}\0${imp.packageQualifier ?? ''}\0${imp.parentExport ?? ''}\0${imp.localName}\0${imp.haskellTypeOnly ? 1 : 0}\0${imp.haskellValueOnly ? 1 : 0}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+    return imports.flatMap((imp): ImportMapping[] => {
+      // A leaf export may have entered scope as a grouped child. Retain each
+      // possible imported owner instead of requiring the export list to use
+      // the same grouping syntax as the import list.
+      const parents = parent !== undefined ? [parent]
+        : imp.parentExport ? [imp.parentExport]
+        : [undefined, ...imp.includedParentExports ?? [],
+            ...(imp.includedParentChildren ?? [])
+              .filter((child) => child.child === name && haskellChildAllowsNamespace(child, namespace))
+              .map((child) => child.parent)];
+      return [...new Set(parents)].flatMap((routeParent): ImportMapping[] => {
+        if (!mappingExposes(imp, name, routeParent, namespace, qualifier)) return [];
+        const key = `${imp.source}\0${imp.packageQualifier ?? ''}\0${routeParent ?? ''}\0${imp.localName}\0${imp.haskellTypeOnly ? 1 : 0}\0${imp.haskellValueOnly ? 1 : 0}\0${JSON.stringify([imp.excludedParentExports, imp.excludedParentChildren])}`;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [routeParent === undefined ? imp : { ...imp, parentExport: routeParent }];
+      });
     });
   };
 
@@ -3517,11 +3580,40 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
     const qualifier = qualifiedItem?.qualifier;
     const namespace = item.typeOnly ? 'type' : item.valueOnly ? 'value' : undefined;
     for (const imp of sourcesFor(item.name, undefined, namespace, qualifier)) {
+      if ((imp.excludedParentExports?.length ?? 0) > 0
+        || (imp.excludedParentChildren?.length ?? 0) > 0) {
+        // The leaf's owner is not always known until the upstream declaration
+        // is visited. Keep grouped hiding as a predicate on that declaration.
+        const typeOnly = item.typeOnly || imp.haskellTypeOnly;
+        const valueOnly = item.valueOnly || imp.haskellValueOnly;
+        pushUnique({
+          kind: 'wildcard',
+          source: imp.source,
+          ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
+          ...(imp.parentExport ? {
+            includedParentChildren: [{
+              parent: imp.parentExport,
+              child: item.name,
+              ...(typeOnly ? { haskellTypeOnly: true as const } : {}),
+              ...(valueOnly ? { haskellValueOnly: true as const } : {}),
+            }],
+          } : {
+            includedNames: [item.name],
+            ...(typeOnly ? { haskellTypeOnlyNames: [item.name] } : {}),
+            ...(valueOnly ? { haskellValueOnlyNames: [item.name] } : {}),
+            haskellClearParent: true,
+          }),
+          ...(imp.excludedParentExports ? { excludedParentExports: imp.excludedParentExports } : {}),
+          ...(imp.excludedParentChildren ? { excludedParentChildren: imp.excludedParentChildren } : {}),
+        });
+        continue;
+      }
       pushUnique({
         kind: 'named',
         exportedName: item.name,
         originalName: item.name,
         source: imp.source,
+        ...(imp.parentExport ? { parentExport: imp.parentExport } : {}),
         ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
         ...((item.typeOnly || imp.haskellTypeOnly) ? { haskellTypeOnly: true } : {}),
         ...((item.valueOnly || imp.haskellValueOnly) ? { haskellValueOnly: true } : {}),
@@ -3553,18 +3645,33 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
         if (qualifier !== undefined) {
           if (!imp.isNamespace || imp.localName !== qualifier) continue;
         } else if (imp.isNamespace) continue;
-        if (imp.parentExport === item.name && imp.localName !== '*') {
+        if (!imp.isNamespace && imp.localName !== '*'
+          && (!imp.parentExport || imp.parentExport === item.name)) {
           pushUnique({
             kind: 'named',
             exportedName: imp.localName,
             originalName: imp.exportedName,
             source: imp.source,
-            parentExport: imp.parentExport,
+            parentExport: item.name,
             ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
             ...(imp.haskellTypeOnly ? { haskellTypeOnly: true } : {}),
             ...(imp.haskellValueOnly ? { haskellValueOnly: true } : {}),
           });
           continue;
+        }
+        // A separately imported selector/constructor can be regrouped under
+        // its type too. Ownership is checked against the upstream node.
+        for (const name of imp.includedNames ?? []) {
+          pushUnique({
+            kind: 'named',
+            exportedName: name,
+            originalName: name,
+            source: imp.source,
+            parentExport: item.name,
+            ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
+            ...(imp.haskellTypeOnlyNames?.includes(name) ? { haskellTypeOnly: true } : {}),
+            ...(imp.haskellValueOnlyNames?.includes(name) ? { haskellValueOnly: true } : {}),
+          });
         }
         // Qualified imports store selected children on their namespace
         // mapping rather than as separate named bindings. `O.T(..)` exports
@@ -3582,7 +3689,8 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
             ...(child.haskellValueOnly ? { haskellValueOnly: true } : {}),
           });
         }
-        const unrestrictedWildcard = !imp.includedNames
+        const unrestrictedWildcard = !imp.parentExport
+          && !imp.includedNames
           && !imp.includedParentExports
           && !imp.includedParentChildren;
         const parentWildcard = (qualifier !== undefined || imp.localName === '*')

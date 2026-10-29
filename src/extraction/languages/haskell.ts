@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getChildByField, getNodeText, getPrecedingDocstring } from '../tree-sitter-helpers';
 import type { BareReferenceInfo, ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
-import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX } from '../../types';
+import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER, type UnresolvedReference } from '../../types';
 
 // tree-sitter-haskell emits signatures, default signatures, and equations as
 // separate syntax nodes. Keep them under one graph node per lexical declaration.
@@ -580,7 +580,7 @@ function isRecursiveDo(node: SyntaxNode): boolean {
 }
 
 /** Scope kinds a lexical-range decorator reports the span of. */
-const LEXICAL_RANGE_CONTAINERS = new Set(['let_in', 'alternative', 'function', 'do', 'list_comprehension']);
+const LEXICAL_RANGE_CONTAINERS = new Set(['let_in', 'alternative', 'function', 'bind', 'do', 'list_comprehension']);
 
 function lexicalRangeDecorators(node: SyntaxNode): string[] {
   const range = (start: SyntaxNode['startPosition'], end: SyntaxNode['endPosition']): string =>
@@ -610,7 +610,7 @@ function lexicalRangeDecorators(node: SyntaxNode): string[] {
       // every declaration recursive across the whole block.
       const start = ancestor.type === 'do' && bindingStatement && !isRecursiveDo(ancestor)
         ? bindingStatement.startPosition
-        : ancestor.type === 'alternative' || ancestor.type === 'function'
+        : ancestor.type === 'alternative' || ancestor.type === 'function' || ancestor.type === 'bind'
           ? (getChildByField(ancestor, 'match')?.startPosition ?? ancestor.startPosition)
           : ancestor.startPosition;
       return [range(start, ancestor.endPosition)];
@@ -1009,6 +1009,13 @@ interface HaskellPatternBinding {
   node: SyntaxNode;
 }
 
+// Internal lexical identities let the existing pattern-scope walk track a
+// wildcard without guessing its imported fields or creating graph symbols.
+const WILDCARD_LEXICAL_PREFIX = '\0record-wildcard:';
+function wildcardBindingName(node: SyntaxNode): string {
+  return `${WILDCARD_LEXICAL_PREFIX}${node.startIndex}`;
+}
+
 function collectPatternBindings(pattern: SyntaxNode | null, source: string): HaskellPatternBinding[] {
   if (!pattern) return [];
   const bindings: HaskellPatternBinding[] = [];
@@ -1035,6 +1042,10 @@ function collectPatternBindings(pattern: SyntaxNode | null, source: string): Has
       continue;
     }
     if (current.type === 'field_pattern') {
+      if (current.namedChildren.some((child) => child.type === 'wildcard')) {
+        bindings.push({ name: wildcardBindingName(current), node: current });
+        continue;
+      }
       const nestedPattern = getChildByField(current, 'pattern');
       if (nestedPattern) {
         // `R { field = x }` binds x, not the label `field`.
@@ -1197,14 +1208,20 @@ function bindingAt(
   return undefined;
 }
 
-/** Haskell lexical values that must not become global/imported callees. */
-function isLexicallyBound(
+interface LexicalBindingScope {
+  scope: SyntaxNode;
+  materializedNode: boolean;
+  parameter?: boolean;
+}
+
+/** Nearest lexical binding, retaining the scope that proves its identity. */
+function lexicalBindingScope(
   name: string,
   node: SyntaxNode,
   source: string,
   stateOwner: object,
-): boolean {
-  if (!name || haskellReferenceParts(name).qualifier !== null) return false;
+): LexicalBindingScope | null {
+  if (!name || haskellReferenceParts(name).qualifier !== null) return null;
   let branch = node;
   let ancestor = node.parent;
   while (ancestor) {
@@ -1219,40 +1236,44 @@ function isLexicallyBound(
       const whereBinds = getChildByField(ancestor, 'binds');
       if (whereBinds && !patternRoots.some((pattern) => nodeContains(pattern, node))) {
         const binding = bindingAt(whereBinds, name, source, null, stateOwner);
-        if (binding) return !binding.materializedNode;
+        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
       }
       // View-pattern expressions are evaluated left-to-right. A binder in the
       // view result (or in a later argument) must not retroactively shadow the
       // callable used by the view expression; every binder is visible in the
       // ordinary RHS because all pattern positions precede it.
       if (patternRoots.some((pattern) =>
-        patternContainsName(pattern, name, source, node.startIndex))) return true;
+        patternContainsName(pattern, name, source, node.startIndex))) {
+        return { scope: ancestor, materializedNode: false, parameter: true };
+      }
     }
     if (ancestor.type === 'bind') {
       const whereBinds = getChildByField(ancestor, 'binds');
       if (whereBinds) {
         const binding = bindingAt(whereBinds, name, source, null, stateOwner);
-        if (binding) return !binding.materializedNode;
+        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
       }
     }
     if (ancestor.type === 'pattern_synonym') {
       const equation = ancestor.namedChildren.find((child) => child.type === 'equation');
       const synonym = equation ? getChildByField(equation, 'synonym') : null;
-      if (patternContainsName(synonym, name, source, node.startIndex)) return true;
+      if (patternContainsName(synonym, name, source, node.startIndex)) {
+        return { scope: ancestor, materializedNode: false };
+      }
     }
     if (ancestor.type === 'alternative') {
       const pattern = getChildByField(ancestor, 'pattern');
       const whereBinds = getChildByField(ancestor, 'binds');
       if (whereBinds && !nodeContains(pattern, node)) {
         const binding = bindingAt(whereBinds, name, source, null, stateOwner);
-        if (binding) return !binding.materializedNode;
+        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
       }
       if (patternContainsName(
         pattern,
         name,
         source,
         node.startIndex,
-      )) return true;
+      )) return { scope: ancestor, materializedNode: false };
     }
     if (ancestor.type === 'let_in' || ancestor.type === 'let') {
       const binds = getChildByField(ancestor, 'binds');
@@ -1260,18 +1281,18 @@ function isLexicallyBound(
         // Haskell let bindings are recursive: every declaration is in scope in
         // every RHS as well as in the body.
         const binding = bindingAt(binds, name, source, null, stateOwner);
-        if (binding) return !binding.materializedNode;
+        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
       }
     }
     if (ancestor.type === 'local_binds') {
       const binding = bindingAt(ancestor, name, source, null, stateOwner);
-      if (binding) return !binding.materializedNode;
+      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
     }
     if (ancestor.type === 'rec') {
       // RecursiveDo's explicit `rec` block brings every contained monadic
       // binder into scope throughout the block, even inside earlier RHSs.
       const binding = bindingAt(ancestor, name, source, null, stateOwner);
-      if (binding) return !binding.materializedNode;
+      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
     }
     if (ancestor.type === 'do') {
       const binding = bindingAt(
@@ -1281,36 +1302,92 @@ function isLexicallyBound(
         isRecursiveDo(ancestor) ? null : branch.startIndex,
         stateOwner,
       );
-      if (binding) return !binding.materializedNode;
+      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
     }
     if (ancestor.type === 'qualifiers') {
       const binding = bindingAt(ancestor, name, source, branch.startIndex, stateOwner);
-      if (binding) return !binding.materializedNode;
+      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
     }
     if (ancestor.type === 'list_comprehension') {
       const output = getChildByField(ancestor, 'expression');
       const qualifiers = getChildByField(ancestor, 'qualifiers');
       if (output && qualifiers && nodeContains(output, node)) {
         const binding = bindingAt(qualifiers, name, source, null, stateOwner);
-        if (binding) return !binding.materializedNode;
+        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
       }
     }
     if (ancestor.type === 'guards') {
       const binding = bindingAt(ancestor, name, source, branch.startIndex, stateOwner);
-      if (binding) return !binding.materializedNode;
+      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
     }
     if (ancestor.type === 'match') {
       const guards = getChildByField(ancestor, 'guards');
       const expression = getChildByField(ancestor, 'expression');
       if (guards && expression && nodeContains(expression, node)) {
         const binding = bindingAt(guards, name, source, null, stateOwner);
-        if (binding) return !binding.materializedNode;
+        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
       }
     }
     branch = ancestor;
     ancestor = ancestor.parent;
   }
-  return false;
+  return null;
+}
+
+/** Haskell lexical values that must not become global/imported callees. */
+function isLexicallyBound(name: string, node: SyntaxNode, source: string, stateOwner: object): boolean {
+  const binding = lexicalBindingScope(name, node, source, stateOwner);
+  return binding !== null && !binding.materializedNode;
+}
+
+/** Preserve import-dependent wildcard shadowing while the syntax tree is alive. */
+export function annotateHaskellWildcardReferences(
+  root: SyntaxNode,
+  source: string,
+  references: UnresolvedReference[],
+  stateOwner: object,
+): void {
+  const wildcards: Array<{ binding: string; constructor: string; explicit: Set<string> }> = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.type === 'field_pattern'
+      && current.namedChildren.some((child) => child.type === 'wildcard')
+      && isHaskellPatternPosition(current)) {
+      const record = current.parent;
+      const constructorNode = record ? getChildByField(record, 'constructor') : null;
+      const constructor = constructorNode ? normalizedSimpleReference(constructorNode, source) : null;
+      if (record && constructor) {
+        const explicit = new Set(record.childrenForFieldName('field').flatMap((field) => {
+          const name = getChildByField(field, 'field');
+          return name ? [haskellReferenceParts(normalizeReferenceText(getNodeText(name, source))).member] : [];
+        }));
+        wildcards.push({ binding: wildcardBindingName(current), constructor: constructor.name, explicit });
+      }
+    }
+    stack.push(...current.namedChildren);
+  }
+  if (wildcards.length === 0) return;
+  for (const reference of references) {
+    if (!['calls', 'function_ref', 'haskell_effect_alias'].includes(reference.referenceKind)) continue;
+    const name = haskellReferenceParts(reference.referenceName);
+    if (name.qualifier !== null || !HASKELL_VARID_START_RE.test(name.member)) continue;
+    const syntax = root.descendantForPosition({ row: reference.line - 1, column: reference.column });
+    if (!syntax) continue;
+    const explicit = lexicalBindingScope(reference.referenceName, syntax, source, stateOwner);
+    for (const wildcard of wildcards) {
+      if (wildcard.explicit.has(name.member)) continue;
+      const binding = lexicalBindingScope(wildcard.binding, syntax, source, stateOwner);
+      if (!binding) continue;
+      // An inner explicit declaration wins over an outer wildcard, just as it
+      // wins over an ordinary parameter. Same-scope where groups win too.
+      if (explicit && nodeContains(binding.scope, explicit.scope)) continue;
+      const marker = `${HASKELL_WILDCARD_BINDING_PREFIX}${wildcard.constructor}`;
+      if (!reference.candidates?.includes(marker)) {
+        (reference.candidates ??= []).push(marker);
+      }
+    }
+  }
 }
 
 function isHaskellPatternPosition(node: SyntaxNode): boolean {
@@ -1717,6 +1794,11 @@ function extractHaskellBareReference(
   }
 
   if (node.type === 'projection' || node.type === 'projection_selector') {
+    const expression = getChildByField(node, 'expression');
+    const receiver = expression?.type === 'variable'
+      ? lexicalBindingScope(getNodeText(expression, source), expression, source, stateOwner)
+      : null;
+    const shadowed = receiver && (receiver.scope.type !== 'function' || !receiver.parameter);
     const fields = node.childrenForFieldName('field');
     const variables = fields.flatMap((field) => {
       if (field.type === 'variable') return [field];
@@ -1728,6 +1810,7 @@ function extractHaskellBareReference(
         name: getNodeText(variable, source).trim(),
         referenceKind: 'references' as const,
         node: variable,
+        ...(shadowed ? { candidates: [HASKELL_SHADOWED_PROJECTION_RECEIVER] } : {}),
       }))
       .filter((reference) => reference.name.length > 0);
   }
@@ -1890,7 +1973,8 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
     // to their enclosing symbol by the ordinary walker.
     if (!isTopLevel) return false;
     const pattern = getChildByField(node, 'pattern');
-    const names = [...new Set(collectPatternNames(pattern, ctx.source))];
+    const names = [...new Set(collectPatternNames(pattern, ctx.source))]
+      .filter((name) => !name.startsWith(WILDCARD_LEXICAL_PREFIX));
     if (names.length === 0) return false;
     const lhs = pattern
       ? collapseWhitespace(getNodeText(pattern, ctx.source)).slice(0, 240)
@@ -2037,6 +2121,14 @@ function handleDataDeclaration(
           ?? (infix ? getChildByField(infix, 'operator') : null)
           ?? firstDescendant(current, new Set(['constructor']))]
           .filter((candidate): candidate is SyntaxNode => candidate !== null);
+      const fieldNames: string[] = [];
+      const fieldStack = [...current.namedChildren];
+      while (fieldStack.length > 0) {
+        const child = fieldStack.pop()!;
+        if (child.type === 'field') {
+          fieldNames.push(...child.childrenForFieldName('name').map((field) => getNodeText(field, ctx.source).trim()));
+        } else fieldStack.push(...child.namedChildren);
+      }
       for (const constructorName of constructorNames) {
         const rawConstructor = getNodeText(constructorName, ctx.source).trim();
         const constructor = declaredInfixName(rawConstructor);
@@ -2049,9 +2141,10 @@ function handleDataDeclaration(
             ctx.nodes as object,
             options?.exportParentName ?? name,
           ),
-          decorators: options?.exportParentName
-            ? [`haskell-export-parent:${options.exportParentName}`]
-            : undefined,
+          decorators: [
+            `${HASKELL_RECORD_FIELDS_PREFIX}${JSON.stringify(fieldNames)}`,
+            ...(options?.exportParentName ? [`haskell-export-parent:${options.exportParentName}`] : []),
+          ],
         });
       }
       // Record fields can live below a constructor, so continue walking.

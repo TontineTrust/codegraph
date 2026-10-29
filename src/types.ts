@@ -374,6 +374,12 @@ export type ReferenceKind = EdgeKind | 'function_ref' | 'haskell_effect_alias';
 export const HASKELL_EFFECT_ALIAS_HEAD_PREFIX = 'haskell-effect-head:';
 /** Constructor proof for a record-construction field label. */
 export const HASKELL_RECORD_CONSTRUCTOR_PREFIX = 'haskell-record-constructor:';
+/** Exact record labels declared by a constructor, independent of selector sharing. */
+export const HASKELL_RECORD_FIELDS_PREFIX = 'haskell-record-fields:';
+/** A record wildcard whose implicit binders may shadow this unqualified value. */
+export const HASKELL_WILDCARD_BINDING_PREFIX = 'haskell-wildcard-binding:';
+/** A projection receiver is bound inside the annotated function's parameter scope. */
+export const HASKELL_SHADOWED_PROJECTION_RECEIVER = 'haskell-shadowed-projection-receiver';
 /** Combinator whose canonical origin must prove an inferred operand call. */
 export const HASKELL_COMBINATOR_PREFIX = 'haskell-combinator:';
 /** The same operand also appeared as a function value; replay both semantic edges. */

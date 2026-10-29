@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE } from '../types';
+import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER } from '../types';
 import { QueryBuilder } from '../db/queries';
 import { SynthesisStage } from '../db/synthesis-stage';
 import {
@@ -1382,6 +1382,34 @@ export class ReferenceResolver {
     return fields;
   }
 
+  /** Resolve only the field identity needed to establish an implicit pattern binder. */
+  private isHaskellWildcardBound(ref: UnresolvedRef): boolean {
+    if (ref.language !== 'haskell') return false;
+    const markers = ref.candidates?.filter((candidate) => candidate.startsWith(HASKELL_WILDCARD_BINDING_PREFIX)) ?? [];
+    for (const marker of markers) {
+      const constructorRef: UnresolvedRef = {
+        ...ref,
+        referenceName: marker.slice(HASKELL_WILDCARD_BINDING_PREFIX.length),
+        referenceKind: 'references',
+        candidates: undefined,
+      };
+      const lexical = this.resolveHaskellLexical(constructorRef);
+      const resolved = lexical.claimed ? lexical.result : resolveViaImport(constructorRef, this.context);
+      // Without an indexed constructor we cannot prove that a same-named
+      // global is unshadowed. Keep the original ref pending for topology replay.
+      if (!resolved) return true;
+      const constructor = this.getHaskellNodeById(resolved.targetNodeId);
+      if (constructor?.kind !== 'enum_member') return true;
+      const fieldsMarker = constructor.decorators?.find((value) => value.startsWith(HASKELL_RECORD_FIELDS_PREFIX));
+      if (!fieldsMarker) return true;
+      const declaredFields = JSON.parse(fieldsMarker.slice(HASKELL_RECORD_FIELDS_PREFIX.length)) as string[];
+      if (!declaredFields.includes(ref.referenceName)) continue;
+      const fields = this.getHaskellRecordFields(constructor.id).get(ref.referenceName) ?? [];
+      if (fields.some((field) => haskellRecordFieldIsVisible(ref, field, this.context))) return true;
+    }
+    return false;
+  }
+
   /** A construction label is selected by its exact constructor, not the bare value namespace. */
   private resolveHaskellRecordField(ref: UnresolvedRef): {
     claimed: boolean;
@@ -1495,6 +1523,7 @@ export class ReferenceResolver {
     from: Node,
     receiver: string,
   ): string | null {
+    if (ref.candidates?.includes(HASKELL_SHADOWED_PROJECTION_RECEIVER)) return null;
     const signature = from.signature;
     const marker = signature?.indexOf('::') ?? -1;
     if (!signature || marker < 0) return null;
@@ -2175,6 +2204,7 @@ export class ReferenceResolver {
   }
 
   private resolveOneInner(ref: UnresolvedRef): ResolvedRef | null {
+    if (this.isHaskellWildcardBound(ref)) return null;
     const combinator = ref.language === 'haskell' && ref.referenceKind === 'calls'
       ? ref.candidates?.find((candidate) => candidate.startsWith(HASKELL_COMBINATOR_PREFIX))
       : undefined;
@@ -2727,6 +2757,9 @@ export class ReferenceResolver {
             ...(t.metadata ?? {}),
             confidence: ref.confidence,
             resolvedBy: ref.resolvedBy,
+            ...(ref.original.language === 'haskell'
+              && ref.original.candidates?.some((candidate) => candidate.startsWith(HASKELL_WILDCARD_BINDING_PREFIX))
+              ? { haskellImportDependent: true } : {}),
             // The ORIGINAL reference text (and kind, when edge-kind promotion
             // rewrote it — calls→instantiates, extends→implements,
             // function_ref→references). If this edge's target is later removed
@@ -2741,7 +2774,8 @@ export class ReferenceResolver {
             ...(ref.original.referenceKind !== kind ? { refKind: ref.original.referenceKind } : {}),
             ...((ref.original.referenceKind === 'haskell_effect_alias'
               || (ref.original.language === 'haskell'
-                && (ref.original.referenceKind === 'references' || ref.original.referenceKind === 'calls')))
+                && (ref.original.referenceKind === 'references' || ref.original.referenceKind === 'calls'
+                  || ref.original.referenceKind === 'function_ref')))
               && ref.original.candidates
               ? { refCandidates: ref.original.candidates }
               : {}),

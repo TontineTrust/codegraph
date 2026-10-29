@@ -138,11 +138,11 @@ export function findAllSymbols(cg: CodeGraph, symbol: string): { nodes: Node[]; 
   if (unqualifiedOperator && isHaskellOperatorBody(unqualifiedOperator)) {
     const exact = cg.getNodesByName(`(${unqualifiedOperator})`)
       .filter((node) => node.language === 'haskell');
-    // A bare dollar-only spelling is also a valid JavaScript identifier.
-    // Resolve both exact language-specific names, never a fuzzy operator match.
-    if (symbol === unqualifiedOperator) {
-      exact.push(...cg.getNodesByName(symbol).filter((node) => node.language !== 'haskell'));
-    }
+    // Flow normalization wraps symbolic endpoints for Haskell, but Scala
+    // and other languages store the same exact operator without parentheses.
+    // Dollar-only JavaScript identifiers also keep their original spelling.
+    exact.push(...cg.getNodesByName(unqualifiedOperator)
+      .filter((node) => node.language !== 'haskell'));
     const isGen = cg.generatedFilePredicate(exact.map((node) => node.filePath));
     const nodes = [...exact].sort(
       (left, right) => (isGen(left.filePath) ? 1 : 0) - (isGen(right.filePath) ? 1 : 0),

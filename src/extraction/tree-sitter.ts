@@ -27,7 +27,7 @@ import { stripCppTemplateArgs, isCppConstructorDeclaration, cDeclaratorIdentifie
 import { NestedIntervals, scanCppBraceScopes, type CppBraceScopes } from './languages/cpp-brace-scopes';
 import { appendCppMacroMethods } from './languages/cpp-macro-methods';
 import { rustImplItemOwner, rustImplTypeName } from './languages/rust';
-import { HASKELL_CONID_START_RE, haskellReferenceParts, normalizeReferenceText } from './languages/haskell';
+import { HASKELL_CONID_START_RE, haskellReferenceParts, normalizeReferenceText, annotateHaskellWildcardReferences } from './languages/haskell';
 import { goAliasTypeNames, goEmbeddedTypeName, goInterfaceMethodTypeNames, goStructFieldTypeNames } from './languages/go';
 import { dartMisparsedGenericCall, dartReceiverOf, isDartTypeName, pushDartTypeAliasRefs, pushDartTypeRefs } from './languages/dart';
 import { cfmlConstructedComponent, cfmlCreatedComponent, isCfIncludeCall } from './languages/cfscript';
@@ -1048,6 +1048,10 @@ export class TreeSitterExtractor {
       this.flushFnRefCandidates();
       this.flushValueRefs();
       this.flushPascalReads();
+
+      if (this.language === 'haskell') {
+        annotateHaskellWildcardReferences(this.tree.rootNode, this.source, this.unresolvedReferences, this.nodes);
+      }
 
       if (packageNodeId) this.nodeStack.pop();
       this.nodeStack.pop();

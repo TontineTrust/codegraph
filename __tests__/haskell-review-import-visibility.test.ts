@@ -134,4 +134,117 @@ describe('Haskell import visibility review regressions', () => {
       { kind: 'calls', target: 'Origin::A::value' },
     ]);
   });
+
+  it.each([
+    ['T(..)', 'Origin (T, value)'],
+    ['O.T(..)', 'qualified Origin as O (T, value)'],
+    ['value', 'Origin (T(value))'],
+    ['value', 'Origin (T(..))'],
+    ['O.value', 'qualified Origin as O (T(value))'],
+    ['O.value', 'qualified Origin as O (T(..))'],
+  ])('preserves child visibility when %s regroups import %s', async (exported, imported) => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT { value :: Int }\n',
+      'Facade.hs': `module Facade (${exported}) where\nimport ${imported}\n`,
+      'Consumer.hs': 'module Consumer where\nimport Facade\nreadValue item = value item\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::T::value' },
+    ]);
+  });
+
+  it.each([
+    ['value', 'Origin (A(value))'],
+    ['O.value', 'qualified Origin as O (A(value))'],
+  ])('keeps duplicate-field ownership when %s exports import %s by its leaf', async (exported, imported) => {
+    const graph = await createGraph({
+      'Origin.hs': '{-# LANGUAGE DuplicateRecordFields #-}\nmodule Origin where\ndata A = MkA { value :: Int }\ndata B = MkB { value :: Bool }\n',
+      'Facade.hs': `module Facade (${exported}) where\nimport ${imported}\n`,
+      'Consumer.hs': 'module Consumer where\nimport Facade\nreadValue item = value item\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::A::value' },
+    ]);
+  });
+
+  it('does not add unimported constructors when separately imported children are regrouped', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT { value :: Int }\n',
+      'Facade.hs': 'module Facade (T(..)) where\nimport Origin (T, value)\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nreadValue item = value item\nnotVisible = MkT 1\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::T::value' },
+    ]);
+    expect(dependencies(graph, 'Consumer.hs', 'notVisible')).toEqual([]);
+  });
+
+  it('keeps grouped hiding restrictions when exporting a field by its leaf', async () => {
+    const graph = await createGraph({
+      'Origin.hs': '{-# LANGUAGE DuplicateRecordFields #-}\nmodule Origin where\ndata A = MkA { value :: Int }\ndata B = MkB { value :: Bool }\n',
+      'Facade.hs': 'module Facade (value) where\nimport Origin hiding (A(value))\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nreadValue item = value item\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::B::value' },
+    ]);
+  });
+
+  it('does not treat another grouped import as an unrestricted child import', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT Int\ndata Other = Other Int\n',
+      'Facade.hs': 'module Facade (T(..)) where\nimport Origin (T, Other(..))\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nnotVisible = MkT 1\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'notVisible')).toEqual([]);
+  });
+
+  it.each([
+    'module Consumer where { import Origin; readValue item = value item }',
+    'module Consumer (readValue) where {\n import Origin;\n readValue item = value item\n }',
+  ])('discovers imports in an explicit module layout: %s', async (source) => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nvalue n = n + 1\n',
+      'Consumer.hs': source,
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::value' },
+    ]);
+  });
+
+  it('discovers imports in a headerless explicit-layout Main module', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nvalue n = n + 1\n',
+      'Main.hs': '{ import Origin; main = print (value 1) }\n',
+    });
+    expect(dependencies(graph, 'Main.hs', 'main')).toEqual([
+      { kind: 'calls', target: 'Origin::value' },
+    ]);
+  });
+
+  it.each(['"; import Other; value"', '[q| ; import Other; value |]'])('ignores source-looking literal %s in explicit layout', async (literal) => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nvalue n = n + 1\n',
+      'Other.hs': 'module Other where\nvalue n = n - 1\n',
+      'Consumer.hs': [
+        '{-# LANGUAGE QuasiQuotes #-}',
+        'module Consumer where { {- import Other; -} import Origin;',
+        ` payload = ${literal};`,
+        ' readValue item = value item }',
+      ].join('\n'),
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::value' },
+    ]);
+  });
+
+  it('preserves package strings and multiple explicit-layout imports', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nvalue n = n + 1\n',
+      'Consumer.hs': '{-# LANGUAGE PackageImports #-}\nmodule Consumer where { import "base" Prelude; import qualified Origin as O (value); readValue item = O.value item }\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::value' },
+    ]);
+  });
 });
