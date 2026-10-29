@@ -398,6 +398,12 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 #### Haskell indexing
 
+- Haskell calls respect helper scopes in guards, comprehensions and case alternatives, avoiding links to unrelated functions. (#1337)
+
+- Haskell imports and re-exports preserve constructor and record-field visibility, including annotated record projections across modules. (#1337)
+
+- Qualified Haskell operators and stored function values retain their dependencies, including application operators written in prefix form. (#1337)
+
 - Large Haskell projects index and refresh exported definitions faster while preserving import visibility and ambiguity checks. (#1337)
 
 - Haskell local functions keep their callers when they shadow a parameter with the same name. (#1337)

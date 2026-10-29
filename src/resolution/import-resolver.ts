@@ -2998,13 +2998,12 @@ function parseHaskellImportItem(rawItem: string): HaskellImportItem | null {
     const close = cleaned.lastIndexOf(')');
     if (open >= 0 && close > open) childList = cleaned.slice(open + 1, close).trim();
   }
-  // Haskell2010 §5.3: a bare uppercase item imports BOTH the type and its
-  // data constructors (dual namespace) — neither flag, matching the
-  // conservative child semantics of parseHaskellImportChild. Lowercase
-  // identifiers are necessarily values, and a bare operator item — including
-  // any `:`-headed constructor operator — can only denote a value;
-  // type-level operators require an explicit `type` qualifier.
-  const typeOnly = explicitType;
+  // A positive import/export item's uppercase head names a type or class,
+  // including when it has children (`T(T)` imports the constructor through
+  // the child, not the head). `pattern T` explicitly selects a value. Hiding
+  // lists deliberately discard this type-only restriction below: `hiding (T)`
+  // hides both the type and a same-named constructor (Haskell2010 §5.3.1).
+  const typeOnly = explicitType || (!explicitPattern && HASKELL_CONID_START_RE.test(name));
   const valueOnly = explicitPattern || (!explicitType && !HASKELL_CONID_START_RE.test(name));
   return {
     name,
@@ -3560,11 +3559,28 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
             exportedName: imp.localName,
             originalName: imp.exportedName,
             source: imp.source,
+            parentExport: imp.parentExport,
             ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
             ...(imp.haskellTypeOnly ? { haskellTypeOnly: true } : {}),
             ...(imp.haskellValueOnly ? { haskellValueOnly: true } : {}),
           });
           continue;
+        }
+        // Qualified imports store selected children on their namespace
+        // mapping rather than as separate named bindings. `O.T(..)` exports
+        // precisely those visible children, with their original ownership.
+        for (const child of imp.includedParentChildren ?? []) {
+          if (child.parent !== item.name) continue;
+          pushUnique({
+            kind: 'named',
+            exportedName: child.child,
+            originalName: child.child,
+            source: imp.source,
+            parentExport: child.parent,
+            ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
+            ...(child.haskellTypeOnly ? { haskellTypeOnly: true } : {}),
+            ...(child.haskellValueOnly ? { haskellValueOnly: true } : {}),
+          });
         }
         const unrestrictedWildcard = !imp.includedNames
           && !imp.includedParentExports

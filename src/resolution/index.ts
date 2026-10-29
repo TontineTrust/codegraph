@@ -42,7 +42,7 @@ import { matchShopifyThemeFile } from './shopify-themes';
 import { isJsSuperCallLanguage, isJsSuperCallSite, matchJsSuperCall } from './js-super-calls';
 import { CLASS_EXPRESSION_REF_LANGUAGES, isCommonJsExportedClass, isJsClassExpression, writtenIn, type ClassExpressionIndex } from './js-class-expressions';
 import { matchRubyConstantPathRef } from './ruby-constant-paths';
-import { resolveViaImport, resolvePhpImportedStaticCall, resolvePhpQualifiedClassRef, resolveTsQualifiedTypeRef, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isDartImportRef, isLuaRequireRef, isJsPathImportRef, isBoundToOutOfRepoImport, reachesAmbientModule, importBindingTail, clearImportResolverMemos, resolveImportPath, isExternalImport, ESM_IMPORT_LANGUAGES, jsModuleFile, pythonRootFingerprint, pythonReopenScope, pythonPackageImporters, moduleDefaultExport, isJsFamilyFile, isModuleBindingName, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellNodeOwnedBy, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
+import { resolveViaImport, resolvePhpImportedStaticCall, resolvePhpQualifiedClassRef, resolveTsQualifiedTypeRef, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isDartImportRef, isLuaRequireRef, isJsPathImportRef, isBoundToOutOfRepoImport, reachesAmbientModule, importBindingTail, clearImportResolverMemos, resolveImportPath, isExternalImport, ESM_IMPORT_LANGUAGES, jsModuleFile, pythonRootFingerprint, pythonReopenScope, pythonPackageImporters, moduleDefaultExport, isJsFamilyFile, isModuleBindingName, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
 import { haskellCombinatorHasCanonicalOrigin } from './haskell-combinators';
 import { ResolverPool, minRefsForPool, shouldEngageAdaptively } from './resolver-pool';
 import { resolveAliasBinding } from './alias-binding';
@@ -1575,28 +1575,40 @@ export class ReferenceResolver {
     const parent = this.inferHaskellProjectionParent(ref, from, receiver);
     if (!parent) return { claimed: true, result: null };
 
-    const ownedByParent = (node: Node): boolean => {
-      return haskellNodeOwnedBy(node, parent);
-    };
-    const targets = this.context.getNodesByName(ref.referenceName)
-      .filter((node) => node.language === 'haskell'
-        && node.kind === 'field'
-        && node.filePath === ref.filePath
-        && ownedByParent(node));
-    const imported = this.gateLanguage(resolveViaImport(ref, this.context), ref);
-    if (imported) {
-      const target = this.getHaskellNodeById(imported.targetNodeId);
-      if (target?.kind === 'field' && ownedByParent(target)) targets.push(target);
+    // Resolve the annotation in the type namespace before considering fields.
+    // A bare field import may be ambiguous even when the receiver's type is
+    // exact, and a different module may define an unrelated type named A too.
+    const parentRef: UnresolvedRef = { ...ref, referenceName: parent, referenceKind: 'type_of' };
+    const localParents = this.context.getNodesByName(parent).filter((node) =>
+      node.language === 'haskell' && node.filePath === ref.filePath
+      && (node.kind === 'enum' || node.kind === 'struct' || node.kind === 'type_alias')
+    );
+    let owner: Node | null = null;
+    if (localParents.length > 0) {
+      if (localParents.length !== 1
+        || haskellImportConflictsWithLocal(parentRef, localParents[0]!, this.context)) {
+        return { claimed: true, result: null };
+      }
+      owner = localParents[0]!;
+    } else {
+      const imported = this.gateLanguage(resolveViaImport(parentRef, this.context), parentRef);
+      if (imported) owner = this.getHaskellNodeById(imported.targetNodeId);
     }
-    const unique = [...new Map(targets.map((node) => [node.id, node])).values()];
-    if (unique.length !== 1) return { claimed: true, result: null };
+    if (!owner) return { claimed: true, result: null };
+    const targets = this.context.getNodesByName(ref.referenceName).filter((node) =>
+      node.language === 'haskell' && node.kind === 'field'
+      && this.getHaskellContainingNode(node.id)?.id === owner.id
+      && haskellRecordFieldIsVisible(ref, node, this.context)
+    );
+    if (targets.length !== 1) return { claimed: true, result: null };
     return {
       claimed: true,
       result: {
         original: ref,
-        targetNodeId: unique[0]!.id,
+        targetNodeId: targets[0]!.id,
         confidence: 0.99,
-        resolvedBy: imported?.targetNodeId === unique[0]!.id ? 'import' : 'qualified-name',
+        resolvedBy: owner.filePath === ref.filePath ? 'qualified-name' : 'import',
+        metadata: { haskellImportDependent: true },
       },
     };
   }
@@ -1709,22 +1721,23 @@ export class ReferenceResolver {
       return this.getHaskellContainingNode(node.id)?.decorators?.includes('haskell-instance') === true;
     };
 
-    const lexicalRange = (node: Node): [number, number, number, number] | null => {
-      const decorator = node.decorators?.find((value) => value.startsWith('haskell-lexical-range:'));
-      const match = decorator?.match(/^haskell-lexical-range:(\d+):(\d+)(?::(\d+):(\d+))?$/);
-      if (!match) return null;
-      // Retain compatibility with indexes containing the original line-only
-      // range. New extraction includes columns to separate inline branches.
-      return match[3] === undefined
+    type LexicalRange = [number, number, number, number];
+    const lexicalRanges = (node: Node): LexicalRange[] => (node.decorators ?? []).flatMap((decorator) => {
+      const match = decorator.match(/^haskell-lexical-range:(\d+):(\d+)(?::(\d+):(\d+))?$/);
+      if (!match) return [];
+      // A comprehension helper has separate output and qualifier intervals.
+      // Keep compatibility with the original line-only single-range indexes.
+      const range: LexicalRange = match[3] === undefined
         ? [Number(match[1]), 0, Number(match[2]), Number.POSITIVE_INFINITY]
         : [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4])];
-    };
+      return [range];
+    });
     const withinLexicalRange = (node: Node): boolean => {
-      const range = lexicalRange(node);
-      return range === null || (
+      const ranges = lexicalRanges(node);
+      return ranges.length === 0 || ranges.some((range) => (
         (ref.line > range[0] || (ref.line === range[0] && ref.column >= range[1]))
         && (ref.line < range[2] || (ref.line === range[2] && ref.column < range[3]))
-      );
+      ));
     };
 
     const ranked = candidates.flatMap((node): Array<{ node: Node; rank: number }> => {
@@ -1788,11 +1801,11 @@ export class ReferenceResolver {
         const sourceLine = this.context.getFileLines?.(ref.filePath)?.[ref.line - 1];
         if (sourceLine) {
           const visible = best.filter(({ node }) => {
-            const range = lexicalRange(node);
+            const ranges = lexicalRanges(node);
             // Precise ranges already establish visibility. An intervening
             // `let` may belong to an argument or string literal, so retain
             // this positional fallback only for older indexes.
-            if (range && Number.isFinite(range[3])) return true;
+            if (ranges.some((range) => Number.isFinite(range[3]))) return true;
             return !(
               node.startLine === ref.line
               && node.startColumn > ref.column
@@ -1805,15 +1818,18 @@ export class ReferenceResolver {
         // therefore shadows the outer one even when its declaration is farther
         // away from this reference. Keep the innermost containing ranges before
         // the positional fallback used for older indexes.
+        const containsRanges = (outer: LexicalRange[], inner: LexicalRange[]): boolean =>
+          inner.every((inside) => outer.some((outside) => {
+            const start = inside[0] - outside[0] || inside[1] - outside[1];
+            const end = inside[2] - outside[2] || inside[3] - outside[3];
+            return start >= 0 && end <= 0;
+          }));
         best = best.filter(({ node }) => {
-          const outer = lexicalRange(node);
-          if (!outer) return true;
+          const outer = lexicalRanges(node);
+          if (outer.length === 0) return true;
           return !best.some(({ node: other }) => {
-            const inner = lexicalRange(other);
-            if (!inner) return false;
-            const start = inner[0] - outer[0] || inner[1] - outer[1];
-            const end = inner[2] - outer[2] || inner[3] - outer[3];
-            return start >= 0 && end <= 0 && (start > 0 || end < 0);
+            const inner = lexicalRanges(other);
+            return inner.length > 0 && containsRanges(outer, inner) && !containsRanges(inner, outer);
           });
         });
 

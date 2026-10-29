@@ -1555,13 +1555,10 @@ describe('Haskell resolution round 2', () => {
       expect(outgoingTargets(graph, 'runOperator', 'Consumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: originOperator.id }) }));
       expect(constructor).toBeDefined();
-      // A bare uppercase facade item (`O.T`) re-exports BOTH namespaces
-      // (Haskell2010 §5.3), so the value-position `T` is the constructor.
+      // A bare uppercase facade item exports the type alone; the grouped
+      // form explicitly includes the same-named constructor.
       expect(outgoingTargets(graph, 'notAConstructor', 'Consumer.hs'))
-        .toContainEqual(expect.objectContaining({
-          edge: expect.objectContaining({ kind: 'references' }),
-          target: expect.objectContaining({ id: constructor!.id }),
-        }));
+        .not.toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: constructor!.id }) }));
       expect(outgoingTargets(graph, 'runGrouped', 'GroupedConsumer.hs'))
         .toContainEqual(expect.objectContaining({ target: expect.objectContaining({ id: constructor!.id }) }));
 
@@ -1574,7 +1571,7 @@ describe('Haskell resolution round 2', () => {
       kind: 'wildcard',
       source: 'Origin',
       includedNames: ['foo', 'T', '<+>'],
-      // `O.T` is dual-namespace, so it appears in neither Only list.
+      haskellTypeOnlyNames: ['T'],
       haskellValueOnlyNames: ['foo', '<+>'],
       haskellClearParent: true,
     }));
@@ -2681,7 +2678,7 @@ describe('Haskell resolution round 2', () => {
       expect(edges.map((edge) => edge.target)).toEqual([jsTarget.id]);
   });
 
-  it('resolves dual-namespace bare uppercase import items in value and type positions', async () => {
+  it('distinguishes explicit constructor imports from bare type and class imports', async () => {
     const graph = await createGraph({
       'Origin.hs': [
         'module Origin (Maybe(..), C) where',
@@ -2690,8 +2687,9 @@ describe('Haskell resolution round 2', () => {
         '  method :: a -> a',
       ].join('\n'),
       'ValueConsumer.hs': [
+        '{-# LANGUAGE PatternSynonyms #-}',
         'module ValueConsumer where',
-        'import Origin (Just)',
+        'import Origin (pattern Just)',
         'make x = Just x',
       ].join('\n'),
       'TypeConsumer.hs': [
@@ -2720,20 +2718,22 @@ describe('Haskell resolution round 2', () => {
         target: clazz.id,
       }));
 
-      // Haskell2010 §5.3: a bare uppercase item occupies both namespaces, a
-      // bare operator item is a value, and only an explicit `type` qualifier
-      // makes an item type-only.
-      const dualMappings = extractImportMappings('C.hs', [
+      // Bare uppercase positive items name types/classes; constructors need
+      // a grouped child or the explicit `pattern` namespace qualifier.
+      const namespaceMappings = extractImportMappings('C.hs', [
         'module C where',
-        'import Origin (Just)',
+        'import Origin (pattern Just)',
         'import Origin (type Maybe)',
+        'import Origin (C)',
       ].join('\n'), 'haskell');
-      const just = dualMappings.find((m) => m.localName === 'Just' && !m.isNamespace)!;
+      const just = namespaceMappings.find((m) => m.localName === 'Just' && !m.isNamespace)!;
       expect(just.haskellTypeOnly).toBeUndefined();
-      expect(just.haskellValueOnly).toBeUndefined();
-      const maybeType = dualMappings.find((m) => m.localName === 'Maybe' && !m.isNamespace)!;
+      expect(just.haskellValueOnly).toBe(true);
+      const maybeType = namespaceMappings.find((m) => m.localName === 'Maybe' && !m.isNamespace)!;
       expect(maybeType.haskellTypeOnly).toBe(true);
       expect(maybeType.haskellValueOnly).toBeUndefined();
+      const classType = namespaceMappings.find((m) => m.localName === 'C' && !m.isNamespace)!;
+      expect(classType.haskellTypeOnly).toBe(true);
   });
 
   it('resolves colon-headed constructor operators imported as bare value items', async () => {

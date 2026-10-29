@@ -5381,8 +5381,15 @@ export class TreeSitterExtractor {
         isLexicallyBound(name, node, this.source, this.nodes);
       const simpleReference = (candidate: SyntaxNode | null): { name: string; node: SyntaxNode } | null => {
         let current = candidate;
-        while (current?.type === 'parens' && current.namedChildCount === 1) {
-          current = current.namedChild(0);
+        while (current) {
+          if (current.type === 'parens' && current.namedChildCount === 1) {
+            current = current.namedChild(0);
+          } else if (current.type === 'apply'
+            && getChildByField(current, 'argument')?.type === 'type_application') {
+            // Type specialization still names the same value; term
+            // applications remain expressions whose result is not inferred.
+            current = getChildByField(current, 'function');
+          } else break;
         }
         if (!current || !['variable', 'constructor', 'qualified', 'prefix_id'].includes(current.type)) {
           return null;
@@ -5507,10 +5514,11 @@ export class TreeSitterExtractor {
             const contextOperatorName = contextOperator
               ? normalizeReferenceText(getNodeText(contextOperator, this.source).trim())
               : '';
+            const contextOperatorMember = haskellReferenceParts(contextOperatorName).member;
             const appliedByKnownApplicationOperator = context?.type === 'infix' && (
-              ((contextOperatorName === '$' || contextOperatorName === '$!')
+              ((contextOperatorMember === '$' || contextOperatorMember === '$!')
                 && sameSyntaxNode(getChildByField(context, 'left_operand'), contextNode))
-              || (contextOperatorName === '&'
+              || (contextOperatorMember === '&'
                 && sameSyntaxNode(getChildByField(context, 'right_operand'), contextNode))
             );
             // Named bindings/equations have a `match` wrapper; their dedicated
@@ -5550,8 +5558,13 @@ export class TreeSitterExtractor {
         ) {
           return;
         }
-        let callee = getChildByField(node, 'function') ?? node.namedChild(0);
+        const termArguments: SyntaxNode[] = [];
+        let callee: SyntaxNode | null = node;
         while (callee?.type === 'apply') {
+          const argumentNode = getChildByField(callee, 'argument');
+          if (argumentNode && argumentNode.type !== 'type_application') {
+            termArguments.unshift(argumentNode);
+          }
           callee = getChildByField(callee, 'function') ?? callee.namedChild(0);
         }
         while (callee?.type === 'parens' && callee.namedChildCount === 1) {
@@ -5559,6 +5572,15 @@ export class TreeSitterExtractor {
         }
         if (!callee || !['variable', 'constructor', 'qualified', 'prefix_id'].includes(callee.type)) {
           return;
+        }
+        const calleeReference = simpleReference(callee);
+        if (calleeReference && termArguments.length >= 2) {
+          const member = haskellReferenceParts(calleeReference.name).member;
+          if (member === '$' || member === '$!') {
+            emitCall(termArguments[0]!, calleeReference.name);
+          } else if (member === '&') {
+            emitCall(termArguments[1]!, calleeReference.name);
+          }
         }
         emitCall(callee);
         return;
@@ -5569,24 +5591,27 @@ export class TreeSitterExtractor {
         if (!operator) return;
         const operatorName = normalizeReferenceText(getNodeText(operator, this.source).trim());
         if (!operatorName || patternBinds(operatorName)) return;
+        // Classify qualified spellings by their member, but retain the full
+        // name so resolution can prove the operator's actual import origin.
+        const operatorMember = haskellReferenceParts(operatorName).member;
 
         // `$`/`$!` and `&` are application syntax in practice. The function is
         // an operand rather than an `apply` node, so surface the semantic callee
         // (`handler $ value`, `value & handler`). Keep the operator itself
         // as a normal reference so a custom definition still resolves.
-        if (operatorName === '$' || operatorName === '$!') {
+        if (operatorMember === '$' || operatorMember === '$!') {
           emitCall(getChildByField(node, 'left_operand'), operatorName);
         }
-        if (operatorName === '&') {
+        if (operatorMember === '&') {
           emitCall(getChildByField(node, 'right_operand'), operatorName);
         }
 
-        if (HASKELL_FUNCTION_COMPOSITION_OPERATORS.has(operatorName)) {
+        if (HASKELL_FUNCTION_COMPOSITION_OPERATORS.has(operatorMember)) {
           emitFunctionRef(getChildByField(node, 'left_operand'));
           emitFunctionRef(getChildByField(node, 'right_operand'));
-        } else if (operatorName === '<$>' || operatorName === '=<<') {
+        } else if (operatorMember === '<$>' || operatorMember === '=<<') {
           emitFunctionRef(getChildByField(node, 'left_operand'));
-        } else if (operatorName === '<&>' || operatorName === '>>=') {
+        } else if (operatorMember === '<&>' || operatorMember === '>>=') {
           emitFunctionRef(getChildByField(node, 'right_operand'));
         }
         this.unresolvedReferences.push({

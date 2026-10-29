@@ -582,24 +582,42 @@ function isRecursiveDo(node: SyntaxNode): boolean {
 /** Scope kinds a lexical-range decorator reports the span of. */
 const LEXICAL_RANGE_CONTAINERS = new Set(['let_in', 'alternative', 'function', 'do', 'list_comprehension']);
 
-function lexicalRangeDecorator(node: SyntaxNode): string | null {
+function lexicalRangeDecorators(node: SyntaxNode): string[] {
+  const range = (start: SyntaxNode['startPosition'], end: SyntaxNode['endPosition']): string =>
+    `haskell-lexical-range:${start.row + 1}:${start.column}:${end.row + 1}:${end.column}`;
   let ancestor = node.parent;
   let bindingStatement: SyntaxNode | null = null;
   while (ancestor) {
     if (ancestor.type === 'let' || ancestor.type === 'rec') bindingStatement = ancestor;
+    if (ancestor.type === 'match' && bindingStatement) {
+      // A guard let is recursive within its own declarations and visible in
+      // later guards and this RHS, never an earlier guard or another RHS.
+      return [range(bindingStatement.startPosition, ancestor.endPosition)];
+    }
     if (LEXICAL_RANGE_CONTAINERS.has(ancestor.type)) {
+      if (ancestor.type === 'list_comprehension' && bindingStatement) {
+        // The output is written before the qualifiers but sees all of them.
+        // Keep its interval separate from the sequential qualifier tail, so
+        // a later let cannot capture an earlier qualifier's reference.
+        const output = getChildByField(ancestor, 'expression');
+        return [
+          range(bindingStatement.startPosition, ancestor.endPosition),
+          ...(output ? [range(output.startPosition, output.endPosition)] : []),
+        ];
+      }
       // A do-let declaration scopes over its own RHS and later statements,
       // including its enclosing recursive group when present. An mdo keeps
       // every declaration recursive across the whole block.
       const start = ancestor.type === 'do' && bindingStatement && !isRecursiveDo(ancestor)
         ? bindingStatement.startPosition
-        : ancestor.startPosition;
-      const end = ancestor.endPosition;
-      return `haskell-lexical-range:${start.row + 1}:${start.column}:${end.row + 1}:${end.column}`;
+        : ancestor.type === 'alternative' || ancestor.type === 'function'
+          ? (getChildByField(ancestor, 'match')?.startPosition ?? ancestor.startPosition)
+          : ancestor.startPosition;
+      return [range(start, ancestor.endPosition)];
     }
     ancestor = ancestor.parent;
   }
-  return null;
+  return [];
 }
 
 function groupedNode(key: string, ctx: ExtractorContext) {
@@ -1223,8 +1241,14 @@ function isLexicallyBound(
       if (patternContainsName(synonym, name, source, node.startIndex)) return true;
     }
     if (ancestor.type === 'alternative') {
+      const pattern = getChildByField(ancestor, 'pattern');
+      const whereBinds = getChildByField(ancestor, 'binds');
+      if (whereBinds && !nodeContains(pattern, node)) {
+        const binding = bindingAt(whereBinds, name, source, null, stateOwner);
+        if (binding) return !binding.materializedNode;
+      }
       if (patternContainsName(
-        getChildByField(ancestor, 'pattern'),
+        pattern,
         name,
         source,
         node.startIndex,
@@ -1383,7 +1407,7 @@ function extractHaskellDataPositionReference(
   source: string,
   stateOwner: object,
 ): BareReferenceInfo | undefined {
-  if (node.type !== 'variable') return undefined;
+  if (!['variable', 'qualified', 'prefix_id'].includes(node.type)) return undefined;
   let container: SyntaxNode | null = node.parent;
   while (container?.type === 'parens' && container.namedChildCount === 1) {
     container = container.parent;
@@ -1397,9 +1421,13 @@ function extractHaskellDataPositionReference(
   }
   if (!inDataPosition) return undefined;
   if (isHaskellPatternPosition(node) || !isRuntimeExpressionPosition(node)) return undefined;
-  const name = getNodeText(node, source).trim();
-  if (!name || isLexicallyBound(name, node, source, stateOwner)) return undefined;
-  return { name, referenceKind: 'function_ref', node };
+  const reference = normalizedSimpleReference(node, source);
+  if (!reference || isLexicallyBound(reference.name, node, source, stateOwner)) return undefined;
+  const member = haskellReferenceParts(reference.name).member;
+  // Constructor values already have their canonical references edge in the
+  // bare-constructor hook. Only term functions/operators belong on this path.
+  if (HASKELL_CONID_START_RE.test(member) || member.startsWith(':')) return undefined;
+  return { name: reference.name, referenceKind: 'function_ref', node };
 }
 
 function normalizedSimpleReference(node: SyntaxNode, source: string): { name: string; node: SyntaxNode } | null {
@@ -1910,7 +1938,7 @@ function handleBind(node: SyntaxNode, ctx: ExtractorContext): boolean {
       ? isNameExported(node, ctx.source, name, ctx.nodes as object)
       : owner?.kind === 'trait' && isNameExported(node, ctx.source, name, ctx.nodes as object, owner.name),
     decorators: !isTopLevel && kind === 'function'
-      ? [lexicalRangeDecorator(node)].filter((value): value is string => value !== null)
+      ? lexicalRangeDecorators(node)
       : undefined,
   });
   if (!bindingNode) return true;
@@ -1959,7 +1987,7 @@ function handleFunction(node: SyntaxNode, ctx: ExtractorContext): boolean {
       ? isNameExported(node, ctx.source, name, ctx.nodes as object)
       : parent?.kind === 'trait' && isNameExported(node, ctx.source, name, ctx.nodes as object, parent.name),
     decorators: !isTopLevel && kind === 'function'
-      ? [lexicalRangeDecorator(node)].filter((value): value is string => value !== null)
+      ? lexicalRangeDecorators(node)
       : undefined,
   });
   if (!functionNode) return true;
