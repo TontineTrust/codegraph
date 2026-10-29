@@ -400,6 +400,8 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 #### Haskell indexing
 
+- Haskell dependency links stay current when a shared record field is added to another constructor. (#1337)
+
 - Haskell record patterns and nested value bindings no longer create calls to names they shadow, and explicit module layout preserves imported dependencies. (#1337)
 
 - Haskell facades retain visible record fields when imports and exports use different grouping. (#1337)

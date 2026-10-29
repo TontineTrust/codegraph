@@ -250,7 +250,9 @@ describe('bounded re-export traversal', () => {
       'Bridge.hs': 'module Bridge (module Origin) where\nimport Origin',
       'Facade.hs': 'module Facade (B(..)) where\nimport Bridge',
       'Consumer.hs': 'module Consumer where\nimport Facade (wanted)\nrun = wanted x',
-    }, [excluded, permitted]);
+    }, [excluded, permitted,
+      declaration('A', 'Origin.hs', 'haskell', 'enum'),
+      declaration('B', 'Origin.hs', 'haskell', 'enum')]);
     expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(permitted.id);
   });
 
@@ -263,7 +265,9 @@ describe('bounded re-export traversal', () => {
       'Allowed.hs': 'module Allowed (B(..)) where\nimport Origin',
       'Entry.hs': 'module Entry (module Denied, module Allowed) where\nimport Denied\nimport Allowed',
       'Consumer.hs': 'module Consumer where\nimport Entry (wanted)\nrun = wanted x',
-    }, [target]);
+    }, [target,
+      declaration('A', 'Origin.hs', 'haskell', 'enum'),
+      declaration('B', 'Origin.hs', 'haskell', 'enum')]);
     expect(graph.resolve('Consumer.hs')?.targetNodeId).toBe(target.id);
   });
 

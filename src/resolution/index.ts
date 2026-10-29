@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER } from '../types';
+import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_WILDCARD_PROJECTION_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER } from '../types';
 import { QueryBuilder } from '../db/queries';
 import { SynthesisStage } from '../db/synthesis-stage';
 import {
@@ -1524,6 +1524,15 @@ export class ReferenceResolver {
     receiver: string,
   ): string | null {
     if (ref.candidates?.includes(HASKELL_SHADOWED_PROJECTION_RECEIVER)) return null;
+    for (const candidate of ref.candidates ?? []) {
+      if (!candidate.startsWith(HASKELL_WILDCARD_PROJECTION_PREFIX)) continue;
+      const [name, constructor] = JSON.parse(candidate.slice(HASKELL_WILDCARD_PROJECTION_PREFIX.length)) as [string, string];
+      if (name === receiver && this.isHaskellWildcardBound({
+        ...ref,
+        referenceName: receiver,
+        candidates: [`${HASKELL_WILDCARD_BINDING_PREFIX}${constructor}`],
+      })) return null;
+    }
     const signature = from.signature;
     const marker = signature?.indexOf('::') ?? -1;
     if (!signature || marker < 0) return null;

@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getChildByField, getNodeText, getPrecedingDocstring } from '../tree-sitter-helpers';
 import type { BareReferenceInfo, ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
-import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER, type UnresolvedReference } from '../../types';
+import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_WILDCARD_PROJECTION_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER, type UnresolvedReference } from '../../types';
 
 // tree-sitter-haskell emits signatures, default signatures, and equations as
 // separate syntax nodes. Keep them under one graph node per lexical declaration.
@@ -1212,6 +1212,9 @@ interface LexicalBindingScope {
   scope: SyntaxNode;
   materializedNode: boolean;
   parameter?: boolean;
+  /** Sequential scopes choose the latest binding, not merely the same container. */
+  sequential?: boolean;
+  startIndex?: number;
 }
 
 /** Nearest lexical binding, retaining the scope that proves its identity. */
@@ -1302,30 +1305,30 @@ function lexicalBindingScope(
         isRecursiveDo(ancestor) ? null : branch.startIndex,
         stateOwner,
       );
-      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
+      if (binding) return { scope: ancestor, ...binding, sequential: !isRecursiveDo(ancestor) };
     }
     if (ancestor.type === 'qualifiers') {
       const binding = bindingAt(ancestor, name, source, branch.startIndex, stateOwner);
-      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
+      if (binding) return { scope: ancestor, ...binding, sequential: true };
     }
     if (ancestor.type === 'list_comprehension') {
       const output = getChildByField(ancestor, 'expression');
       const qualifiers = getChildByField(ancestor, 'qualifiers');
       if (output && qualifiers && nodeContains(output, node)) {
         const binding = bindingAt(qualifiers, name, source, null, stateOwner);
-        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
+        if (binding) return { scope: ancestor, ...binding, sequential: true };
       }
     }
     if (ancestor.type === 'guards') {
       const binding = bindingAt(ancestor, name, source, branch.startIndex, stateOwner);
-      if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
+      if (binding) return { scope: ancestor, ...binding, sequential: true };
     }
     if (ancestor.type === 'match') {
       const guards = getChildByField(ancestor, 'guards');
       const expression = getChildByField(ancestor, 'expression');
       if (guards && expression && nodeContains(expression, node)) {
         const binding = bindingAt(guards, name, source, null, stateOwner);
-        if (binding) return { scope: ancestor, materializedNode: binding.materializedNode };
+        if (binding) return { scope: ancestor, ...binding, sequential: true };
       }
     }
     branch = ancestor;
@@ -1369,20 +1372,42 @@ export function annotateHaskellWildcardReferences(
   }
   if (wildcards.length === 0) return;
   for (const reference of references) {
-    if (!['calls', 'function_ref', 'haskell_effect_alias'].includes(reference.referenceKind)) continue;
-    const name = haskellReferenceParts(reference.referenceName);
-    if (name.qualifier !== null || !HASKELL_VARID_START_RE.test(name.member)) continue;
-    const syntax = root.descendantForPosition({ row: reference.line - 1, column: reference.column });
+    if (!['calls', 'function_ref', 'haskell_effect_alias', 'references'].includes(reference.referenceKind)) continue;
+    let syntax = root.descendantForPosition({ row: reference.line - 1, column: reference.column });
     if (!syntax) continue;
-    const explicit = lexicalBindingScope(reference.referenceName, syntax, source, stateOwner);
+    let nameText = reference.referenceName;
+    const projection = reference.referenceKind === 'references';
+    if (projection) {
+      // A selector ref names the field, but it is the RECEIVER's binding that
+      // determines whether an enclosing function annotation is still valid.
+      let expression: SyntaxNode | null = syntax;
+      while (expression && !['projection', 'projection_selector'].includes(expression.type)) {
+        expression = expression.parent;
+      }
+      const receiver = expression ? getChildByField(expression, 'expression') : null;
+      if (receiver?.type !== 'variable') continue;
+      syntax = receiver;
+      nameText = getNodeText(receiver, source).trim();
+    }
+    const name = haskellReferenceParts(nameText);
+    if (name.qualifier !== null || !HASKELL_VARID_START_RE.test(name.member)) continue;
+    const explicit = lexicalBindingScope(nameText, syntax, source, stateOwner);
     for (const wildcard of wildcards) {
       if (wildcard.explicit.has(name.member)) continue;
       const binding = lexicalBindingScope(wildcard.binding, syntax, source, stateOwner);
       if (!binding) continue;
-      // An inner explicit declaration wins over an outer wildcard, just as it
-      // wins over an ordinary parameter. Same-scope where groups win too.
-      if (explicit && nodeContains(binding.scope, explicit.scope)) continue;
-      const marker = `${HASKELL_WILDCARD_BINDING_PREFIX}${wildcard.constructor}`;
+      // Within do/guards/comprehensions, a later wildcard shadows an earlier
+      // let even though both share one AST container. Recursive scopes keep
+      // their ordinary containment precedence instead of imposing source order.
+      const earlierExplicit = explicit?.sequential && binding.sequential
+        && explicit.scope.startIndex === binding.scope.startIndex
+        && explicit.scope.endIndex === binding.scope.endIndex
+        && explicit.startIndex !== undefined && binding.startIndex !== undefined
+        && explicit.startIndex < binding.startIndex;
+      if (explicit && nodeContains(binding.scope, explicit.scope) && !earlierExplicit) continue;
+      const marker = projection
+        ? `${HASKELL_WILDCARD_PROJECTION_PREFIX}${JSON.stringify([name.member, wildcard.constructor])}`
+        : `${HASKELL_WILDCARD_BINDING_PREFIX}${wildcard.constructor}`;
       if (!reference.candidates?.includes(marker)) {
         (reference.candidates ??= []).push(marker);
       }

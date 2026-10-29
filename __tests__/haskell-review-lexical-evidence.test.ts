@@ -226,4 +226,99 @@ describe('Haskell review: binding evidence', () => {
       }
     }
   });
+
+  it('uses a later wildcard binder instead of an earlier helper in sequential scopes', async () => {
+    const { graph } = await index({ 'Sample.hs': [
+      '{-# LANGUAGE RecordWildCards #-}',
+      'module Sample where',
+      'data R = R { helper :: Int -> Int }',
+      'run records = do',
+      '  let helper x = x + 1',
+      '  R{..} <- records',
+      '  pure (helper 1)',
+      'control records = do',
+      '  R{..} <- records',
+      '  let helper x = x + 1',
+      '  pure (helper 1)',
+      'list records = [helper 1 | let helper x = x + 1, R{..} <- records]',
+      'listControl records = [helper 1 | R{..} <- records, let helper x = x + 1]',
+      'guarded record | let helper x = x + 1, R{..} <- record = helper 1',
+      'guardControl record | R{..} <- record, let helper x = x + 1 = helper 1',
+    ].join('\n') });
+    for (const owner of ['run', 'list', 'guarded']) expect(targets(graph, owner, 'helper')).toEqual([]);
+    for (const owner of ['control', 'listControl', 'guardControl']) {
+      expect(targets(graph, owner, 'helper')).toEqual([
+        expect.objectContaining({ kind: 'calls', target: `Sample::${owner}::helper` }),
+      ]);
+    }
+  });
+
+  it('keeps wildcard binders recursive in mdo and explicit rec groups', async () => {
+    const { graph } = await index({ 'Sample.hs': [
+      '{-# LANGUAGE RecordWildCards, RecursiveDo #-}',
+      'module Sample where',
+      'data R = R { helper :: Int -> Int }',
+      'recursive records = mdo',
+      '  let result = helper 1',
+      '  R{..} <- records',
+      '  pure result',
+      'explicit records = do',
+      '  rec',
+      '    let result = helper 1',
+      '    R{..} <- records',
+      '  pure result',
+    ].join('\n') });
+    expect(targets(graph, 'recursive', 'helper')).toEqual([]);
+    expect(targets(graph, 'explicit', 'helper')).toEqual([]);
+  });
+
+  it('does not apply an outer annotation to a wildcard-bound projection receiver', async () => {
+    const { graph } = await index({ 'Sample.hs': [
+      '{-# LANGUAGE RecordWildCards, DuplicateRecordFields, OverloadedRecordDot #-}',
+      'module Sample where',
+      'data A = A { value :: Int }',
+      'data B = B { value :: Bool }',
+      'data Box = Box { item :: B }',
+      'shadowed :: A -> Bool',
+      'shadowed item = case Box (B True) of Box{..} -> item.value',
+      'unshadowed :: A -> Int',
+      'unshadowed item = case Box (B True) of Box{item = inner} -> item.value',
+    ].join('\n') });
+    expect(targets(graph, 'shadowed', 'value')).toEqual([]);
+    expect(targets(graph, 'unshadowed', 'value')).toEqual([
+      expect.objectContaining({ kind: 'references', target: 'Sample::A::value' }),
+    ]);
+  });
+
+  it('rechecks imported wildcard receiver capture when field visibility changes', async () => {
+    const files = {
+      'Origin.hs': 'module Origin (Box(Box), B(value)) where\ndata B = B { value :: Bool }\ndata Box = Box { item :: B }\n',
+      'Sample.hs': [
+        '{-# LANGUAGE RecordWildCards, OverloadedRecordDot #-}',
+        'module Sample where',
+        'import qualified Origin as O',
+        'data A = A { value :: Int }',
+        'run :: A -> O.Box -> ()',
+        'run item box = case box of O.Box{..} -> const () item.value',
+        'control :: A -> O.Box -> ()',
+        'control item box = case box of O.Box{} -> const () item.value',
+      ].join('\n'),
+    };
+    const { graph, directory } = await index(files);
+    expect(targets(graph, 'run', 'value')).toHaveLength(1);
+    for (const [source, count] of [
+      ['module Origin (Box(..), B(value)) where\ndata B = B { value :: Bool }\ndata Box = Box { item :: B }\n', 0],
+      ['module Origin (Box(Box), B(value)) where\ndata B = B { value :: Bool }\ndata Box = Box { item :: B }\n', 1],
+    ] as const) {
+      files['Origin.hs'] = source;
+      fs.writeFileSync(path.join(directory, 'Origin.hs'), source);
+      await graph.sync();
+      const fresh = await index(files);
+      expect(targets(graph, 'run', 'value')).toHaveLength(count);
+      expect(targets(graph, 'run', 'value')).toEqual(targets(fresh.graph, 'run', 'value'));
+      expect(targets(graph, 'control', 'value')).toEqual([
+        expect.objectContaining({ kind: 'references', target: 'Sample::A::value' }),
+      ]);
+    }
+  });
 });

@@ -3559,15 +3559,16 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
       'u',
     ));
     if (moduleMatch) {
-      // `module X` means the unqualified names brought into scope through the
-      // local module binding X. It may be an alias (`import Origin as X`) and a
-      // qualified-only import contributes no unqualified exports.
+      // `module X` exports entities in scope both as X.name and as name.
+      // An unqualified import supplies both itself; a qualified-only route
+      // needs an identity intersection with the other unqualified imports.
       for (const imp of imports) {
-        if (!imp.isNamespace || imp.isQualifiedOnly || imp.localName !== moduleMatch[1]) continue;
+        if (!imp.isNamespace || imp.localName !== moduleMatch[1]) continue;
         pushUnique({
           kind: 'wildcard',
           source: imp.source,
           ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
+          ...(imp.isQualifiedOnly ? { haskellRequireUnqualified: true } : {}),
           ...restrictionsFrom(imp),
         });
       }
@@ -3631,6 +3632,7 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
             source: imp.source,
             ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
             parentExport: item.name,
+            haskellVerifyExportParent: true,
             ...((child.typeOnly || imp.haskellTypeOnly) ? { haskellTypeOnly: true } : {}),
             ...((child.valueOnly || imp.haskellValueOnly) ? { haskellValueOnly: true } : {}),
           });
@@ -3653,6 +3655,7 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
             originalName: imp.exportedName,
             source: imp.source,
             parentExport: item.name,
+            haskellVerifyExportParent: true,
             ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
             ...(imp.haskellTypeOnly ? { haskellTypeOnly: true } : {}),
             ...(imp.haskellValueOnly ? { haskellValueOnly: true } : {}),
@@ -3668,6 +3671,7 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
             originalName: name,
             source: imp.source,
             parentExport: item.name,
+            haskellVerifyExportParent: true,
             ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
             ...(imp.haskellTypeOnlyNames?.includes(name) ? { haskellTypeOnly: true } : {}),
             ...(imp.haskellValueOnlyNames?.includes(name) ? { haskellValueOnly: true } : {}),
@@ -3684,6 +3688,7 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
             originalName: child.child,
             source: imp.source,
             parentExport: child.parent,
+            haskellVerifyExportParent: true,
             ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
             ...(child.haskellTypeOnly ? { haskellTypeOnly: true } : {}),
             ...(child.haskellValueOnly ? { haskellValueOnly: true } : {}),
@@ -3703,6 +3708,7 @@ function extractHaskellReExportsFromStripped(cleaned: string, imports: ImportMap
           source: imp.source,
           ...(imp.packageQualifier ? { packageQualifier: imp.packageQualifier } : {}),
           includedParentExports: [item.name],
+          haskellVerifyExportParent: true,
           ...(imp.excludedNames ? { excludedNames: imp.excludedNames } : {}),
           ...(imp.excludedParentExports ? { excludedParentExports: imp.excludedParentExports } : {}),
           ...(imp.excludedParentChildren ? { excludedParentChildren: imp.excludedParentChildren } : {}),
@@ -5196,6 +5202,10 @@ function haskellNameHasCanonicalOriginUncached(
       ...reExportIndex.wildcards,
     ]
       .flatMap((reExport): ModuleRoute[] => {
+        // External canonical modules have no indexed declaration IDs with
+        // which to prove a qualified/unqualified entity intersection. The
+        // nominal-origin walker must not bypass the graph walk's proof.
+        if (reExport.kind === 'wildcard' && reExport.haskellRequireUnqualified) return [];
         if (reExport.kind === 'named') {
           if (namespace === 'value' ? reExport.haskellTypeOnly : reExport.haskellValueOnly) return [];
           return reExport.exportedName === leaf && reExport.originalName === leaf
@@ -5903,6 +5913,133 @@ const REEXPORT_MAX_VISITS = 10_000;
 interface ReExportTraversal {
   remaining: number;
   exhausted: boolean;
+  haskellProofs?: Map<string, ExportedSymbolWalkResult>;
+  haskellActiveProofs?: Set<string>;
+  haskellProofCycles?: number;
+}
+
+/** Identity proofs share the caller's work budget. Never memoize a proof that
+ * encountered an active ancestor: its answer may depend on that ancestry. */
+function haskellIdentityProof(
+  key: string,
+  traversal: ReExportTraversal,
+  prove: () => ExportedSymbolWalkResult,
+): ExportedSymbolWalkResult {
+  if (traversal.exhausted) return undefined;
+  const memo = traversal.haskellProofs ??= new Map();
+  if (memo.has(key)) return memo.get(key);
+  const active = traversal.haskellActiveProofs ??= new Set();
+  if (active.has(key)) {
+    traversal.haskellProofCycles = (traversal.haskellProofCycles ?? 0) + 1;
+    return undefined;
+  }
+  const cyclesBefore = traversal.haskellProofCycles ?? 0;
+  active.add(key);
+  try {
+    const result = prove();
+    if (!traversal.exhausted && cyclesBefore === (traversal.haskellProofCycles ?? 0)) {
+      memo.set(key, result);
+    }
+    return result;
+  } finally {
+    active.delete(key);
+  }
+}
+
+/** Test membership of one declaration, not uniqueness of its spelling. A
+ * module export intersects entities even when another imported entity has
+ * the same name (notably DuplicateRecordFields selectors). */
+function haskellUnqualifiedEntity(
+  filePath: string,
+  node: Node,
+  context: ResolutionContext,
+  depth: number,
+  traversal: ReExportTraversal,
+): ExportedSymbolWalkResult {
+  return haskellIdentityProof(`scope\0${filePath}\0${node.id}`, traversal, () => {
+    if (node.filePath === filePath) return node;
+    const name = parseHaskellReferenceName(node.name).member;
+    const namespace = haskellTypeNode(node) ? 'type' : 'value';
+    const imports = getHaskellImportRouteIndex(context.getImportMappings(filePath, 'haskell'));
+    for (const imp of [...imports.explicitByLocalName.get(name) ?? [], ...imports.wildcards]) {
+      if (imp.packageQualifier !== undefined
+        || (namespace === 'value' ? imp.haskellTypeOnly : imp.haskellValueOnly)
+        || !haskellReExportCouldExposeName(imp, name, namespace)) continue;
+      const upstream = resolveImportPath(imp.source, filePath, 'haskell', context);
+      if (!upstream) continue;
+      const candidate = findExportedSymbolWalk(upstream, {
+        isDefault: false,
+        isNamespace: false,
+        exportedName: imp.exportedName === '*' ? name : imp.exportedName,
+        memberName: null,
+        haskellNamespace: namespace,
+        ...(imp.parentExport ? { haskellParent: imp.parentExport } : {}),
+        haskellAllows: (target) => target.id === node.id && haskellReExportAllows(imp, name, target),
+      }, 'haskell', context, new Set(), depth + 1, traversal);
+      if (traversal.exhausted) return undefined;
+      if (candidate && candidate !== HASKELL_EXPORT_AMBIGUOUS) return candidate;
+    }
+    return undefined;
+  });
+}
+
+function haskellExportParentMatches(
+  filePath: string,
+  parentName: string,
+  node: Node,
+  context: ResolutionContext,
+  depth: number,
+  traversal: ReExportTraversal,
+): boolean {
+  if (!haskellNodeOwnedBy(node, parentName)) return false;
+  const parent = haskellIdentityProof(`parent\0${filePath}\0${parentName}`, traversal, () =>
+    findExportedSymbolWalk(filePath, {
+      isDefault: false,
+      isNamespace: false,
+      exportedName: parentName,
+      memberName: null,
+      haskellNamespace: 'type',
+    }, 'haskell', context, new Set(), depth + 1, traversal)
+  );
+  if (!parent || parent === HASKELL_EXPORT_AMBIGUOUS) return false;
+  // File identity distinguishes A.T from B.T even when both own `value`.
+  if (node.filePath === parent.filePath) return true;
+  const localParents = haskellNodeNameVariants(parentName).flatMap((name) =>
+    nodesInFileNamed(node.filePath, name, context)
+      .filter((candidate) => candidate.language === 'haskell' && haskellTypeNode(candidate))
+  );
+  if (localParents.length > 0) return localParents.some((candidate) => candidate.id === parent.id);
+  // Bundled patterns and data-family instances can belong to a type imported
+  // by their defining module. Prove that imported declaration's identity too.
+  const imported = haskellUnqualifiedEntity(node.filePath, parent, context, depth, traversal);
+  return !!imported && imported !== HASKELL_EXPORT_AMBIGUOUS && imported.id === parent.id;
+}
+
+function haskellReExportIdentityAllows(
+  filePath: string,
+  reExport: NamedReExport | WildcardReExport,
+  node: Node,
+  context: ResolutionContext,
+  depth: number,
+  traversal: ReExportTraversal,
+): boolean {
+  if (reExport.haskellVerifyExportParent) {
+    const parents = reExport.kind === 'named'
+      ? reExport.parentExport ? [reExport.parentExport] : []
+      : [...reExport.includedParentExports ?? [],
+          ...(reExport.includedParentChildren ?? [])
+            .filter((child) => child.child === parseHaskellReferenceName(node.name).member
+              && haskellChildMatchesNode(child, node))
+            .map((child) => child.parent)];
+    if (!parents.some((parent) =>
+      haskellExportParentMatches(filePath, parent, node, context, depth, traversal)
+    )) return false;
+  }
+  if (reExport.kind === 'wildcard' && reExport.haskellRequireUnqualified) {
+    const imported = haskellUnqualifiedEntity(filePath, node, context, depth, traversal);
+    if (!imported || imported === HASKELL_EXPORT_AMBIGUOUS || imported.id !== node.id) return false;
+  }
+  return true;
 }
 
 /**
@@ -6105,6 +6242,10 @@ function findExportedSymbolWalk(
       && rex.haskellValueOnly === true) continue;
     const next = resolveImportPath(rex.source, filePath, language, context);
     if (!next) continue;
+    const haskellAllows = language === 'haskell' && rex.haskellVerifyExportParent
+      ? (node: Node): boolean => (!want.haskellAllows || want.haskellAllows(node))
+        && haskellReExportIdentityAllows(filePath, rex, node, context, depth, traversal)
+      : want.haskellAllows;
     // After rename: `export { foo as bar } from './x'` — to chase
     // `bar`, we look for `foo` in `./x`.
     const chained = findExportedSymbolWalk(
@@ -6116,7 +6257,7 @@ function findExportedSymbolWalk(
         memberName: null,
         ...(rex.parentExport ? { haskellParent: rex.parentExport } : {}),
         ...(want.haskellNamespace ? { haskellNamespace: want.haskellNamespace } : {}),
-        ...(want.haskellAllows ? { haskellAllows: want.haskellAllows } : {}),
+        ...(haskellAllows ? { haskellAllows } : {}),
       },
       language,
       context,
@@ -6192,6 +6333,8 @@ function findExportedSymbolWalk(
       || (rex.excludedNames?.length ?? 0) > 0
       || (rex.excludedParentExports?.length ?? 0) > 0
       || (rex.excludedParentChildren?.length ?? 0) > 0
+      || rex.haskellVerifyExportParent === true
+      || rex.haskellRequireUnqualified === true
     );
     // An unrestricted wildcard is the identity predicate. Retain the inherited
     // restrictions without growing a closure chain at every facade hop.
@@ -6199,6 +6342,7 @@ function findExportedSymbolWalk(
       ? (node: Node): boolean => (
           (!want.haskellAllows || want.haskellAllows(node))
           && haskellReExportAllows(rex, want.exportedName, node)
+          && haskellReExportIdentityAllows(filePath, rex, node, context, depth, traversal)
         )
       : want.haskellAllows;
     for (const parent of parentVariants) {

@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { CodeGraph } from '../src';
+import { haskellEffectHeadHasCanonicalOrigin } from '../src/resolution/import-resolver';
+import type { ResolutionContext } from '../src/resolution/types';
 
 describe('Haskell import visibility review regressions', () => {
   const fixtures: Array<{ graph: CodeGraph; directory: string }> = [];
@@ -246,5 +248,139 @@ describe('Haskell import visibility review regressions', () => {
     expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
       { kind: 'calls', target: 'Origin::value' },
     ]);
+  });
+
+  it.each([
+    'module Facade (T(..)) where\nimport A (T(..))\nimport B (value)\n',
+    'module Facade (X.T(..)) where\nimport qualified A as X (T(..))\nimport qualified B as X (value)\n',
+  ])('does not regroup a field under a different same-named parent: %s', async (facade) => {
+    const graph = await createGraph({
+      'A.hs': 'module A where\ndata T = MkA\n',
+      'B.hs': 'module B where\ndata T = MkB { value :: Int }\n',
+      'Real.hs': 'module Real where\nvalue n = n + 1\n',
+      'Facade.hs': facade,
+      'Consumer.hs': 'module Consumer where\nimport Facade\nimport Real (value)\nrun n = value n\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'calls', target: 'Real::value' },
+    ]);
+  });
+
+  it('keeps children when parent and child reach the same declaration through different facades', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT { value :: Int }\n',
+      'Parent.hs': 'module Parent (T) where\nimport Origin (T)\n',
+      'Child.hs': 'module Child (value) where\nimport Origin (value)\n',
+      'Facade.hs': 'module Facade (T(..)) where\nimport Parent (T)\nimport Child (value)\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nrun item = value item\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'calls', target: 'Origin::T::value' },
+    ]);
+  });
+
+  it.each(['Origin', 'Alias'])('exports the entity intersection of qualified %s and unqualified imports', async (qualified) => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nfoo n = n + 1\nbar n = n + 2\n',
+      'Alias.hs': 'module Alias (module Origin) where\nimport Origin\n',
+      'Real.hs': 'module Real where\nbar n = n + 3\n',
+      'Facade.hs': `module Facade (module X) where\nimport qualified ${qualified} as X\nimport Origin (foo)\n`,
+      'Consumer.hs': 'module Consumer where\nimport Facade\nimport Real (bar)\nrunFoo n = foo n\nrunBar n = bar n\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'runFoo')).toEqual([
+      { kind: 'calls', target: 'Origin::foo' },
+    ]);
+    expect(dependencies(graph, 'Consumer.hs', 'runBar')).toEqual([
+      { kind: 'calls', target: 'Real::bar' },
+    ]);
+  });
+
+  it('does not intersect distinct entities with the same name', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nfoo n = n + 1\n',
+      'Other.hs': 'module Other where\nfoo n = n + 2\n',
+      'Real.hs': 'module Real where\nfoo n = n + 3\n',
+      'Facade.hs': 'module Facade (module X) where\nimport qualified Origin as X\nimport Other (foo)\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nimport Real (foo)\nrun n = foo n\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'calls', target: 'Real::foo' },
+    ]);
+  });
+
+  it('preserves selected duplicate fields and type namespaces in a module intersection', async () => {
+    const graph = await createGraph({
+      'Origin.hs': '{-# LANGUAGE DuplicateRecordFields #-}\nmodule Origin where\ndata T = T { value :: Int }\ndata U = U { value :: Bool }\n',
+      'Real.hs': 'module Real where\ndata R = T Int\n',
+      'Facade.hs': 'module Facade (module X) where\nimport qualified Origin as X\nimport Origin (T(value))\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nimport Real (R(T))\nreadValue item = value item\nmake n = T n\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'readValue')).toEqual([
+      { kind: 'calls', target: 'Origin::T::value' },
+    ]);
+    expect(dependencies(graph, 'Consumer.hs', 'make')).toEqual([
+      { kind: 'calls', target: 'Real::R::T' },
+    ]);
+  });
+
+  it('bounds entity intersection proofs through cyclic facades', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nfoo n = n + 1\n',
+      'Loop.hs': 'module Loop (module Back, module Origin) where\nimport Back\nimport Origin\n',
+      'Back.hs': 'module Back (module Facade) where\nimport Facade\n',
+      'Facade.hs': 'module Facade (module X) where\nimport qualified Loop as X\nimport Loop (foo)\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nrun n = foo n\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'calls', target: 'Origin::foo' },
+    ]);
+  });
+
+  it('rechecks an unchanged consumer when the unqualified intersection changes', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\nfoo n = n + 1\nbar n = n + 2\n',
+      'Facade.hs': 'module Facade (module X) where\nimport qualified Origin as X\nimport Origin (foo)\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nrun n = foo n\n',
+    });
+    const expected = [{ kind: 'calls', target: 'Origin::foo' }];
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual(expected);
+    const directory = fixtures.find((fixture) => fixture.graph === graph)!.directory;
+    fs.writeFileSync(path.join(directory, 'Facade.hs'), 'module Facade (module X) where\nimport qualified Origin as X\nimport Origin (bar)\n');
+    await graph.sync({ paths: ['Facade.hs'] });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([]);
+    fs.writeFileSync(path.join(directory, 'Facade.hs'), 'module Facade (module X) where\nimport qualified Origin as X\nimport Origin (foo)\n');
+    await graph.sync({ paths: ['Facade.hs'] });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual(expected);
+  });
+
+  it('rechecks child identity when a facade switches between same-named parents', async () => {
+    const graph = await createGraph({
+      'A.hs': 'module A where\ndata T = MkA\n',
+      'B.hs': 'module B where\ndata T = MkB { value :: Int }\n',
+      'Facade.hs': 'module Facade (T(..)) where\nimport A (T)\nimport B (value)\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nrun item = value item\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([]);
+    const directory = fixtures.find((fixture) => fixture.graph === graph)!.directory;
+    fs.writeFileSync(path.join(directory, 'Facade.hs'), 'module Facade (T(..)) where\nimport B (T, value)\n');
+    await graph.sync({ paths: ['Facade.hs'] });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'calls', target: 'B::T::value' },
+    ]);
+    fs.writeFileSync(path.join(directory, 'Facade.hs'), 'module Facade (T(..)) where\nimport A (T)\nimport B (value)\n');
+    await graph.sync({ paths: ['Facade.hs'] });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([]);
+  });
+
+  it('does not infer canonical effects from an unproven external module intersection', async () => {
+    const graph = await createGraph({
+      'Facade.hs': 'module Facade (module X) where\nimport qualified Prelude as X\nimport Prelude (Int)\n',
+      'Consumer.hs': '{-# LANGUAGE NoImplicitPrelude #-}\nmodule Consumer where\nimport Facade\ndata IO a = Custom a\nrun :: IO ()\nrun = Custom ()\naction :: IO ()\naction = run\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'action')).toEqual([
+      { kind: 'references', target: 'Consumer::run' },
+    ]);
+    const context = (graph as unknown as { resolver: { context: ResolutionContext } }).resolver.context;
+    expect(haskellEffectHeadHasCanonicalOrigin('Consumer.hs', 'IO', context)).toBe(false);
   });
 });

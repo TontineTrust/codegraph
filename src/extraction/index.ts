@@ -17,6 +17,7 @@ import {
   ExtractionError,
   Edge,
   UnresolvedReference,
+  HASKELL_RECORD_FIELDS_PREFIX,
 } from '../types';
 import { QueryBuilder, NodeIdentity } from '../db/queries';
 import { extractFromSource } from './tree-sitter';
@@ -248,6 +249,10 @@ export function computeHaskellTopologyHash(
       qualifiedName: node.qualifiedName,
       exportParents: (node.decorators ?? [])
         .filter((decorator) => decorator.startsWith('haskell-export-parent:')),
+      // A selector shared by sibling constructors has one graph node, but
+      // each constructor's membership determines imported wildcard binders.
+      recordFields: (node.decorators ?? [])
+        .filter((decorator) => decorator.startsWith(HASKELL_RECORD_FIELDS_PREFIX)),
     }));
   // Both import surfaces share one comment strip (the generic dispatchers
   // would strip three times for the same file).

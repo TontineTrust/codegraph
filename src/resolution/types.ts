@@ -536,6 +536,8 @@ export type ReExport =
       haskellValueOnly?: true;
       /** Haskell grouped export owner (`T(C)`) when the child is ambiguous. */
       parentExport?: string;
+      /** The grouped header's parent must denote the child's actual type/class. */
+      haskellVerifyExportParent?: true;
     }
   | {
       kind: 'wildcard';
@@ -551,6 +553,10 @@ export type ReExport =
       includedNames?: string[];
       includedParentExports?: string[];
       includedParentChildren?: HaskellParentChildRestriction[];
+      /** Grouped header parents are entities exported by this facade, not just names. */
+      haskellVerifyExportParent?: true;
+      /** `module X` through a qualified-only import also requires unqualified scope. */
+      haskellRequireUnqualified?: true;
       /**
        * Haskell-only compact form for identity named re-exports. A named
        * export introduces the value independently of any downstream grouped

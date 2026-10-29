@@ -378,6 +378,8 @@ export const HASKELL_RECORD_CONSTRUCTOR_PREFIX = 'haskell-record-constructor:';
 export const HASKELL_RECORD_FIELDS_PREFIX = 'haskell-record-fields:';
 /** A record wildcard whose implicit binders may shadow this unqualified value. */
 export const HASKELL_WILDCARD_BINDING_PREFIX = 'haskell-wildcard-binding:';
+/** A receiver name and wildcard constructor whose fields may shadow its annotation. */
+export const HASKELL_WILDCARD_PROJECTION_PREFIX = 'haskell-wildcard-projection:';
 /** A projection receiver is bound inside the annotated function's parameter scope. */
 export const HASKELL_SHADOWED_PROJECTION_RECEIVER = 'haskell-shadowed-projection-receiver';
 /** Combinator whose canonical origin must prove an inferred operand call. */
