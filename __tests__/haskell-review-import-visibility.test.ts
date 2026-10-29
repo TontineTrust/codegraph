@@ -336,6 +336,65 @@ describe('Haskell import visibility review regressions', () => {
     ]);
   });
 
+  it('preserves a pattern bundled under a qualified imported parent through a facade', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT\n',
+      'Patterns.hs': '{-# LANGUAGE PatternSynonyms #-}\nmodule Patterns (O.T(P)) where\nimport qualified Origin as O\npattern P = O.MkT\n',
+      'Facade.hs': 'module Facade (T(..)) where\nimport Patterns\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nrun = P\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'references', target: 'Patterns::P' },
+    ]);
+  });
+
+  it.each(['Patterns (T(P))', 'Patterns (T(..))', 'Facade'])('follows qualified pattern ownership despite a local same-named type via %s', async (imported) => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT\n',
+      'Alias.hs': 'module Alias (module Origin) where\nimport Origin\n',
+      'Patterns.hs': '{-# LANGUAGE PatternSynonyms #-}\nmodule Patterns (O.T(P)) where\nimport qualified Alias as O (T(MkT))\ndata T = LocalT\npattern P = O.MkT\n',
+      'Facade.hs': 'module Facade (Q.T(..)) where\nimport qualified Patterns as Q\n',
+      'Consumer.hs': `module Consumer where\nimport ${imported}\nrun = P\n`,
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'references', target: 'Patterns::P' },
+    ]);
+  });
+
+  it('does not bundle a qualified pattern under an unrelated same-named parent', async () => {
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT\n',
+      'Other.hs': 'module Other where\ndata T = OtherT\n',
+      'Patterns.hs': '{-# LANGUAGE PatternSynonyms #-}\nmodule Patterns (O.T(P)) where\nimport qualified Origin as O\nimport Other (T)\npattern P = O.MkT\n',
+      'Facade.hs': '{-# LANGUAGE PatternSynonyms #-}\nmodule Facade (T(..)) where\nimport Other (T)\nimport Patterns (pattern P)\n',
+      'Real.hs': 'module Real where\ndata R = P\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nimport Real\nrun = P\n',
+    });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([
+      { kind: 'references', target: 'Real::R::P' },
+    ]);
+  });
+
+  it('rechecks bundled pattern identity when its qualified parent import changes', async () => {
+    const patternSource = (origin: string) => `{-# LANGUAGE PatternSynonyms #-}\nmodule Patterns (O.T(P)) where\nimport qualified ${origin} as O\npattern P = O.MkT\n`;
+    const graph = await createGraph({
+      'Origin.hs': 'module Origin where\ndata T = MkT\n',
+      'Other.hs': 'module Other where\ndata T = MkT\n',
+      'Patterns.hs': patternSource('Origin'),
+      'Facade.hs': '{-# LANGUAGE PatternSynonyms #-}\nmodule Facade (T(..)) where\nimport Origin (T)\nimport Patterns (pattern P)\n',
+      'Consumer.hs': 'module Consumer where\nimport Facade\nrun = P\n',
+    });
+    const expected = [{ kind: 'references', target: 'Patterns::P' }];
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual(expected);
+    const directory = fixtures.find((fixture) => fixture.graph === graph)!.directory;
+    fs.writeFileSync(path.join(directory, 'Patterns.hs'), patternSource('Other'));
+    await graph.sync({ paths: ['Patterns.hs'] });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual([]);
+    fs.writeFileSync(path.join(directory, 'Patterns.hs'), patternSource('Origin'));
+    await graph.sync({ paths: ['Patterns.hs'] });
+    expect(dependencies(graph, 'Consumer.hs', 'run')).toEqual(expected);
+  });
+
   it('rechecks an unchanged consumer when the unqualified intersection changes', async () => {
     const graph = await createGraph({
       'Origin.hs': 'module Origin where\nfoo n = n + 1\nbar n = n + 2\n',

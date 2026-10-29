@@ -321,4 +321,82 @@ describe('Haskell review: binding evidence', () => {
       ]);
     }
   });
+
+  it('requires an unshadowed combinator before treating its function operand as executed', async () => {
+    const { graph } = await index({
+      'Origin.hs': '{-# LANGUAGE RankNTypes #-}\nmodule Origin where\ndata R = R { map :: forall a b. (a -> b) -> [a] -> [b] }\n',
+      'Callback.hs': 'module Callback where\nhelper x = x + 1\n',
+      'Sample.hs': [
+        '{-# LANGUAGE RecordWildCards, TypeApplications #-}',
+        'module Sample where',
+        'import Prelude',
+        'import qualified Prelude as P',
+        'import qualified Origin as O',
+        'import qualified Callback as C',
+        'helper x = x + 1',
+        'run O.R{..} xs = map helper xs',
+        'qualifiedOperand O.R{..} xs = map C.helper xs',
+        'explicitBound O.R{map = map} xs = map helper xs',
+        'explicitOther O.R{map = mapper} xs = map helper xs',
+        'qualifiedCombinator O.R{..} xs = P.map helper xs',
+        'parenthesized O.R{..} xs = (map) helper xs',
+        'typeApplied O.R{..} xs = (map @Int @Int) helper xs',
+        'parenthesizedControl xs = (map) helper xs',
+        'typeAppliedControl xs = (map @Int @Int) helper xs',
+        'control xs = map helper xs',
+      ].join('\n'),
+    });
+    for (const owner of ['run', 'qualifiedOperand', 'explicitBound', 'parenthesized', 'typeApplied']) {
+      expect(targets(graph, owner, 'helper').map((edge) => edge.kind)).toEqual(['references']);
+    }
+    for (const owner of ['explicitOther', 'qualifiedCombinator', 'parenthesizedControl', 'typeAppliedControl', 'control']) {
+      expect(targets(graph, owner, 'helper').map((edge) => edge.kind).sort()).toEqual(['calls', 'references']);
+    }
+  });
+
+  it('rechecks wildcard-bound combinators after imported fields become visible, hidden or renamed', async () => {
+    const files = {
+      'Origin.hs': 'module Origin (R(R)) where\ndata R = R { map :: (Int -> Int) -> [Int] -> [Int] }\n',
+      'Callback.hs': 'module Callback where\nhelper x = x + 1\n',
+      'Sample.hs': [
+        '{-# LANGUAGE RecordWildCards #-}',
+        'module Sample where',
+        'import Prelude',
+        'import qualified Prelude as P',
+        'import qualified Origin as O',
+        'import qualified Callback as C',
+        'helper x = x + 1',
+        'run O.R{..} xs = map helper xs',
+        'qualifiedOperand O.R{..} xs = map C.helper xs',
+        'control O.R{..} xs = P.map helper xs',
+      ].join('\n'),
+    };
+    const { graph, directory } = await index(files);
+    const fingerprint = (current: CodeGraph, owner: string) => {
+      const node = current.getNodesByName(owner).find((candidate) => candidate.filePath === 'Sample.hs')!;
+      return current.getOutgoingEdges(node.id)
+        .filter((edge) => current.getNode(edge.target)?.name === 'helper')
+        .map(({ kind, line, column, provenance, metadata }) => ({ kind, line, column, provenance, metadata }))
+        .sort((a, b) => a.kind.localeCompare(b.kind));
+    };
+    const original = fingerprint(graph, 'run');
+    expect(original.map((edge) => edge.kind)).toEqual(['calls', 'references']);
+    for (const [source, kinds] of [
+      ['module Origin (R(..)) where\ndata R = R { map :: (Int -> Int) -> [Int] -> [Int] }\n', ['references']],
+      ['module Origin (R(..)) where\ndata R = R { renamed :: (Int -> Int) -> [Int] -> [Int] }\n', ['calls', 'references']],
+      ['module Origin (R(..)) where\ndata R = R { map :: (Int -> Int) -> [Int] -> [Int] }\n', ['references']],
+      ['module Origin (R(R)) where\ndata R = R { map :: (Int -> Int) -> [Int] -> [Int] }\n', ['calls', 'references']],
+    ] as const) {
+      files['Origin.hs'] = source;
+      fs.writeFileSync(path.join(directory, 'Origin.hs'), source);
+      await graph.sync({ paths: ['Origin.hs'] });
+      const fresh = await index(files);
+      for (const owner of ['run', 'qualifiedOperand', 'control']) {
+        const actual = fingerprint(graph, owner);
+        expect(actual.map((edge) => edge.kind)).toEqual(owner === 'control' ? ['calls', 'references'] : kinds);
+        expect(actual).toEqual(fingerprint(fresh.graph, owner));
+      }
+    }
+    expect(fingerprint(graph, 'run')).toEqual(original);
+  });
 });

@@ -380,6 +380,8 @@ export const HASKELL_RECORD_FIELDS_PREFIX = 'haskell-record-fields:';
 export const HASKELL_WILDCARD_BINDING_PREFIX = 'haskell-wildcard-binding:';
 /** A receiver name and wildcard constructor whose fields may shadow its annotation. */
 export const HASKELL_WILDCARD_PROJECTION_PREFIX = 'haskell-wildcard-projection:';
+/** A wildcard whose fields may shadow the combinator executing this operand. */
+export const HASKELL_WILDCARD_COMBINATOR_PREFIX = 'haskell-wildcard-combinator:';
 /** A projection receiver is bound inside the annotated function's parameter scope. */
 export const HASKELL_SHADOWED_PROJECTION_RECEIVER = 'haskell-shadowed-projection-receiver';
 /** Combinator whose canonical origin must prove an inferred operand call. */

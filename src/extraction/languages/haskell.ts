@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getChildByField, getNodeText, getPrecedingDocstring } from '../tree-sitter-helpers';
 import type { BareReferenceInfo, ExtractorContext, LanguageExtractor } from '../tree-sitter-types';
-import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_WILDCARD_PROJECTION_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER, type UnresolvedReference } from '../../types';
+import { HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_WILDCARD_PROJECTION_PREFIX, HASKELL_WILDCARD_COMBINATOR_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER, type UnresolvedReference } from '../../types';
 
 // tree-sitter-haskell emits signatures, default signatures, and equations as
 // separate syntax nodes. Keep them under one graph node per lexical declaration.
@@ -1389,27 +1389,49 @@ export function annotateHaskellWildcardReferences(
       syntax = receiver;
       nameText = getNodeText(receiver, source).trim();
     }
-    const name = haskellReferenceParts(nameText);
-    if (name.qualifier !== null || !HASKELL_VARID_START_RE.test(name.member)) continue;
-    const explicit = lexicalBindingScope(nameText, syntax, source, stateOwner);
-    for (const wildcard of wildcards) {
-      if (wildcard.explicit.has(name.member)) continue;
-      const binding = lexicalBindingScope(wildcard.binding, syntax, source, stateOwner);
-      if (!binding) continue;
-      // Within do/guards/comprehensions, a later wildcard shadows an earlier
-      // let even though both share one AST container. Recursive scopes keep
-      // their ordinary containment precedence instead of imposing source order.
-      const earlierExplicit = explicit?.sequential && binding.sequential
-        && explicit.scope.startIndex === binding.scope.startIndex
-        && explicit.scope.endIndex === binding.scope.endIndex
-        && explicit.startIndex !== undefined && binding.startIndex !== undefined
-        && explicit.startIndex < binding.startIndex;
-      if (explicit && nodeContains(binding.scope, explicit.scope) && !earlierExplicit) continue;
-      const marker = projection
-        ? `${HASKELL_WILDCARD_PROJECTION_PREFIX}${JSON.stringify([name.member, wildcard.constructor])}`
-        : `${HASKELL_WILDCARD_BINDING_PREFIX}${wildcard.constructor}`;
-      if (!reference.candidates?.includes(marker)) {
-        (reference.candidates ??= []).push(marker);
+    const subjects = [{ name: nameText, node: syntax, kind: projection ? 'projection' : 'value' }];
+    const combinator = reference.candidates?.find((candidate) => candidate.startsWith(HASKELL_COMBINATOR_PREFIX))
+      ?.slice(HASKELL_COMBINATOR_PREFIX.length);
+    if (combinator) {
+      // The operand and the combinator can have different bindings. Locate
+      // the actual callee before recording evidence for `map helper xs`,
+      // including when the operand itself is qualified and cannot be captured.
+      let ancestor: SyntaxNode | null = syntax.parent;
+      while (ancestor) {
+        let callee = ancestor.type === 'infix' ? getChildByField(ancestor, 'operator')
+          : ancestor.type === 'apply' ? getChildByField(ancestor, 'function') : null;
+        while (callee?.type === 'apply') callee = getChildByField(callee, 'function');
+        const candidate = callee ? normalizedSimpleReference(callee, source) : null;
+        if (candidate?.name === combinator) {
+          subjects.push({ name: combinator, node: candidate.node, kind: 'combinator' });
+          break;
+        }
+        ancestor = ancestor.parent;
+      }
+    }
+    for (const subject of subjects) {
+      const name = haskellReferenceParts(subject.name);
+      if (name.qualifier !== null || !HASKELL_VARID_START_RE.test(name.member)) continue;
+      const explicit = lexicalBindingScope(subject.name, subject.node, source, stateOwner);
+      for (const wildcard of wildcards) {
+        if (wildcard.explicit.has(name.member)) continue;
+        const binding = lexicalBindingScope(wildcard.binding, subject.node, source, stateOwner);
+        if (!binding) continue;
+        // Within do/guards/comprehensions, a later wildcard shadows an earlier
+        // let even though both share one AST container. Recursive scopes keep
+        // their ordinary containment precedence instead of imposing source order.
+        const earlierExplicit = explicit?.sequential && binding.sequential
+          && explicit.scope.startIndex === binding.scope.startIndex
+          && explicit.scope.endIndex === binding.scope.endIndex
+          && explicit.startIndex !== undefined && binding.startIndex !== undefined
+          && explicit.startIndex < binding.startIndex;
+        if (explicit && nodeContains(binding.scope, explicit.scope) && !earlierExplicit) continue;
+        const marker = subject.kind === 'projection'
+          ? `${HASKELL_WILDCARD_PROJECTION_PREFIX}${JSON.stringify([name.member, wildcard.constructor])}`
+          : `${subject.kind === 'combinator' ? HASKELL_WILDCARD_COMBINATOR_PREFIX : HASKELL_WILDCARD_BINDING_PREFIX}${wildcard.constructor}`;
+        if (!reference.candidates?.includes(marker)) {
+          (reference.candidates ??= []).push(marker);
+        }
       }
     }
   }

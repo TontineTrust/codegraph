@@ -400,6 +400,8 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 #### Haskell indexing
 
+- Haskell call paths respect functions supplied by record patterns while preserving calls to IO actions. (#1337)
+
 - Haskell dependency links stay current when a shared record field is added to another constructor. (#1337)
 
 - Haskell record patterns and nested value bindings no longer create calls to names they shadow, and explicit module layout preserves imported dependencies. (#1337)

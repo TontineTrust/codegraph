@@ -2876,6 +2876,12 @@ function haskellNodeNameVariants(name: string): string[] {
     : [member, `(${member})`];
 }
 
+function haskellNodeExportParents(node: Node): HaskellReferenceNameParts[] {
+  return (node.decorators ?? [])
+    .filter((decorator) => decorator.startsWith('haskell-export-parent:'))
+    .map((decorator) => parseHaskellReferenceName(decorator.slice('haskell-export-parent:'.length)));
+}
+
 export function haskellNodeOwnedBy(node: Node, parent: string): boolean {
   const canonical = (value: string): string => value.startsWith('(') && value.endsWith(')')
     ? value.slice(1, -1)
@@ -2894,10 +2900,9 @@ export function haskellNodeOwnedBy(node: Node, parent: string): boolean {
     'u',
   ).test(ownerPath);
   return ownerMatches
-    || node.decorators?.some((decorator) =>
-    decorator.startsWith('haskell-export-parent:')
-    && canonical(decorator.slice('haskell-export-parent:'.length)) === canonicalParent
-  ) === true;
+    // This is a candidate-name check. Keep the qualifier on the node so the
+    // identity proof can follow O.T rather than assume any same-named T owns it.
+    || haskellNodeExportParents(node).some((owner) => owner.member === canonicalParent);
 }
 
 const HASKELL_VALUE_KINDS = new Set<Node['kind']>([
@@ -5949,19 +5954,23 @@ function haskellIdentityProof(
 /** Test membership of one declaration, not uniqueness of its spelling. A
  * module export intersects entities even when another imported entity has
  * the same name (notably DuplicateRecordFields selectors). */
-function haskellUnqualifiedEntity(
+function haskellScopedEntity(
   filePath: string,
   node: Node,
   context: ResolutionContext,
   depth: number,
   traversal: ReExportTraversal,
+  qualifier: string | null = null,
 ): ExportedSymbolWalkResult {
-  return haskellIdentityProof(`scope\0${filePath}\0${node.id}`, traversal, () => {
-    if (node.filePath === filePath) return node;
+  return haskellIdentityProof(`scope\0${filePath}\0${qualifier ?? ''}\0${node.id}`, traversal, () => {
+    if (qualifier === null && node.filePath === filePath) return node;
     const name = parseHaskellReferenceName(node.name).member;
     const namespace = haskellTypeNode(node) ? 'type' : 'value';
     const imports = getHaskellImportRouteIndex(context.getImportMappings(filePath, 'haskell'));
-    for (const imp of [...imports.explicitByLocalName.get(name) ?? [], ...imports.wildcards]) {
+    const routes = qualifier === null
+      ? [...imports.explicitByLocalName.get(name) ?? [], ...imports.wildcards]
+      : imports.namespacesByLocalName.get(qualifier) ?? [];
+    for (const imp of routes) {
       if (imp.packageQualifier !== undefined
         || (namespace === 'value' ? imp.haskellTypeOnly : imp.haskellValueOnly)
         || !haskellReExportCouldExposeName(imp, name, namespace)) continue;
@@ -6002,6 +6011,16 @@ function haskellExportParentMatches(
     }, 'haskell', context, new Set(), depth + 1, traversal)
   );
   if (!parent || parent === HASKELL_EXPORT_AMBIGUOUS) return false;
+  const statedOwners = haskellNodeExportParents(node)
+    .filter((owner) => owner.member === parseHaskellReferenceName(parentName).member);
+  for (const owner of statedOwners) {
+    if (owner.qualifier === null) continue;
+    const imported = haskellScopedEntity(node.filePath, parent, context, depth, traversal, owner.qualifier);
+    if (imported && imported !== HASKELL_EXPORT_AMBIGUOUS && imported.id === parent.id) return true;
+  }
+  // Explicit qualification takes precedence over an unrelated local T (or a
+  // different unqualified import). A failed O.T proof cannot fall back to T.
+  if (statedOwners.length > 0 && statedOwners.every((owner) => owner.qualifier !== null)) return false;
   // File identity distinguishes A.T from B.T even when both own `value`.
   if (node.filePath === parent.filePath) return true;
   const localParents = haskellNodeNameVariants(parentName).flatMap((name) =>
@@ -6011,7 +6030,7 @@ function haskellExportParentMatches(
   if (localParents.length > 0) return localParents.some((candidate) => candidate.id === parent.id);
   // Bundled patterns and data-family instances can belong to a type imported
   // by their defining module. Prove that imported declaration's identity too.
-  const imported = haskellUnqualifiedEntity(node.filePath, parent, context, depth, traversal);
+  const imported = haskellScopedEntity(node.filePath, parent, context, depth, traversal);
   return !!imported && imported !== HASKELL_EXPORT_AMBIGUOUS && imported.id === parent.id;
 }
 
@@ -6036,7 +6055,7 @@ function haskellReExportIdentityAllows(
     )) return false;
   }
   if (reExport.kind === 'wildcard' && reExport.haskellRequireUnqualified) {
-    const imported = haskellUnqualifiedEntity(filePath, node, context, depth, traversal);
+    const imported = haskellScopedEntity(filePath, node, context, depth, traversal);
     if (!imported || imported === HASKELL_EXPORT_AMBIGUOUS || imported.id !== node.id) return false;
   }
   return true;
@@ -6189,6 +6208,9 @@ function findExportedSymbolWalk(
       if (language === 'haskell') {
         const candidates = (exportedNodesByName(exportIndex, filePath, context).get(name) ?? [])
           .filter((node) => !want.haskellParent || haskellNodeOwnedBy(node, want.haskellParent))
+          .filter((node) => !want.haskellParent
+            || !haskellNodeExportParents(node).some((owner) => owner.qualifier !== null)
+            || haskellExportParentMatches(filePath, want.haskellParent, node, context, depth, traversal))
           .filter((node) => want.haskellNamespace === 'value'
             ? haskellValueNode(node)
             : want.haskellNamespace === 'type'

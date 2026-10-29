@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_WILDCARD_PROJECTION_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER } from '../types';
+import { Language, Node, UnresolvedReference, Edge, HASKELL_EFFECT_ALIAS_HEAD_PREFIX, HASKELL_RECORD_CONSTRUCTOR_PREFIX, HASKELL_COMBINATOR_PREFIX, HASKELL_COMBINATOR_VALUE_REFERENCE, HASKELL_RECORD_FIELDS_PREFIX, HASKELL_WILDCARD_BINDING_PREFIX, HASKELL_WILDCARD_PROJECTION_PREFIX, HASKELL_WILDCARD_COMBINATOR_PREFIX, HASKELL_SHADOWED_PROJECTION_RECEIVER } from '../types';
 import { QueryBuilder } from '../db/queries';
 import { SynthesisStage } from '../db/synthesis-stage';
 import {
@@ -1953,14 +1953,15 @@ export class ReferenceResolver {
       || target.kind === 'constant'
     )) return null;
 
-    const effectHeads = ref.candidates?.map((marker) =>
+    // Lexical evidence shares this persisted candidate list; it is checked
+    // separately and cannot invalidate an unrelated result-type proof.
+    const effectHeads = (ref.candidates ?? []).flatMap((marker) =>
       typeof marker === 'string' && marker.startsWith(HASKELL_EFFECT_ALIAS_HEAD_PREFIX)
-        ? marker.slice(HASKELL_EFFECT_ALIAS_HEAD_PREFIX.length)
-        : null
+        ? [marker.slice(HASKELL_EFFECT_ALIAS_HEAD_PREFIX.length)]
+        : []
     );
-    const isCanonical = effectHeads !== undefined
-      && effectHeads.length > 0
-      && effectHeads.every((head): head is string => head !== null && head.length > 0)
+    const isCanonical = effectHeads.length > 0
+      && effectHeads.every((head) => head.length > 0)
       && effectHeads.every((head) =>
         haskellEffectHeadHasCanonicalOrigin(ref.filePath, head, this.context)
       );
@@ -2188,12 +2189,14 @@ export class ReferenceResolver {
     const resolved = this.resolveOneInner(valueRef);
     if (!resolved) return null;
     const combinatorRef: UnresolvedRef = {
-      ...ref, referenceName: combinator, referenceKind: 'calls', candidates: undefined,
+      ...ref, referenceName: combinator, referenceKind: 'calls',
+      candidates: ref.candidates?.filter((candidate) => candidate.startsWith(HASKELL_WILDCARD_COMBINATOR_PREFIX))
+        .map((candidate) => `${HASKELL_WILDCARD_BINDING_PREFIX}${candidate.slice(HASKELL_WILDCARD_COMBINATOR_PREFIX.length)}`),
     };
     // Materialized lexical/module definitions override package provenance;
     // non-materialized parameters were already rejected during extraction.
     const lexical = this.resolveHaskellLexical(combinatorRef);
-    const canonical = !lexical.claimed
+    const canonical = !this.isHaskellWildcardBound(combinatorRef) && !lexical.claimed
       && haskellCombinatorHasCanonicalOrigin(ref.filePath, combinator, this.context);
     return {
       ...resolved,
