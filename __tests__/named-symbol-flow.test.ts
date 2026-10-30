@@ -42,7 +42,8 @@ describe('named-symbol flow token normalization', () => {
     ]);
     expect(flowTokens('Éclair.sommé request')).toEqual(['Éclair.sommé', 'request']);
     expect(flowTokens('foo# Éclair.foo# request')).toEqual(['foo#', 'Éclair.foo#', 'request']);
-    expect(flowTokens('函数 λ finish')).toEqual(['函数', 'λ', 'finish']);
+    // Bare λ is retained with index evidence in haskell-cjk-query-merge.test.ts.
+    expect(flowTokens('函数 λ finish')).toEqual(['函数', 'finish']);
     expect(flowTokens('Main.函数 finish')).toEqual(['Main.函数', 'finish']);
     expect(flowTokens('notOps.<+> request')).toEqual(['notOps', 'request']);
     expect(flowTokens('fooData.Ops.<+> request')).toEqual(['fooData.Ops', 'request']);

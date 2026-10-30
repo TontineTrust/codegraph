@@ -34,9 +34,9 @@
 
 import type CodeGraph from '../index';
 import type { Node, Edge } from '../types';
-import { isTestFile } from '../search/query-utils';
+import { isTestFile, splitAtCjkSwitches, isQueryNameToken, meetsQueryWordFloor } from '../search/query-utils';
 
-import { lastQualifierPart, qualifiedSymbolMatches, HASKELL_FLOW_IDENTIFIER_SOURCE, HASKELL_FLOW_MODULE_SOURCE, QUALIFIED_OPERATOR_CONTAINER_SOURCE, isHaskellOperatorBody, qualifiedHaskellOperator, qualifiedHaskellOperatorMatches } from './symbol-lookup';
+import { lastQualifierPart, matchesSymbol, qualifiedSymbolMatches, HASKELL_FLOW_IDENTIFIER_SOURCE, HASKELL_FLOW_MODULE_SOURCE, QUALIFIED_OPERATOR_CONTAINER_SOURCE, isHaskellOperatorBody, qualifiedHaskellOperator, qualifiedHaskellOperatorMatches } from './symbol-lookup';
 import { goPackageReaderFor } from './go-package';
 
 // Preserve the existing imports while sharing the matcher with the CLI and MCP.
@@ -420,9 +420,23 @@ function isPreciseToken(token: string): boolean {
     || /^[\p{Lu}\p{Lt}\p{Lo}]/u.test(token);
 }
 
-/** The symbol-shaped tokens of a query, deduped and capped. */
-export function flowTokens(query: string): string[] {
+/**
+ * The symbol-shaped tokens of a query, deduped and capped: names in any
+ * script, cut where Han, kana or Hangul meets another script, at least two
+ * characters in those scripts (`入口 末端`) and three elsewhere (#1262).
+ * Exact indexed Haskell names retain their short or mixed-script spelling.
+ */
+export function flowTokens(query: string, cg?: CodeGraph): string[] {
   const found: Array<{ index: number; token: string }> = [];
+  const haskellNames = new Map<string, boolean>();
+  const indexedHaskellName = (token: string): boolean => {
+    if (!cg || !HAS_NON_ASCII.test(token)) return false;
+    if (!haskellNames.has(token)) {
+      haskellNames.set(token, cg.getNodesByName(lastQualifierPart(token))
+        .some((node) => node.language === 'haskell' && matchesSymbol(node, token)));
+    }
+    return haskellNames.get(token)!;
+  };
   const covered: Array<{ start: number; end: number }> = [];
   const overlapsQualifiedOperator = (start: number, end: number): boolean =>
     covered.some((range) => start < range.end && end > range.start);
@@ -462,7 +476,10 @@ export function flowTokens(query: string): string[] {
   ));
 
   const identifier = new RegExp(
-    `${HASKELL_FLOW_IDENTIFIER_SOURCE}(?:(?:::|\\.)${HASKELL_FLOW_IDENTIFIER_SOURCE})*`,
+    // Discover both main's ordinary names (including letter numbers and
+    // numeric qualified tails) and Haskell's prime/hash forms. Validate the
+    // whole candidate below before treating any CJK fragment as a token.
+    String.raw`[\p{L}\p{Nl}_$][\p{L}\p{N}\p{M}_'$]*#*(?:(?:::|\.)[\p{L}\p{N}\p{M}_'$]+#*)*`,
     'gu',
   );
   // The old tokenizer validated each whitespace-delimited token as a WHOLE
@@ -508,13 +525,21 @@ export function flowTokens(query: string): string[] {
     // Haskell identifiers may contain primes (`hover'`, `Module'.run'`).
     // Keep the opening character strict in EVERY qualified segment so a quote
     // itself can never begin a token or a segment.
-    // Keep the noise floor for short ASCII prose words, but do not discard a
-    // valid one- or two-codepoint Unicode identifier (`λ`, `函数`). Exact node
-    // lookup plus precise-token ranking still prevents a fuzzy fallback.
-    if ((token.length >= 3 || HAS_NON_ASCII.test(token))
-      && (backtickWrapped || !ENGLISH_CONTRACTION.test(token))
-      && ANCHORED_IDENTIFIER.test(token)) {
+    if ((!backtickWrapped && ENGLISH_CONTRACTION.test(token))
+      || !(isQueryNameToken(token) || ANCHORED_IDENTIFIER.test(token))) continue;
+    const parts = splitAtCjkSwitches(token);
+    // A real Haskell declaration supplies the evidence that a short word
+    // (`λ`, `на`, `类`) or mixed-script name is code, rather than prose.
+    // Ordinary names need no extra lookup; a Haskell file's mere presence
+    // must not relax the word floor for unrelated query text.
+    if ((parts.length > 1 || !meetsQueryWordFloor(token)) && indexedHaskellName(token)) {
       found.push({ index: start, token });
+      continue;
+    }
+    for (const part of parts) {
+      if (isQueryNameToken(part) || (meetsQueryWordFloor(part) && ANCHORED_IDENTIFIER.test(part))) {
+        found.push({ index: start, token: part });
+      }
     }
   }
 
@@ -567,7 +592,7 @@ export function resolveNamedTokens(
   // one of those, leaving the other end reported as naming nothing.
   const tokens = directed && opts.from && opts.to
     ? [...new Set([normalizeToken(opts.from), normalizeToken(opts.to)])]
-    : flowTokens(query);
+    : flowTokens(query, cg);
   out.tokens = tokens;
   if (tokens.length < 2) return out;
 

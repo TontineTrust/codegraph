@@ -131,6 +131,7 @@ describe('planFrontload — front-load hook project resolution (#964)', () => {
       root: service,
       viaSubScan: true,
       candidates: [service],
+      refusal: null,
     });
   });
 
@@ -147,6 +148,7 @@ describe('planFrontload — front-load hook project resolution (#964)', () => {
       root: null,
       viaSubScan: false,
       candidates: [],
+      refusal: null,
     });
   });
 

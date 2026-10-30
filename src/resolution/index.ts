@@ -21,7 +21,7 @@ import {
   isImportableKind,
   CPP_DEFINE_SIGNATURE,
 } from './types';
-import { isPythonSelfCall, matchJsStoreBindingCall, isUnresolvedJsMemberCall, matchObjectPathCall, thisScopeCaller, isVisibleAcrossFiles, matchReference, matchByFilePath, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope, isRustForeignImplCallable, isRustPathCallReachable, rustChainedCallByName, CASE_INSENSITIVE_LANGUAGES, isDartMemberRead, matchDartMemberRead, isDartChainLink, matchDartChainLink, isDartAnnotation, matchDartAnnotation, isStdMethodName, isGoUnknownQualified, isGoProjectLocalCall, GO_STDLIB_PACKAGES, isGoBareName, goTypePositionTarget, goDotImportedSupertype, GO_TYPE_KINDS, matchGoAssertedCall, matchGoIndexedCall, matchGoChainedCall, preferGoBuildTwin, isGoAssertedLocal, isGoLocallyBound, isPythonFromImportModule, pythonAttrRefResolves, matchPythonTypedLocalCall, isImportShadowedByJsBinding, isManualMockPath, isTestSuitePath, matchNewReceiverCall, newReceiverClass, NEW_RECEIVER_SHAPE, isGuessedRecordAccessor, matchKotlinReceiverChain } from './name-matcher';
+import { isPythonSelfCall, matchJsStoreBindingCall, isUnresolvedJsMemberCall, matchObjectPathCall, thisScopeCaller, isVisibleAcrossFiles, matchReference, matchByFilePath, matchFunctionRef, matchDottedCallChain, matchScopedCallChain, matchMethodCall, sameLanguageFamily, crossesCodeBoundary, gateLanguageMatch, dumpNameMatcherProfile, clearNameMatcherMemos, isRustNameInScope, isRustForeignImplCallable, isRustPathCallReachable, rustChainedCallByName, matchRustUseBoundName, CASE_INSENSITIVE_LANGUAGES, isDartMemberRead, matchDartMemberRead, isDartChainLink, matchDartChainLink, isDartAnnotation, matchDartAnnotation, isStdMethodName, isGoUnknownQualified, isGoProjectLocalCall, GO_STDLIB_PACKAGES, isGoBareName, goTypePositionTarget, goDotImportedSupertype, GO_TYPE_KINDS, matchGoAssertedCall, matchGoIndexedCall, matchGoChainedCall, preferGoBuildTwin, isGoAssertedLocal, isGoLocallyBound, isPythonFromImportModule, pythonFunctionModuleAlias, pythonAttrRefResolves, matchPythonTypedLocalCall, isImportShadowedByJsBinding, isManualMockPath, isTestSuitePath, matchNewReceiverCall, newReceiverClass, NEW_RECEIVER_SHAPE, isGuessedRecordAccessor, matchKotlinReceiverChain } from './name-matcher';
 import { isVisibleCppMacro, clearCppMacroVisibility } from './cpp-macro-visibility';
 import { isCppConstructorRef, matchCppConstructor } from './cpp-constructor';
 import { isCppSupertypeRef, matchCppSupertype, clearCppSupertypeMemos } from './cpp-supertypes';
@@ -42,7 +42,7 @@ import { matchShopifyThemeFile } from './shopify-themes';
 import { isJsSuperCallLanguage, isJsSuperCallSite, matchJsSuperCall } from './js-super-calls';
 import { CLASS_EXPRESSION_REF_LANGUAGES, isCommonJsExportedClass, isJsClassExpression, writtenIn, type ClassExpressionIndex } from './js-class-expressions';
 import { matchRubyConstantPathRef } from './ruby-constant-paths';
-import { resolveViaImport, resolvePhpImportedStaticCall, resolvePhpQualifiedClassRef, resolveTsQualifiedTypeRef, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isDartImportRef, isLuaRequireRef, isJsPathImportRef, isBoundToOutOfRepoImport, reachesAmbientModule, importBindingTail, clearImportResolverMemos, resolveImportPath, isExternalImport, ESM_IMPORT_LANGUAGES, jsModuleFile, pythonRootFingerprint, pythonReopenScope, pythonPackageImporters, moduleDefaultExport, isJsFamilyFile, isModuleBindingName, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
+import { resolveViaImport, resolvePhpImportedStaticCall, resolvePhpQualifiedClassRef, resolveTsQualifiedTypeRef, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs, isPhpIncludePathRef, isCobolCopybookRef, isNixPathImportRef, isDartImportRef, isLuaRequireRef, isJsPathImportRef, isBoundToOutOfRepoImport, reachesAmbientModule, importBindingTail, clearImportResolverMemos, resolveImportPath, isExternalImport, pythonImportsInScope, ESM_IMPORT_LANGUAGES, jsModuleFile, pythonRootFingerprint, pythonReopenScope, pythonPackageImporters, moduleDefaultExport, isJsFamilyFile, isModuleBindingName, normalizeHaskellReferenceName, parseHaskellReferenceName, haskellImportConflictsWithLocal, haskellRecordFieldIsVisible, haskellEffectHeadHasCanonicalOrigin, HASKELL_ID_CONTINUE_SOURCE, HASKELL_VARID_SOURCE, HASKELL_CONID_SOURCE } from './import-resolver';
 import { haskellCombinatorHasCanonicalOrigin } from './haskell-combinators';
 import { ResolverPool, minRefsForPool, shouldEngageAdaptively } from './resolver-pool';
 import { resolveAliasBinding } from './alias-binding';
@@ -2286,6 +2286,14 @@ export class ReferenceResolver {
     // library one. An untyped chain resolves as the bare method name, the ref
     // the extractor emitted before it kept the chain.
     if (ref.language === 'kotlin' && ref.referenceKind === 'calls') {
+      // A chain rooted at an imported declaration, `JUtil.Nested.deep()` after
+      // `import p.JUtil`, walks that declaration's nested types whichever JVM
+      // language declares them; a chain through its properties is typed below.
+      const root = ref.referenceName.slice(0, ref.referenceName.indexOf('.'));
+      if (root && this.context.getImportMappings(ref.filePath, ref.language).some((m) => m.localName === root)) {
+        const viaImport = this.gateLanguage(resolveViaImport(ref, this.context), ref);
+        if (viaImport) return viaImport;
+      }
       const chain = matchKotlinReceiverChain(ref, this.context);
       if (chain && 'method' in chain) {
         const bare = this.resolveOneInner({ ...ref, referenceName: chain.method });
@@ -2373,6 +2381,14 @@ export class ReferenceResolver {
     // namesake by its last name.
     const rubyPath = matchRubyConstantPathRef(ref, this.context);
     if (rubyPath !== undefined) return this.gateLanguage(rubyPath, ref);
+
+    // A bare Rust name a `use` renames (`use crate::util::take as consume;
+    // consume()`) is the item its path names, which no declaration carries by
+    // that name — the pre-filter below would drop it — and a call to a name a
+    // local binds where it is written (a parameter, a `let`, a closure's) is
+    // to that local, whatever the file imports (see matchRustUseBoundName).
+    const rustBound = matchRustUseBoundName(ref, this.context);
+    if (rustBound !== undefined) return this.gateLanguage(rustBound, ref);
 
     // Fast pre-filter: skip if no symbol with this name exists anywhere
     // AND the name doesn't match a local import. The import escape is
@@ -4102,9 +4118,20 @@ export class ReferenceResolver {
    * Resolving the specifier is the same question resolveViaImport will ask
    * next, so a receiver that passes here is one the qualified path can actually
    * serve; anything else stays a silent miss rather than a wrong edge.
+   *
+   * Asked of the binding the reference reads, as resolveViaImport asks it, for
+   * a receiver the file imports at all: an `import a.b as receiver` inside the
+   * calling function (#2600), or the file's imports of the name unless the
+   * function binds it itself — a parameter or local named like the module
+   * (`def save(store): store.write()`) is a value, and its builtin-named call
+   * stays filtered.
    */
   private isPythonProjectModule(ref: UnresolvedRef, receiver: string): boolean {
-    for (const imp of this.context.getImportMappings(ref.filePath, ref.language)) {
+    const imports = this.context.getImportMappings(ref.filePath, ref.language);
+    if (!imports.some((imp) => imp.localName === receiver)) return false;
+    const local = pythonFunctionModuleAlias(receiver, ref, this.context);
+    if (local) return resolveImportPath(local, ref.filePath, ref.language!, this.context) !== null;
+    for (const imp of pythonImportsInScope(ref, imports, this.context)) {
       if (imp.localName !== receiver) continue;
       // `import pkg.mod` / `import pkg.mod as m` binds the module `source`
       // names. `from pkg import mod` binds `pkg.mod`, and `from . import mod`

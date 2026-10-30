@@ -73,8 +73,9 @@ describe('flowTokens keeps the capabilities the rewrite added', () => {
     // Plain cross-language symbol bags.
     ['mutateElement renderScene', ['mutateElement', 'renderScene']],
     ['GraphTraverser BFS impact traversal.ts', ['GraphTraverser', 'BFS', 'impact', 'traversal']],
-    // Unicode identifiers below the ASCII length floor are deliberate.
-    ['函数 λ finish', ['函数', 'λ', 'finish']],
+    // Short Haskell identifiers need index evidence; the integration suite
+    // retains bare λ when a real Haskell declaration supplies that evidence.
+    ['函数 λ finish', ['函数', 'finish']],
     // Haskell primes — including a trailing prime, which is not a contraction.
     ["hover' xs' request", ["hover'", "xs'", 'request']],
     // Qualified operators, parenthesized operators, backtick spellings.
