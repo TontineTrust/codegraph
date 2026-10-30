@@ -336,6 +336,20 @@ function isRubyConstantPath(node: SyntaxNode): boolean {
   return getChildByField(node, 'name')?.type === 'constant' && (!scope || isRubyConstantPath(scope));
 }
 
+/**
+ * The class a Ruby call receiver constructs, as written: `Foo` for
+ * `Foo.new(key)`, `Billing::Card` for `Billing::Card.new`, `::Foo` for
+ * `::Foo.new`. Null for any other receiver, a `new` on a value (`klass.new`)
+ * among them.
+ */
+function rubyConstructedClass(receiver: SyntaxNode, source: string): string | null {
+  if (receiver.type !== 'call') return null;
+  const method = getChildByField(receiver, 'method');
+  const made = getChildByField(receiver, 'receiver');
+  if (!method || getNodeText(method, source) !== 'new' || !made || !isRubyConstantPath(made)) return null;
+  return getNodeText(made, source);
+}
+
 /** True when `node` is (transitively) inside a C function body — i.e. a local,
  * not a file/namespace-scope declaration. Walks the parent chain to the root. */
 function hasFunctionAncestor(node: SyntaxNode): boolean {
@@ -705,6 +719,17 @@ function tsJsCalleeName(func: SyntaxNode, source: string): { name: string; at: S
 }
 
 /**
+ * The name a JS/TS string literal spells when it is a plain identifier: `'svc'`
+ * or `"getItems"` → the text between the quotes. Null for anything else,
+ * including a string with an escape or a character no identifier can hold.
+ * Mirrored in the kernel's quoted_identifier.
+ */
+function quotedIdentifier(node: SyntaxNode | null, source: string): string | null {
+  if (node?.type !== 'string') return null;
+  return /^(['"])([A-Za-z_$][\w$]*)\1$/.exec(getNodeText(node, source))?.[2] ?? null;
+}
+
+/**
  * A TS/JS receiver that subscripts the enclosing class's object: an element
  * of a field, `this.<field>[k]` → `this.<field>[]`, or a field named by a
  * string key, `this['svc']` → `this.svc`. Null for any other subscript.
@@ -716,8 +741,7 @@ function tsThisSubscriptReceiver(node: SyntaxNode, source: string): string | nul
   if (!objectNode) return null;
   const object = peelTsJsReceiver(objectNode);
   if (object.type === 'this') {
-    const index = getChildByField(node, 'index');
-    const key = index?.type === 'string' ? /^(['"])([A-Za-z_$][\w$]*)\1$/.exec(getNodeText(index, source))?.[2] : undefined;
+    const key = quotedIdentifier(getChildByField(node, 'index'), source);
     return key ? `this.${key}` : null;
   }
   if (object.type !== 'member_expression' || getChildByField(object, 'object')?.type !== 'this') return null;
@@ -1997,6 +2021,12 @@ export class TreeSitterExtractor {
         this.extractAnonymousClass(node, anonBody);
         skipChildren = true;
       }
+    }
+    // Kotlin `object : Api.Listener { … }`: an anonymous class, as Java's
+    // `new Api.Listener() { … }` is (extractKotlinObjectLiteral).
+    else if (this.language === 'kotlin' && nodeType === 'object_literal' &&
+      this.extractKotlinObjectLiteral(node, (header) => this.visitNode(header))) {
+      skipChildren = true;
     }
     // (Decorator handling lives inside the symbol-creating extractors
     // — extractClass / extractFunction / extractProperty — because the
@@ -4139,9 +4169,14 @@ export class TreeSitterExtractor {
 
           // A member of a `const ( … )` or `var ( … )` group has its own doc
           // comment beside it in the parentheses; one without keeps the group's.
+          // Exported by its own name's case, read from the spec: the
+          // declaration around it has no name, so `var Hook = …` and
+          // `const Limit = 3` read as unexported and `a.Hook()` from another
+          // package linked to nothing.
           varNode = this.createNode(node.type === 'const_declaration' ? 'constant' : 'variable', name, spec, {
             docstring: this.docstringFor(spec) ?? docstring,
             signature: initSignature,
+            isExported: this.extractor.isExported?.(spec, this.source),
           });
         }
         // Walk the initializer so composite literals and calls in a
@@ -5584,9 +5619,14 @@ export class TreeSitterExtractor {
       }
       const SKIP_RECEIVERS = new Set(['self', 'super']);
       const skip = SKIP_RECEIVERS.has(receiverName);
+      // A call on what `Foo.new(…)` / `Billing::Card.new` made is a call on an
+      // instance of that class: recorded as `new Foo().bar`, the shape a
+      // constructed receiver has in every language, rather than the receiver's
+      // text with its arguments in it (#684).
+      const constructed = rubyConstructedClass(receiverNode, this.source);
       this.unresolvedReferences.push({
         fromNodeId: callerId,
-        referenceName: skip ? methodName : `${receiverName}.${methodName}`,
+        referenceName: skip ? methodName : constructed ? `new ${constructed}().${methodName}` : `${receiverName}.${methodName}`,
         referenceKind: 'calls',
         line,
         column,
@@ -6980,6 +7020,9 @@ export class TreeSitterExtractor {
     let typeName = typeNode ? getNodeText(typeNode, this.source) : 'Object';
     const ltIdx = typeName.indexOf('<');
     if (ltIdx > 0) typeName = typeName.slice(0, ltIdx);
+    // The supertype as written, `Api.Listener` for `new Api.Listener() {…}`:
+    // the last segment alone is a nested type nothing can find.
+    const writtenType = typeName.trim() || 'Object';
     const lastDot = Math.max(typeName.lastIndexOf('.'), typeName.lastIndexOf('::'));
     if (lastDot >= 0) typeName = typeName.slice(lastDot + 1).replace(/^[:.]/, '');
     typeName = typeName.trim() || 'Object';
@@ -6995,7 +7038,7 @@ export class TreeSitterExtractor {
     // bridge T's methods to the override names found in the anon body.
     this.unresolvedReferences.push({
       fromNodeId: classNode.id,
-      referenceName: typeName,
+      referenceName: writtenType,
       referenceKind: 'extends',
       line: typeNode?.startPosition.row ?? node.startPosition.row,
       column: typeNode?.startPosition.column ?? node.startPosition.column,
@@ -7009,6 +7052,72 @@ export class TreeSitterExtractor {
       if (child) this.visitNode(child);
     }
     this.nodeStack.pop();
+  }
+
+  /**
+   * A Kotlin object expression, `object : Api.Listener { … }` or `object :
+   * Base(x), Runnable { … }`: an anonymous class, as Java's `new T() { … }`
+   * is. The class, `<Listener$anon@line>`, extends each supertype as written
+   * (the dotted path, type arguments left out), the code around it
+   * instantiates the first, and its body's declarations are its members — an
+   * override inside is then reached through the interface it implements,
+   * instead of standing as a local function of the code around it. The
+   * header (a constructor's arguments, a `by` delegate) runs in the
+   * enclosing scope: `walkHeader` walks it there. False, with nothing done,
+   * for an object expression without a body.
+   */
+  private extractKotlinObjectLiteral(node: SyntaxNode, walkHeader: (header: SyntaxNode) => void): boolean {
+    const body = node.namedChildren.find((c: SyntaxNode) => c.type === 'class_body');
+    if (!body) return false;
+    const specs = node.namedChildren.filter((c: SyntaxNode) => c.type === 'delegation_specifier');
+    const supertypes: Array<{ name: string; at: SyntaxNode; built: boolean }> = [];
+    for (const spec of specs) {
+      const holder = spec.namedChildren.find((c: SyntaxNode) => c.type === 'constructor_invocation' || c.type === 'explicit_delegation');
+      const userType = (holder ?? spec).namedChildren.find((c: SyntaxNode) => c.type === 'user_type');
+      const ids = userType?.namedChildren.filter((c: SyntaxNode) => c.type === 'type_identifier') ?? [];
+      if (ids.length > 0) {
+        supertypes.push({
+          name: ids.map((c: SyntaxNode) => getNodeText(c, this.source)).join('.'),
+          at: ids[0]!,
+          built: holder?.type === 'constructor_invocation',
+        });
+      }
+    }
+    for (const spec of specs) walkHeader(spec);
+    // The class it builds (`object : Base(), Runnable`), else its first
+    // supertype, names the object and is what the code around instantiates —
+    // as written (`mockwebserver3.Dispatcher`, `Detector.Listener`), which
+    // its last name alone would leave to a namesake.
+    const primary = supertypes.find((s) => s.built) ?? supertypes[0];
+    const shortName = primary ? primary.name.slice(primary.name.lastIndexOf('.') + 1) : 'Object';
+    const ownerId = this.nodeStack[this.nodeStack.length - 1];
+    if (primary && ownerId) {
+      this.unresolvedReferences.push({
+        fromNodeId: ownerId,
+        referenceName: primary.name,
+        referenceKind: 'instantiates',
+        line: primary.at.startPosition.row + 1,
+        column: primary.at.startPosition.column,
+      });
+    }
+    const classNode = this.createNode('class', `<${shortName}$anon@${node.startPosition.row + 1}>`, node, {});
+    if (!classNode) {
+      for (const child of body.namedChildren) walkHeader(child);
+      return true;
+    }
+    for (const supertype of supertypes) {
+      this.unresolvedReferences.push({
+        fromNodeId: classNode.id,
+        referenceName: supertype.name,
+        referenceKind: 'extends',
+        line: supertype.at.startPosition.row + 1,
+        column: supertype.at.startPosition.column,
+      });
+    }
+    this.nodeStack.push(classNode.id);
+    for (const child of body.namedChildren) this.visitNode(child);
+    this.nodeStack.pop();
+    return true;
   }
 
   /**
@@ -7305,9 +7414,10 @@ export class TreeSitterExtractor {
 
   /**
    * The property a CommonJS export assignment binds a function to —
-   * `exports.NAME = <node>` or `module.exports.NAME = <node>` — or null for
-   * any other assignment. JS-family only; the node must be the assignment's
-   * whole right-hand side.
+   * `exports.NAME = <node>` or `module.exports.NAME = <node>`, or the same
+   * with the name in quotes, `exports["NAME"] = <node>` — or null for any
+   * other assignment. JS-family only; the node must be the assignment's whole
+   * right-hand side.
    */
   private commonJsExportName(assignment: SyntaxNode, value: SyntaxNode): string | null {
     if (
@@ -7321,12 +7431,14 @@ export class TreeSitterExtractor {
     const right = getChildByField(assignment, 'right');
     if (!right || right.startIndex !== value.startIndex || right.endIndex !== value.endIndex) return null;
     const left = getChildByField(assignment, 'left');
-    if (!left || left.type !== 'member_expression') return null;
+    if (!left || (left.type !== 'member_expression' && left.type !== 'subscript_expression')) return null;
     const object = getChildByField(left, 'object');
-    const property = getChildByField(left, 'property');
-    if (!object || !property || property.type !== 'property_identifier') return null;
+    if (!object) return null;
     const objectText = getNodeText(object, this.source);
     if (objectText !== 'exports' && objectText !== 'module.exports') return null;
+    if (left.type === 'subscript_expression') return quotedIdentifier(getChildByField(left, 'index'), this.source);
+    const property = getChildByField(left, 'property');
+    if (!property || property.type !== 'property_identifier') return null;
     return getNodeText(property, this.source);
   }
 
@@ -7612,6 +7724,15 @@ export class TreeSitterExtractor {
       ) {
         const ownerId = this.nodeStack[this.nodeStack.length - 1];
         if (ownerId) this.extractVariableTypeAnnotation(node, ownerId);
+      }
+
+      // A Kotlin object expression in a body or an initializer, `object :
+      // Listener { … }`: an anonymous class with its own members, as Java's
+      // `new Listener() { … }` (extractKotlinObjectLiteral). Its header
+      // (constructor arguments, a delegate) is still this body's code.
+      if (this.language === 'kotlin' && nodeType === 'object_literal' &&
+        this.extractKotlinObjectLiteral(node, (header) => visitForCallsAndStructure(header, node))) {
+        return;
       }
 
       // Nested NAMED functions inside a body — function declarations and named
@@ -8071,11 +8192,14 @@ export class TreeSitterExtractor {
         const constructorInvocation = child.namedChildren.find((c: SyntaxNode) => c.type === 'constructor_invocation');
         const target = userType ?? constructorInvocation;
         if (target) {
-          const typeId = target.type === 'user_type'
-            ? target.namedChildren.find((c: SyntaxNode) => c.type === 'type_identifier') ?? target
-            : target.namedChildren.find((c: SyntaxNode) => c.type === 'user_type')?.namedChildren.find((c: SyntaxNode) => c.type === 'type_identifier')
-              ?? target.namedChildren.find((c: SyntaxNode) => c.type === 'user_type') ?? target;
-          const name = getNodeText(typeId, this.source);
+          // `class K : Outer.Inner()` names the nested type by its whole
+          // path (`Outer.Inner`), type arguments left out — not `Outer`.
+          const typeNode = target.type === 'user_type'
+            ? target
+            : target.namedChildren.find((c: SyntaxNode) => c.type === 'user_type');
+          const ids = typeNode?.namedChildren.filter((c: SyntaxNode) => c.type === 'type_identifier') ?? [];
+          const typeId = ids[0] ?? typeNode ?? target;
+          const name = ids.length > 0 ? ids.map((c: SyntaxNode) => getNodeText(c, this.source)).join('.') : getNodeText(typeId, this.source);
           this.unresolvedReferences.push({
             fromNodeId: classId,
             referenceName: name,
